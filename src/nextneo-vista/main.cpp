@@ -8,6 +8,7 @@
 #include <ArduinoJson.h>
 #include <Arduino_GFX_Library.h>
 #include <lvgl.h>
+#include <math.h>
 
 LV_FONT_DECLARE(lv_font_weather_14);
 LV_FONT_DECLARE(lv_font_weather_20);
@@ -56,9 +57,19 @@ struct Shared {
   float history[3][24] = {};
   uint8_t historyCount[3] = {0,0,0};
   bool haveFinance[3] = {false, false, false};
+  bool financeRefreshing = false;
+  uint8_t financeSuccessCount = 0;
+  uint32_t financeLastSuccessMs = 0;
+  uint32_t financeVersion = 0;
+  uint32_t financeQuoteEpoch[3] = {0,0,0};
   String pendingSsid, pendingPass, pendingCity;
 } sh;
 SemaphoreHandle_t mtx;
+
+// Yahoo can temporarily rate-limit chart requests. Honor Retry-After when supplied.
+static uint32_t financeRetryAfterMs = 0;
+static constexpr uint32_t FINANCE_REFRESH_MS = 240000UL;
+static constexpr uint32_t FINANCE_MAX_BACKOFF_MS = 16UL * 60 * 1000;
 
 enum Cmd { CMD_SCAN, CMD_CONNECT, CMD_GEOCODE, CMD_WEATHER, CMD_FINANCE };
 QueueHandle_t cmdQ;
@@ -92,31 +103,93 @@ static bool isRainCode(int c) {
   return (c >= 51 && c <= 67) || (c >= 80 && c <= 82) || c >= 95;
 }
 
-static bool fetchYahoo(const char *symbol, float &price, float &changePct, float &previousClose, float *series, uint8_t &count) {
+static bool fetchYahoo(const char *symbol, float &price, float &changePct, float &previousClose, uint32_t &quoteEpoch, float *series, uint8_t &count) {
   String url = String("https://query1.finance.yahoo.com/v8/finance/chart/") + symbol + "?range=1d&interval=5m&nocache=" + String(millis());
-  WiFiClientSecure client; client.setInsecure(); HTTPClient http; http.setTimeout(12000);
-  if (!http.begin(client, url)) return false;
-  http.addHeader("Cache-Control", "no-cache, no-store, max-age=0"); http.addHeader("Pragma", "no-cache"); http.addHeader("User-Agent", "Mozilla/5.0");
-  int status=http.GET(); String body=status==200?http.getString():""; http.end(); if(body.isEmpty()) return false;
-  JsonDocument doc; if(deserializeJson(doc,body)) return false;
+  String body;
+  int status = 0;
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    WiFiClientSecure client; client.setInsecure(); HTTPClient http; http.setTimeout(12000);
+    if (!http.begin(client, url)) return false;
+    const char *responseHeaders[] = {"Retry-After"};
+    http.collectHeaders(responseHeaders, 1);
+    http.addHeader("Cache-Control", "no-cache, no-store, max-age=0");
+    http.addHeader("Pragma", "no-cache");
+    http.addHeader("User-Agent", "Mozilla/5.0");
+    status = http.GET();
+    body = status == HTTP_CODE_OK ? http.getString() : "";
+    if (status == HTTP_CODE_TOO_MANY_REQUESTS) {
+      uint32_t retrySeconds = (uint32_t)http.header("Retry-After").toInt();
+      if (retrySeconds) financeRetryAfterMs = max(financeRetryAfterMs, min(retrySeconds, FINANCE_MAX_BACKOFF_MS / 1000UL) * 1000UL);
+    }
+    http.end();
+    if (status == HTTP_CODE_OK && !body.isEmpty()) break;
+    Serial.printf("Finance %s HTTP %d (tentativa %d/2)\n", symbol, status, attempt + 1);
+    if (attempt == 0 && (status <= 0 || status >= HTTP_CODE_INTERNAL_SERVER_ERROR)) {
+      vTaskDelay(pdMS_TO_TICKS(500));
+      continue;
+    }
+    return false;
+  }
+  if (body.isEmpty()) return false;
+  JsonDocument doc;
+  if (deserializeJson(doc, body)) {
+    Serial.printf("Finance %s: resposta JSON inválida\n", symbol);
+    return false;
+  }
   JsonObject meta=doc["chart"]["result"][0]["meta"].as<JsonObject>();
-  float p=meta["regularMarketPrice"]|0.0f, pct=meta["regularMarketChangePercent"]|0.0f, prev=meta["previousClose"]|0.0f;
-  if(p<=0) return false;
+  float p=meta["regularMarketPrice"]|0.0f, prev=meta["previousClose"]|0.0f;
+  float pct=meta["regularMarketChangePercent"]|NAN;
+  uint32_t quoteTime=meta["regularMarketTime"]|0U;
+  if (p <= 0 || !isfinite(p)) {
+    Serial.printf("Finance %s: cotação ausente na resposta\n", symbol);
+    return false;
+  }
+  if (!isfinite(pct) && prev > 0) pct = (p - prev) * 100.0f / prev;
+  if (!isfinite(pct)) pct = 0;
   JsonArray close=doc["chart"]["result"][0]["indicators"]["quote"][0]["close"].as<JsonArray>();
   uint8_t n=0; for(JsonVariant v:close){float x=v|0.0f;if(x>0){if(n<24)series[n++]=x;else {for(int k=1;k<24;k++)series[k-1]=series[k];series[23]=x;}}}
-  price=p;changePct=pct;previousClose=prev;count=n;return true;
+  price=p;changePct=pct;previousClose=prev;quoteEpoch=quoteTime;count=n;return true;
 }
 
-static void doFinance() {
-  if (WiFi.status() != WL_CONNECTED) return;
-  const char *symbols[] = {"BRL=X", "EURBRL=X", "BTC-USD"};
-  for (int i=0; i<3; ++i) {
-    float v=0,pct=0,prev=0,points[24]={0};uint8_t n=0;bool ok=fetchYahoo(symbols[i],v,pct,prev,points,n);
+static uint8_t doFinance() {
+  if (WiFi.status() != WL_CONNECTED) {
     xSemaphoreTake(mtx, portMAX_DELAY);
-    if(ok){ sh.previousFinance[i]=prev;sh.financeChange[i]=pct;sh.haveChange[i]=fabsf(pct)>0.0001f;sh.finance[i]=v;sh.haveFinance[i]=true;sh.historyCount[i]=n;memcpy(sh.history[i],points,sizeof points); }
-    else {sh.finance[i]=0;sh.haveFinance[i]=false;sh.haveChange[i]=false;}
+    sh.financeRefreshing = false;
+    sh.financeSuccessCount = 0;
+    sh.financeVersion++;
+    xSemaphoreGive(mtx);
+    return 0;
+  }
+  xSemaphoreTake(mtx, portMAX_DELAY);
+  sh.financeRefreshing = true;
+  xSemaphoreGive(mtx);
+  const char *symbols[] = {"BRL=X", "EURBRL=X", "BTC-USD"};
+  uint8_t successes = 0;
+  for (int i=0; i<3; ++i) {
+    float v=0,pct=0,prev=0,points[24]={0};uint32_t quoteEpoch=0;uint8_t n=0;bool ok=fetchYahoo(symbols[i],v,pct,prev,quoteEpoch,points,n);
+    xSemaphoreTake(mtx, portMAX_DELAY);
+    if(ok){
+      successes++;
+      sh.previousFinance[i]=prev;sh.financeChange[i]=pct;sh.haveChange[i]=fabsf(pct)>0.0001f;sh.finance[i]=v;sh.haveFinance[i]=true;
+      sh.financeQuoteEpoch[i]=quoteEpoch;
+      // When Yahoo omits intraday candles (often outside active FX hours), keep the
+      // graph useful with the previous close and current quote. Never erase a good chart.
+      if (n < 2 && prev > 0) { points[0] = prev; points[1] = v; n = 2; }
+      if (n >= 2) { sh.historyCount[i]=n;memcpy(sh.history[i],points,sizeof points); }
+    }
+    else {
+      // Keep the last valid quote and graph during temporary API/network failures.
+      Serial.printf("Finance %s: atualização falhou; mantendo última cotação válida\n", symbols[i]);
+    }
     xSemaphoreGive(mtx);
   }
+  xSemaphoreTake(mtx, portMAX_DELAY);
+  sh.financeRefreshing = false;
+  sh.financeSuccessCount = successes;
+  if (successes) sh.financeLastSuccessMs = millis();
+  sh.financeVersion++;
+  xSemaphoreGive(mtx);
+  return successes;
 }
 
 static String urlEncode(const String &s) {
@@ -297,6 +370,8 @@ static void doConnect() {
 static void workerTask(void *) {
   uint32_t lastWeather = 0;
   uint32_t lastFinance = 0;
+  uint32_t financeIntervalMs = FINANCE_REFRESH_MS;
+  uint8_t financeFailureStreak = 0;
   uint32_t lastReconnectCheck = millis();
   uint32_t reconnectStarted = 0;
   bool first = true;
@@ -308,7 +383,21 @@ static void workerTask(void *) {
         case CMD_CONNECT: doConnect(); lastWeather = millis(); break;
         case CMD_GEOCODE: doGeocode(); lastWeather = millis(); break;
         case CMD_WEATHER: doWeather(); lastWeather = millis(); break;
-        case CMD_FINANCE: doFinance(); lastFinance = millis(); break;
+        case CMD_FINANCE: {
+          uint8_t successes = doFinance();
+          if (WiFi.status() == WL_CONNECTED) {
+            lastFinance = millis();
+            if (successes == 3) { financeIntervalMs = FINANCE_REFRESH_MS; financeFailureStreak = 0; financeRetryAfterMs = 0; }
+            else {
+              uint8_t shift = min(financeFailureStreak, (uint8_t)2);
+              uint32_t backoff = min(FINANCE_REFRESH_MS << shift, FINANCE_MAX_BACKOFF_MS);
+              financeFailureStreak++;
+              financeIntervalMs = max(backoff, financeRetryAfterMs);
+              financeRetryAfterMs = 0;
+            }
+          } else lastFinance = 0;
+          break;
+        }
       }
     }
     bool up = WiFi.status() == WL_CONNECTED;
@@ -337,7 +426,18 @@ static void workerTask(void *) {
       doWeather();
       lastWeather = millis();
     }
-    if (up && (lastFinance == 0 || millis() - lastFinance >= 120000UL)) { doFinance(); lastFinance = millis(); }
+    if (up && (lastFinance == 0 || millis() - lastFinance >= financeIntervalMs)) {
+      lastFinance = millis();
+      uint8_t successes = doFinance();
+      if (successes == 3) { financeIntervalMs = FINANCE_REFRESH_MS; financeFailureStreak = 0; financeRetryAfterMs = 0; }
+      else {
+        uint8_t shift = min(financeFailureStreak, (uint8_t)2);
+        uint32_t backoff = min(FINANCE_REFRESH_MS << shift, FINANCE_MAX_BACKOFF_MS);
+        financeFailureStreak++;
+        financeIntervalMs = max(backoff, financeRetryAfterMs);
+        financeRetryAfterMs = 0;
+      }
+    }
   }
 }
 
@@ -383,7 +483,8 @@ static lv_obj_t *hourTime[8], *hourCond[8], *hourTemp[8], *hourRain[8];
 static lv_obj_t *hourArt[8], *dayArt[7];
 static lv_obj_t *ddSsid, *taPass, *taCity, *kb, *setStatusLbl, *wifiInfoLbl, *swH24;
 static lv_obj_t *mainMenu, *weatherView, *settingsView, *weatherTabs;
-static lv_obj_t *financeView, *financeStrip, *financeValue[3], *financeDelta[3], *financePlot[3], *financeHeader[3], *financeCard[3];
+static lv_obj_t *financeView, *financeStrip, *financeStatusLabel, *financeAgeLabel[3], *financeValue[3], *financeDelta[3], *financePlot[3], *financeLine[3], *financeHeader[3], *financeCard[3];
+static lv_point_precise_t financeLinePoints[3][24] = {};
 static lv_obj_t *menuWifiIcon;
 static lv_obj_t *calendarView;
 static int calendarOffset = 0;
@@ -470,6 +571,11 @@ static void ui_update(lv_timer_t *) {
   bool up = sh.wifiUp, have = sh.haveWeather;
   float fx[3]; bool fxok[3],deltaOk[3];float delta[3],hist[3][24];uint8_t histN[3];
   memcpy(fx,sh.finance,sizeof fx);memcpy(fxok,sh.haveFinance,sizeof fxok);memcpy(delta,sh.financeChange,sizeof delta);memcpy(deltaOk,sh.haveChange,sizeof deltaOk);memcpy(hist,sh.history,sizeof hist);memcpy(histN,sh.historyCount,sizeof histN);
+  bool financeRefreshing = sh.financeRefreshing;
+  uint8_t financeSuccessCount = sh.financeSuccessCount;
+  uint32_t financeLastSuccessMs = sh.financeLastSuccessMs;
+  uint32_t financeVersion = sh.financeVersion;
+  uint32_t financeQuoteEpoch[3]; memcpy(financeQuoteEpoch, sh.financeQuoteEpoch, sizeof financeQuoteEpoch);
   float temp = sh.temp; int code = sh.code;
   int humidity = sh.humidity; float wind = sh.wind;
   int hourCount = sh.hourCount;
@@ -491,11 +597,61 @@ static void ui_update(lv_timer_t *) {
   lv_label_set_text(wifiInfoLbl, wifiInfo.c_str());
   lv_obj_set_style_text_color(lblWifiDot, up ? lv_color_hex(0x42D392) : lv_color_hex(0xF07878), 0);
   lv_obj_set_style_text_color(menuWifiIcon, up ? lv_color_hex(0x42D392) : lv_color_hex(0xF07878), 0);
-  for(int i=0;i<3;i++){ if(fxok[i]) lv_label_set_text_fmt(financeValue[i], i==2?"%.0f":"%.2f", fx[i]); else lv_label_set_text(financeValue[i], "");
-    lv_color_t trend=deltaOk[i]?lv_color_hex(delta[i]>=0?0x35D879:0xFF5555):lv_color_hex(0xAEB0B8);
-    lv_obj_set_style_text_color(financeHeader[i],trend,0); lv_obj_set_style_border_color(financeCard[i],deltaOk[i]?trend:lv_color_hex(0x45484D),0);
-    if(deltaOk[i]){lv_label_set_text_fmt(financeDelta[i], "%s %+.2f%%",delta[i]>=0?LV_SYMBOL_UP:LV_SYMBOL_DOWN,delta[i]);lv_obj_set_style_text_color(financeDelta[i],lv_color_hex(delta[i]>=0?0x35D879:0xFF5555),0);}else lv_label_set_text(financeDelta[i],"");
-    lv_obj_clean(financePlot[i]); if(histN[i]>1){float lo=hist[i][0],hi=lo;for(int j=1;j<histN[i];j++){lo=min(lo,hist[i][j]);hi=max(hi,hist[i][j]);} if(hi-lo<0.0001f)hi=lo+0.0001f; for(int j=1;j<histN[i];j++){int x1=(j-1)*164/(histN[i]-1),x2=j*164/(histN[i]-1);int y1=33-(int)((hist[i][j-1]-lo)*27/(hi-lo)),y2=33-(int)((hist[i][j]-lo)*27/(hi-lo));lv_obj_t*seg=lv_obj_create(financePlot[i]);lv_obj_set_size(seg,max(2,x2-x1),2);lv_obj_set_pos(seg,x1,min(y1,y2));lv_obj_set_style_bg_color(seg,lv_color_hex(deltaOk[i]&&delta[i]<0?0xFF5555:0x35D879),0);lv_obj_set_style_bg_opa(seg,LV_OPA_COVER,0);lv_obj_set_style_border_width(seg,0,0);}}
+  static uint32_t renderedFinanceVersion = UINT32_MAX;
+  if (renderedFinanceVersion != financeVersion) {
+    for(int i=0;i<3;i++){
+      if(fxok[i]) lv_label_set_text_fmt(financeValue[i], i==2?"%.0f":"%.2f", fx[i]);
+      else lv_label_set_text(financeValue[i], "");
+      lv_color_t trend=deltaOk[i]?lv_color_hex(delta[i]>=0?0x35D879:0xFF5555):lv_color_hex(0xAEB0B8);
+      lv_obj_set_style_text_color(financeHeader[i],trend,0);
+      lv_obj_set_style_border_color(financeCard[i],deltaOk[i]?trend:lv_color_hex(0x45484D),0);
+      if(deltaOk[i]){
+        lv_label_set_text_fmt(financeDelta[i], "%s %+.2f%%",delta[i]>=0?LV_SYMBOL_UP:LV_SYMBOL_DOWN,delta[i]);
+        lv_obj_set_style_text_color(financeDelta[i],lv_color_hex(delta[i]>=0?0x35D879:0xFF5555),0);
+      } else lv_label_set_text(financeDelta[i],"");
+      lv_color_t lineColor=deltaOk[i]&&delta[i]<0?lv_color_hex(0xFF5555):lv_color_hex(0x35D879);
+      lv_obj_set_style_line_color(financeLine[i],lineColor,0);
+      if(histN[i]>1){
+        float lo=hist[i][0],hi=lo;
+        for(int j=1;j<histN[i];j++){lo=min(lo,hist[i][j]);hi=max(hi,hist[i][j]);}
+        if(hi-lo<0.0001f) hi=lo+0.0001f;
+        for(int j=0;j<histN[i];j++){
+          financeLinePoints[i][j].x=j*163/(histN[i]-1);
+          financeLinePoints[i][j].y=52-(int)((hist[i][j]-lo)*44/(hi-lo));
+        }
+        lv_line_set_points(financeLine[i],financeLinePoints[i],histN[i]);
+      } else lv_line_set_points(financeLine[i],NULL,0);
+    }
+    renderedFinanceVersion = financeVersion;
+  }
+  char financeStatus[48];
+  uint32_t financeAgeMin = financeLastSuccessMs ? (millis() - financeLastSuccessMs) / 60000UL : 0;
+  time_t nowEpoch = time(nullptr);
+  if (financeRefreshing) snprintf(financeStatus, sizeof financeStatus, "Atualizando cotações...");
+  else if (!fxok[0] && !fxok[1] && !fxok[2]) snprintf(financeStatus, sizeof financeStatus, "Aguardando cotações da API");
+  else if (financeSuccessCount < 3) snprintf(financeStatus, sizeof financeStatus, "Falha parcial da API · dados mantidos");
+  else if (financeAgeMin == 0) snprintf(financeStatus, sizeof financeStatus, "Consulta à API: agora");
+  else snprintf(financeStatus, sizeof financeStatus, "Consulta à API: há %lu min", (unsigned long)financeAgeMin);
+  lv_label_set_text(financeStatusLabel, financeStatus);
+  lv_obj_set_style_text_color(financeStatusLabel, financeRefreshing ? lv_color_hex(0x78D7FF) : (financeSuccessCount < 3 && (fxok[0] || fxok[1] || fxok[2]) ? lv_color_hex(0xFFD477) : lv_color_hex(0xAEB0B8)), 0);
+  static uint32_t lastFinanceAgeRender = 0;
+  if (lastFinanceAgeRender == 0 || millis() - lastFinanceAgeRender >= 30000UL) {
+    lastFinanceAgeRender = millis();
+    for (int i=0; i<3; ++i) {
+      char ageText[20];
+      uint32_t quoteEpoch = financeQuoteEpoch[i];
+      if (!fxok[i]) snprintf(ageText, sizeof ageText, "sem cotação");
+      else if (!quoteEpoch || nowEpoch < 1700000000 || nowEpoch < (time_t)quoteEpoch) snprintf(ageText, sizeof ageText, "hora n/d");
+      else {
+        uint32_t ageSec = (uint32_t)(nowEpoch - (time_t)quoteEpoch);
+        if (ageSec < 60) snprintf(ageText, sizeof ageText, "agora");
+        else if (ageSec < 3600) snprintf(ageText, sizeof ageText, "há %lum", (unsigned long)(ageSec/60));
+        else snprintf(ageText, sizeof ageText, "há %luh%02lum", (unsigned long)(ageSec/3600), (unsigned long)((ageSec%3600)/60));
+      }
+      lv_label_set_text(financeAgeLabel[i], ageText);
+      uint32_t ageSec = quoteEpoch && nowEpoch > (time_t)quoteEpoch ? (uint32_t)(nowEpoch - (time_t)quoteEpoch) : 0;
+      lv_obj_set_style_text_color(financeAgeLabel[i], ageSec >= 900 ? lv_color_hex(0xFFD477) : lv_color_hex(0x9299A5), 0);
+    }
   }
   lv_label_set_text(lblCity, city.c_str());
   if (have) {
@@ -1087,8 +1243,10 @@ static void build_ui() {
   // Keep the 240px cards inside the scroll viewport so the colored top border never gets clipped.
   lv_obj_set_style_pad_bottom(financeStrip,14,0);
   const char *ft[] = {"$  USD/BRL", "€  EUR/BRL", "$  BTC/USD"}; const char *fs[] = {"Dólar para real", "Euro para real", "Bitcoin em dólar"};
-  for(int i=0;i<3;i++){ lv_obj_t *c=financeCard[i]=lv_obj_create(financeStrip); lv_obj_set_size(c,210,240); lv_obj_set_style_bg_color(c,lv_color_hex(0x151719),0); lv_obj_set_style_bg_opa(c,LV_OPA_COVER,0); lv_obj_set_style_radius(c,22,0); lv_obj_set_style_border_width(c,2,0); lv_obj_set_style_border_color(c,lv_color_hex(0x45484D),0); lv_obj_set_style_shadow_width(c,12,0); lv_obj_set_style_shadow_opa(c,LV_OPA_40,0); lv_obj_remove_flag(c,LV_OBJ_FLAG_SCROLLABLE); financeHeader[i]=makeLabel(c,ft[i],&lv_font_weather_14,0xAEB0B8); lv_obj_set_pos(financeHeader[i],14,12); lv_obj_t *s=makeLabel(c,fs[i],&lv_font_weather_14,0xAEB0B8); lv_obj_set_pos(s,14,36); financePlot[i]=lv_obj_create(c);lv_obj_set_size(financePlot[i],164,56);lv_obj_set_pos(financePlot[i],14,62);lv_obj_set_style_bg_opa(financePlot[i],LV_OPA_TRANSP,0);lv_obj_set_style_border_width(financePlot[i],0,0);lv_obj_set_style_pad_all(financePlot[i],0,0);lv_obj_remove_flag(financePlot[i],LV_OBJ_FLAG_SCROLLABLE); financeDelta[i]=makeLabel(c,"",&lv_font_weather_14,0x30C875);lv_obj_set_pos(financeDelta[i],14,128); financeValue[i]=makeLabel(c,"",&lv_font_montserrat_48,0xEEEEEE); lv_obj_align(financeValue[i],LV_ALIGN_BOTTOM_RIGHT,-10,-5); }
-  lv_obj_t *financeTitle=makeLabel(financeView,"Finance",&lv_font_weather_20,0xFFFFFF); lv_obj_align(financeTitle,LV_ALIGN_TOP_LEFT,62,8); addBackButton(financeView); lv_obj_move_foreground(lv_obj_get_child(financeView,lv_obj_get_child_cnt(financeView)-1));
+  for(int i=0;i<3;i++){ lv_obj_t *c=financeCard[i]=lv_obj_create(financeStrip); lv_obj_set_size(c,210,240); lv_obj_set_style_bg_color(c,lv_color_hex(0x151719),0); lv_obj_set_style_bg_opa(c,LV_OPA_COVER,0); lv_obj_set_style_radius(c,22,0); lv_obj_set_style_border_width(c,2,0); lv_obj_set_style_border_color(c,lv_color_hex(0x45484D),0); lv_obj_set_style_shadow_width(c,12,0); lv_obj_set_style_shadow_opa(c,LV_OPA_40,0); lv_obj_remove_flag(c,LV_OBJ_FLAG_SCROLLABLE); financeHeader[i]=makeLabel(c,ft[i],&lv_font_weather_14,0xAEB0B8); lv_obj_set_pos(financeHeader[i],14,12); lv_obj_t *s=makeLabel(c,fs[i],&lv_font_weather_14,0xAEB0B8); lv_obj_set_pos(s,14,36); financeAgeLabel[i]=makeLabel(c,"hora n/d",&lv_font_weather_14,0x9299A5);lv_obj_set_size(financeAgeLabel[i],72,18);lv_obj_set_pos(financeAgeLabel[i],110,12);lv_obj_set_style_text_align(financeAgeLabel[i],LV_TEXT_ALIGN_RIGHT,0); financePlot[i]=lv_obj_create(c);lv_obj_set_size(financePlot[i],164,56);lv_obj_set_pos(financePlot[i],14,62);lv_obj_set_style_bg_opa(financePlot[i],LV_OPA_TRANSP,0);lv_obj_set_style_border_width(financePlot[i],0,0);lv_obj_set_style_pad_all(financePlot[i],0,0);lv_obj_remove_flag(financePlot[i],LV_OBJ_FLAG_SCROLLABLE); financeLine[i]=lv_line_create(financePlot[i]);lv_obj_set_size(financeLine[i],164,56);lv_obj_set_pos(financeLine[i],0,0);lv_obj_set_style_bg_opa(financeLine[i],LV_OPA_TRANSP,0);lv_obj_set_style_border_width(financeLine[i],0,0);lv_obj_set_style_pad_all(financeLine[i],0,0);lv_obj_set_style_line_width(financeLine[i],2,0);lv_obj_set_style_line_rounded(financeLine[i],true,0);lv_obj_set_style_line_color(financeLine[i],lv_color_hex(0x35D879),0);lv_obj_set_style_line_opa(financeLine[i],LV_OPA_COVER,0); financeDelta[i]=makeLabel(c,"",&lv_font_weather_14,0x30C875);lv_obj_set_pos(financeDelta[i],14,128); financeValue[i]=makeLabel(c,"",&lv_font_montserrat_48,0xEEEEEE); lv_obj_align(financeValue[i],LV_ALIGN_BOTTOM_RIGHT,-10,-5); }
+  lv_obj_t *financeTitle=makeLabel(financeView,"Finance",&lv_font_weather_20,0xFFFFFF); lv_obj_align(financeTitle,LV_ALIGN_TOP_LEFT,62,8);
+  financeStatusLabel=makeLabel(financeView,"Aguardando cotações da API",&lv_font_weather_14,0xAEB0B8); lv_obj_set_size(financeStatusLabel,250,20); lv_obj_set_pos(financeStatusLabel,218,13); lv_obj_set_style_text_align(financeStatusLabel,LV_TEXT_ALIGN_RIGHT,0);
+  addBackButton(financeView); lv_obj_move_foreground(lv_obj_get_child(financeView,lv_obj_get_child_cnt(financeView)-1));
 
   calendarView = lv_obj_create(scr); lv_obj_set_size(calendarView,SCR_W,SCR_H); lv_obj_set_pos(calendarView,0,0); lv_obj_set_style_bg_color(calendarView,lv_color_hex(0x05091C),0); lv_obj_set_style_bg_opa(calendarView,LV_OPA_COVER,0); lv_obj_set_style_border_width(calendarView,0,0); lv_obj_set_style_pad_all(calendarView,0,0); lv_obj_remove_flag(calendarView,LV_OBJ_FLAG_SCROLLABLE); lv_obj_add_flag(calendarView,LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(calendarView,LV_OBJ_FLAG_GESTURE_BUBBLE);
   calendarTitle=makeLabel(calendarView,"",&lv_font_weather_20,0xFFFFFF); lv_obj_align(calendarTitle,LV_ALIGN_TOP_MID,0,30);
