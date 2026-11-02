@@ -55,7 +55,6 @@ struct Shared {
   bool haveChange[3] = {false,false,false};
   float history[3][24] = {};
   uint8_t historyCount[3] = {0,0,0};
-  float financeDefaults[4] = {1.0f, 5.44f, 1.0f, 6.07f}; // USD, BRL, EUR, BTC display defaults
   bool haveFinance[3] = {false, false, false};
   String pendingSsid, pendingPass, pendingCity;
 } sh;
@@ -93,27 +92,28 @@ static bool isRainCode(int c) {
   return (c >= 51 && c <= 67) || (c >= 80 && c <= 82) || c >= 95;
 }
 
-static bool fetchFx(const char *pair, float &rate) {
-  String url = String("https://fxapi.app/api/") + pair + ".json?nocache=" + String(millis());
-  WiFiClientSecure client; client.setInsecure(); HTTPClient http; http.setTimeout(10000);
+static bool fetchYahoo(const char *symbol, float &price, float &changePct, float &previousClose, float *series, uint8_t &count) {
+  String url = String("https://query1.finance.yahoo.com/v8/finance/chart/") + symbol + "?range=1d&interval=5m&nocache=" + String(millis());
+  WiFiClientSecure client; client.setInsecure(); HTTPClient http; http.setTimeout(12000);
   if (!http.begin(client, url)) return false;
-  http.addHeader("Cache-Control", "no-cache, no-store, max-age=0");
-  http.addHeader("Pragma", "no-cache");
-  int status = http.GET(); String body = status == 200 ? http.getString() : ""; http.end();
-  if (body.isEmpty()) return false;
-  JsonDocument doc; if (deserializeJson(doc, body)) return false;
-  float value = doc["rate"] | (doc["value"] | 0.0f);
-  if (value <= 0) return false;
-  rate = value; return true;
+  http.addHeader("Cache-Control", "no-cache, no-store, max-age=0"); http.addHeader("Pragma", "no-cache"); http.addHeader("User-Agent", "Mozilla/5.0");
+  int status=http.GET(); String body=status==200?http.getString():""; http.end(); if(body.isEmpty()) return false;
+  JsonDocument doc; if(deserializeJson(doc,body)) return false;
+  JsonObject meta=doc["chart"]["result"][0]["meta"].as<JsonObject>();
+  float p=meta["regularMarketPrice"]|0.0f, pct=meta["regularMarketChangePercent"]|0.0f, prev=meta["previousClose"]|0.0f;
+  if(p<=0) return false;
+  JsonArray close=doc["chart"]["result"][0]["indicators"]["quote"][0]["close"].as<JsonArray>();
+  uint8_t n=0; for(JsonVariant v:close){float x=v|0.0f;if(x>0){if(n<24)series[n++]=x;else {for(int k=1;k<24;k++)series[k-1]=series[k];series[23]=x;}}}
+  price=p;changePct=pct;previousClose=prev;count=n;return true;
 }
 
 static void doFinance() {
   if (WiFi.status() != WL_CONNECTED) return;
-  const char *pairs[] = {"usd/brl", "eur/brl", "btc/usd"};
+  const char *symbols[] = {"BRL=X", "EURBRL=X", "BTC-USD"};
   for (int i=0; i<3; ++i) {
-    float v=0; bool ok=fetchFx(pairs[i],v);
+    float v=0,pct=0,prev=0,points[24]={0};uint8_t n=0;bool ok=fetchYahoo(symbols[i],v,pct,prev,points,n);
     xSemaphoreTake(mtx, portMAX_DELAY);
-    if(ok){ if(sh.haveFinance[i] && sh.finance[i]>0){sh.previousFinance[i]=sh.finance[i];sh.financeChange[i]=(v-sh.finance[i])*100.0f/sh.finance[i];sh.haveChange[i]=fabsf(sh.financeChange[i])>0.0001f;} sh.finance[i]=v;sh.haveFinance[i]=true;uint8_t n=sh.historyCount[i];if(n<24)sh.historyCount[i]=++n;for(int k=n-1;k>0;k--)sh.history[i][k]=sh.history[i][k-1];sh.history[i][0]=v; }
+    if(ok){ sh.previousFinance[i]=prev;sh.financeChange[i]=pct;sh.haveChange[i]=fabsf(pct)>0.0001f;sh.finance[i]=v;sh.haveFinance[i]=true;sh.historyCount[i]=n;memcpy(sh.history[i],points,sizeof points); }
     else {sh.finance[i]=0;sh.haveFinance[i]=false;sh.haveChange[i]=false;}
     xSemaphoreGive(mtx);
   }
@@ -658,17 +658,15 @@ static String configPage(const String &notice = "") {
   xSemaphoreTake(mtx, portMAX_DELAY);
   String city = sh.cityName;
   String status = sh.status;
-  float usd = sh.financeDefaults[0], brl=sh.financeDefaults[1], eur=sh.financeDefaults[2], btc=sh.financeDefaults[3];
   xSemaphoreGive(mtx);
   String page = R"HTML(<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Weather | Ajustes</title>
 <style>*{box-sizing:border-box}body{margin:0;min-height:100vh;background:linear-gradient(145deg,#091629,#1b3b62);color:#edf4ff;font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;place-items:center;padding:18px}.card{width:min(100%,520px);padding:24px;border:1px solid #ffffff20;border-radius:20px;background:#ffffff0d;box-shadow:0 20px 60px #0005}h1{font-size:24px;margin:0 0 4px}.muted{color:#b4c7df}.status{margin:18px 0;padding:14px;border-radius:14px;background:#ffffff10;color:#d9e8fa;line-height:1.7}.label{display:block;margin:20px 0 8px;color:#d3e1f1}input{width:100%;padding:14px;border:1px solid #ffffff30;border-radius:12px;background:#0c1728;color:#fff;font-size:16px}button{margin-top:14px;width:100%;padding:14px;border:0;border-radius:12px;background:#18a4ef;color:#071525;font-size:16px;font-weight:700}small{display:block;margin-top:16px;line-height:1.5;color:#adbed2}.row{display:flex;gap:12px;align-items:center}.row input{width:auto}</style>
-<main class="card"><h1>Clima e Finance</h1><div class="muted">Ajustes do relógio, previsão e cotações</div><div class="status">%NOTICE%<br>Wi-Fi: %STATUS%<br>Endereço: http://%IP%</div><form method="post" action="/save-city" accept-charset="UTF-8"><label class="label" for="city">Cidade (ex.: São Paulo, BR)</label><input id="city" name="city" value="%CITY%" required><label class="label">USD</label><input name="usd" type="number" step="0.01" value="%USD%"><label class="label">BRL</label><input name="brl" type="number" step="0.01" value="%BRL%"><label class="label">EUR</label><input name="eur" type="number" step="0.01" value="%EUR%"><label class="label">BTC</label><input name="btc" type="number" step="0.001" value="%BTC%"><label class="label row"><input type="checkbox" name="h24" value="1" %H24%> Relógio 24 horas</label><button type="submit">Salvar ajustes</button></form><small>Esses são os valores de referência editáveis; as cotações de câmbio são consultadas pela FXAPI.</small></main></html>)HTML";
+<main class="card"><h1>Clima e Finance</h1><div class="muted">Ajustes do relógio e da previsão</div><div class="status">%NOTICE%<br>Wi-Fi: %STATUS%<br>Endereço: http://%IP%</div><form method="post" action="/save-city" accept-charset="UTF-8"><label class="label" for="city">Cidade (ex.: São Paulo, BR)</label><input id="city" name="city" value="%CITY%" required><label class="label row"><input type="checkbox" name="h24" value="1" %H24%> Relógio 24 horas</label><button type="submit">Salvar ajustes</button></form><small>As cotações financeiras são consultadas automaticamente pelas APIs.</small></main></html>)HTML";
   page.replace("%NOTICE%", htmlEscape(notice));
   page.replace("%STATUS%", htmlEscape(status));
   page.replace("%IP%", WiFi.localIP().toString());
   page.replace("%CITY%", htmlEscape(city));
   page.replace("%H24%", cfg.h24 ? "checked" : "");
-  page.replace("%USD%", String(usd, 2)); page.replace("%BRL%", String(brl, 2)); page.replace("%EUR%", String(eur, 2)); page.replace("%BTC%", String(btc, 3));
   return page;
 }
 
@@ -679,8 +677,6 @@ static void startConfigServer() {
     city.trim();
     cfg.h24 = configServer.hasArg("h24");
     prefs.putBool("h24", cfg.h24);
-    float usd=configServer.arg("usd").toFloat(), brl=configServer.arg("brl").toFloat(), eur=configServer.arg("eur").toFloat(), btc=configServer.arg("btc").toFloat();
-    float vals[]={usd,brl,eur,btc}; const char* keys[]={"fxusd","fxbrl","fxeur","fxbtc"}; for(int i=0;i<4;i++) if(vals[i]>=0 && vals[i]<1e9f){sh.financeDefaults[i]=vals[i];prefs.putFloat(keys[i],vals[i]);}
     post(CMD_FINANCE);
     if (!city.isEmpty()) {
       xSemaphoreTake(mtx, portMAX_DELAY);
@@ -1185,7 +1181,6 @@ void setup() {
   cmdQ = xQueueCreate(8, sizeof(int));
 
   prefs.begin("clock", false);
-  sh.financeDefaults[0]=prefs.getFloat("fxusd",1.0f); sh.financeDefaults[1]=prefs.getFloat("fxbrl",5.44f); sh.financeDefaults[2]=prefs.getFloat("fxeur",1.0f); sh.financeDefaults[3]=prefs.getFloat("fxbtc",78565.0f);
   cfg.lat = prefs.getFloat("lat", cfg.lat);
   cfg.lon = prefs.getFloat("lon", cfg.lon);
   cfg.utcOffset = prefs.getInt("tz", cfg.utcOffset);
