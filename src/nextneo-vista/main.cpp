@@ -50,11 +50,18 @@ struct Shared {
   char dayName[7][6] = {{0}};
   float tmax[7] = {0}, tmin[7] = {0};
   int dcode[7] = {0};
+  float finance[3] = {0, 0, 0};
+  float previousFinance[3] = {0,0,0}, financeChange[3] = {0,0,0};
+  bool haveChange[3] = {false,false,false};
+  float history[3][24] = {};
+  uint8_t historyCount[3] = {0,0,0};
+  float financeDefaults[4] = {1.0f, 5.44f, 1.0f, 6.07f}; // USD, BRL, EUR, BTC display defaults
+  bool haveFinance[3] = {false, false, false};
   String pendingSsid, pendingPass, pendingCity;
 } sh;
 SemaphoreHandle_t mtx;
 
-enum Cmd { CMD_SCAN, CMD_CONNECT, CMD_GEOCODE, CMD_WEATHER };
+enum Cmd { CMD_SCAN, CMD_CONNECT, CMD_GEOCODE, CMD_WEATHER, CMD_FINANCE };
 QueueHandle_t cmdQ;
 
 struct Config {
@@ -80,6 +87,36 @@ static const char *weatherText(int c) {
   if (c == 85 || c == 86) return "Neve fraca";
   if (c >= 95) return "Tempestade";
   return "Sem dados";
+}
+
+static bool isRainCode(int c) {
+  return (c >= 51 && c <= 67) || (c >= 80 && c <= 82) || c >= 95;
+}
+
+static bool fetchFx(const char *pair, float &rate) {
+  String url = String("https://fxapi.app/api/") + pair + ".json?nocache=" + String(millis());
+  WiFiClientSecure client; client.setInsecure(); HTTPClient http; http.setTimeout(10000);
+  if (!http.begin(client, url)) return false;
+  http.addHeader("Cache-Control", "no-cache, no-store, max-age=0");
+  http.addHeader("Pragma", "no-cache");
+  int status = http.GET(); String body = status == 200 ? http.getString() : ""; http.end();
+  if (body.isEmpty()) return false;
+  JsonDocument doc; if (deserializeJson(doc, body)) return false;
+  float value = doc["rate"] | (doc["value"] | 0.0f);
+  if (value <= 0) return false;
+  rate = value; return true;
+}
+
+static void doFinance() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  const char *pairs[] = {"usd/brl", "eur/brl", "btc/usd"};
+  for (int i=0; i<3; ++i) {
+    float v=0; bool ok=fetchFx(pairs[i],v);
+    xSemaphoreTake(mtx, portMAX_DELAY);
+    if(ok){ if(sh.haveFinance[i] && sh.finance[i]>0){sh.previousFinance[i]=sh.finance[i];sh.financeChange[i]=(v-sh.finance[i])*100.0f/sh.finance[i];sh.haveChange[i]=fabsf(sh.financeChange[i])>0.0001f;} sh.finance[i]=v;sh.haveFinance[i]=true;uint8_t n=sh.historyCount[i];if(n<24)sh.historyCount[i]=++n;for(int k=n-1;k>0;k--)sh.history[i][k]=sh.history[i][k-1];sh.history[i][0]=v; }
+    else {sh.finance[i]=0;sh.haveFinance[i]=false;sh.haveChange[i]=false;}
+    xSemaphoreGive(mtx);
+  }
 }
 
 static String urlEncode(const String &s) {
@@ -259,6 +296,7 @@ static void doConnect() {
 
 static void workerTask(void *) {
   uint32_t lastWeather = 0;
+  uint32_t lastFinance = 0;
   uint32_t lastReconnectCheck = millis();
   uint32_t reconnectStarted = 0;
   bool first = true;
@@ -270,6 +308,7 @@ static void workerTask(void *) {
         case CMD_CONNECT: doConnect(); lastWeather = millis(); break;
         case CMD_GEOCODE: doGeocode(); lastWeather = millis(); break;
         case CMD_WEATHER: doWeather(); lastWeather = millis(); break;
+        case CMD_FINANCE: doFinance(); lastFinance = millis(); break;
       }
     }
     bool up = WiFi.status() == WL_CONNECTED;
@@ -298,6 +337,7 @@ static void workerTask(void *) {
       doWeather();
       lastWeather = millis();
     }
+    if (up && (lastFinance == 0 || millis() - lastFinance >= 120000UL)) { doFinance(); lastFinance = millis(); }
   }
 }
 
@@ -343,6 +383,7 @@ static lv_obj_t *hourTime[8], *hourCond[8], *hourTemp[8], *hourRain[8];
 static lv_obj_t *hourArt[8], *dayArt[7];
 static lv_obj_t *ddSsid, *taPass, *taCity, *kb, *setStatusLbl, *wifiInfoLbl, *swH24;
 static lv_obj_t *mainMenu, *weatherView, *settingsView, *weatherTabs;
+static lv_obj_t *financeView, *financeStrip, *financeValue[3], *financeDelta[3], *financePlot[3], *financeHeader[3], *financeCard[3];
 static lv_obj_t *menuWifiIcon;
 static lv_obj_t *calendarView;
 static int calendarOffset = 0;
@@ -393,7 +434,7 @@ static lv_obj_t *makeWeatherIcon(lv_obj_t *parent, int x, int y, int size, int c
     lv_obj_set_style_bg_color(puff, lv_color_hex(0xD8E7F5), 0);
     lv_obj_set_style_border_width(puff, 0, 0);
   }
-  if (code >= 51) {
+  if (isRainCode(code)) {
     for (int r = 0; r < 3; r++) {
       lv_obj_t *drop = lv_obj_create(icon);
       lv_obj_set_pos(drop, scaled(42 + r * 35), scaled(110));
@@ -427,6 +468,8 @@ static void ui_update(lv_timer_t *) {
   xSemaphoreTake(mtx, portMAX_DELAY);
   String status = sh.status, list = sh.ssidList, city = sh.cityName;
   bool up = sh.wifiUp, have = sh.haveWeather;
+  float fx[3]; bool fxok[3],deltaOk[3];float delta[3],hist[3][24];uint8_t histN[3];
+  memcpy(fx,sh.finance,sizeof fx);memcpy(fxok,sh.haveFinance,sizeof fxok);memcpy(delta,sh.financeChange,sizeof delta);memcpy(deltaOk,sh.haveChange,sizeof deltaOk);memcpy(hist,sh.history,sizeof hist);memcpy(histN,sh.historyCount,sizeof histN);
   float temp = sh.temp; int code = sh.code;
   int humidity = sh.humidity; float wind = sh.wind;
   int hourCount = sh.hourCount;
@@ -448,6 +491,12 @@ static void ui_update(lv_timer_t *) {
   lv_label_set_text(wifiInfoLbl, wifiInfo.c_str());
   lv_obj_set_style_text_color(lblWifiDot, up ? lv_color_hex(0x42D392) : lv_color_hex(0xF07878), 0);
   lv_obj_set_style_text_color(menuWifiIcon, up ? lv_color_hex(0x42D392) : lv_color_hex(0xF07878), 0);
+  for(int i=0;i<3;i++){ if(fxok[i]) lv_label_set_text_fmt(financeValue[i], i==2?"%.0f":"%.2f", fx[i]); else lv_label_set_text(financeValue[i], "");
+    lv_color_t trend=deltaOk[i]?lv_color_hex(delta[i]>=0?0x35D879:0xFF5555):lv_color_hex(0xAEB0B8);
+    lv_obj_set_style_text_color(financeHeader[i],trend,0); lv_obj_set_style_border_color(financeCard[i],deltaOk[i]?trend:lv_color_hex(0x45484D),0);
+    if(deltaOk[i]){lv_label_set_text_fmt(financeDelta[i], "%s %+.2f%%",delta[i]>=0?LV_SYMBOL_UP:LV_SYMBOL_DOWN,delta[i]);lv_obj_set_style_text_color(financeDelta[i],lv_color_hex(delta[i]>=0?0x35D879:0xFF5555),0);}else lv_label_set_text(financeDelta[i],"");
+    lv_obj_clean(financePlot[i]); if(histN[i]>1){float lo=hist[i][0],hi=lo;for(int j=1;j<histN[i];j++){lo=min(lo,hist[i][j]);hi=max(hi,hist[i][j]);} if(hi-lo<0.0001f)hi=lo+0.0001f; for(int j=1;j<histN[i];j++){int x1=(j-1)*164/(histN[i]-1),x2=j*164/(histN[i]-1);int y1=33-(int)((hist[i][j-1]-lo)*27/(hi-lo)),y2=33-(int)((hist[i][j]-lo)*27/(hi-lo));lv_obj_t*seg=lv_obj_create(financePlot[i]);lv_obj_set_size(seg,max(2,x2-x1),2);lv_obj_set_pos(seg,x1,min(y1,y2));lv_obj_set_style_bg_color(seg,lv_color_hex(deltaOk[i]&&delta[i]<0?0xFF5555:0x35D879),0);lv_obj_set_style_bg_opa(seg,LV_OPA_COVER,0);lv_obj_set_style_border_width(seg,0,0);}}
+  }
   lv_label_set_text(lblCity, city.c_str());
   if (have) {
     lv_label_set_text_fmt(lblTemp, "%.0f°C", temp);
@@ -491,8 +540,8 @@ static void ui_update(lv_timer_t *) {
     if (renderedCode != code) {
       renderedCode = code;
       // Change the scene colours to suit the current condition.
-      uint32_t top = (code == 0) ? 0x17253D : (code >= 51 ? 0x101B30 : 0x1A263B);
-      uint32_t bottom = (code == 0) ? 0x334C70 : (code >= 51 ? 0x203B5C : 0x344960);
+      uint32_t top = (code == 0) ? 0x17253D : (isRainCode(code) ? 0x101B30 : 0x1A263B);
+      uint32_t bottom = (code == 0) ? 0x334C70 : (isRainCode(code) ? 0x203B5C : 0x344960);
       lv_obj_set_style_bg_color(homeTab, lv_color_hex(top), 0);
       lv_obj_set_style_bg_grad_color(homeTab, lv_color_hex(bottom), 0);
       lv_obj_clean(weatherArt);
@@ -521,7 +570,7 @@ static void ui_update(lv_timer_t *) {
         lv_obj_set_style_border_width(sun, 0, 0);
         lv_obj_move_to_index(sun, 0);
       }
-      if (code >= 51) {
+      if (isRainCode(code)) {
         for (int r = 0; r < 3; r++) {
           lv_obj_t *drop = lv_obj_create(weatherArt);
           lv_obj_set_pos(drop, 42 + r * 35, 110); lv_obj_set_size(drop, 6, 22);
@@ -609,15 +658,17 @@ static String configPage(const String &notice = "") {
   xSemaphoreTake(mtx, portMAX_DELAY);
   String city = sh.cityName;
   String status = sh.status;
+  float usd = sh.financeDefaults[0], brl=sh.financeDefaults[1], eur=sh.financeDefaults[2], btc=sh.financeDefaults[3];
   xSemaphoreGive(mtx);
   String page = R"HTML(<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Weather | Ajustes</title>
 <style>*{box-sizing:border-box}body{margin:0;min-height:100vh;background:linear-gradient(145deg,#091629,#1b3b62);color:#edf4ff;font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;place-items:center;padding:18px}.card{width:min(100%,520px);padding:24px;border:1px solid #ffffff20;border-radius:20px;background:#ffffff0d;box-shadow:0 20px 60px #0005}h1{font-size:24px;margin:0 0 4px}.muted{color:#b4c7df}.status{margin:18px 0;padding:14px;border-radius:14px;background:#ffffff10;color:#d9e8fa;line-height:1.7}.label{display:block;margin:20px 0 8px;color:#d3e1f1}input{width:100%;padding:14px;border:1px solid #ffffff30;border-radius:12px;background:#0c1728;color:#fff;font-size:16px}button{margin-top:14px;width:100%;padding:14px;border:0;border-radius:12px;background:#18a4ef;color:#071525;font-size:16px;font-weight:700}small{display:block;margin-top:16px;line-height:1.5;color:#adbed2}.row{display:flex;gap:12px;align-items:center}.row input{width:auto}</style>
-<main class="card"><h1>Clima</h1><div class="muted">Ajustes do relógio e da previsão</div><div class="status">%NOTICE%<br>Wi-Fi: %STATUS%<br>Endereço: http://%IP%</div><form method="post" action="/save-city" accept-charset="UTF-8"><label class="label" for="city">Cidade (ex.: São Paulo, BR)</label><input id="city" name="city" value="%CITY%" required><label class="label row"><input type="checkbox" name="h24" value="1" %H24%> Relógio 24 horas</label><button type="submit">Salvar ajustes</button></form><small>Para configurar ou trocar a rede Wi-Fi, use Setting na tela do aparelho. Os dados do clima vêm do Open-Meteo.</small></main></html>)HTML";
+<main class="card"><h1>Clima e Finance</h1><div class="muted">Ajustes do relógio, previsão e cotações</div><div class="status">%NOTICE%<br>Wi-Fi: %STATUS%<br>Endereço: http://%IP%</div><form method="post" action="/save-city" accept-charset="UTF-8"><label class="label" for="city">Cidade (ex.: São Paulo, BR)</label><input id="city" name="city" value="%CITY%" required><label class="label">USD</label><input name="usd" type="number" step="0.01" value="%USD%"><label class="label">BRL</label><input name="brl" type="number" step="0.01" value="%BRL%"><label class="label">EUR</label><input name="eur" type="number" step="0.01" value="%EUR%"><label class="label">BTC</label><input name="btc" type="number" step="0.001" value="%BTC%"><label class="label row"><input type="checkbox" name="h24" value="1" %H24%> Relógio 24 horas</label><button type="submit">Salvar ajustes</button></form><small>Esses são os valores de referência editáveis; as cotações de câmbio são consultadas pela FXAPI.</small></main></html>)HTML";
   page.replace("%NOTICE%", htmlEscape(notice));
   page.replace("%STATUS%", htmlEscape(status));
   page.replace("%IP%", WiFi.localIP().toString());
   page.replace("%CITY%", htmlEscape(city));
   page.replace("%H24%", cfg.h24 ? "checked" : "");
+  page.replace("%USD%", String(usd, 2)); page.replace("%BRL%", String(brl, 2)); page.replace("%EUR%", String(eur, 2)); page.replace("%BTC%", String(btc, 3));
   return page;
 }
 
@@ -628,6 +679,9 @@ static void startConfigServer() {
     city.trim();
     cfg.h24 = configServer.hasArg("h24");
     prefs.putBool("h24", cfg.h24);
+    float usd=configServer.arg("usd").toFloat(), brl=configServer.arg("brl").toFloat(), eur=configServer.arg("eur").toFloat(), btc=configServer.arg("btc").toFloat();
+    float vals[]={usd,brl,eur,btc}; const char* keys[]={"fxusd","fxbrl","fxeur","fxbtc"}; for(int i=0;i<4;i++) if(vals[i]>=0 && vals[i]<1e9f){sh.financeDefaults[i]=vals[i];prefs.putFloat(keys[i],vals[i]);}
+    post(CMD_FINANCE);
     if (!city.isEmpty()) {
       xSemaphoreTake(mtx, portMAX_DELAY);
       sh.pendingCity = city;
@@ -664,6 +718,7 @@ static lv_obj_t *makeCard(lv_obj_t *parent, int w, int h) {
 
 static void showView(lv_obj_t *view) {
   lv_obj_add_flag(mainMenu, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(financeView, LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_flag(calendarView, LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_flag(weatherView, LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_flag(settingsView, LV_OBJ_FLAG_HIDDEN);
@@ -673,6 +728,7 @@ static void showView(lv_obj_t *view) {
 static void showMenuEvent(lv_event_t *) { showView(mainMenu); }
 static void showWeatherEvent(lv_event_t *) { showView(weatherView); }
 static void showSettingsEvent(lv_event_t *) { showView(settingsView); }
+static void showFinanceEvent(lv_event_t *) { showView(financeView); }
 static const char *calMonths[] = {"JAN.","FEV.","MAR.","ABR.","MAI.","JUN.","JUL.","AGO.","SET.","OUT.","NOV.","DEZ."};
 static void drawCalendar() {
   lv_obj_clean(calendarGrid);
@@ -755,7 +811,7 @@ static void build_main_menu(lv_obj_t *menu) {
   lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
   lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_remove_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
-  menuTile(grid, LV_SYMBOL_AUDIO, "MP3", 0x151820, NULL);
+  menuTile(grid, "$", "Finance", 0x151820, showFinanceEvent);
   menuTile(grid, LV_SYMBOL_IMAGE, "Photo", 0x39B982, NULL);
   menuTile(grid, LV_SYMBOL_PLAY, "Video", 0x7353E8, NULL);
   menuTile(grid, LV_SYMBOL_SETTINGS, "Setting", 0x8993A3, showSettingsEvent);
@@ -857,6 +913,7 @@ static void build_hours(lv_obj_t *t) {
   lv_obj_set_flex_align(strip, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   for (int i = 0; i < 8; i++) {
     lv_obj_t *card = makeCard(strip, 92, 158);
+    lv_obj_set_style_translate_y(card, -16, 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_80, 0);
     hourTime[i] = makeLabel(card, "--", &lv_font_weather_14, 0xAFC0D6);
     lv_obj_align(hourTime[i], LV_ALIGN_TOP_MID, 0, 5);
@@ -885,17 +942,20 @@ static void build_days(lv_obj_t *t) {
   lv_obj_set_pos(title, 82, 8);
   lv_obj_t *strip = lv_obj_create(t);
   lv_obj_set_size(strip, 452, 232);
-  lv_obj_set_pos(strip, 14, 29);
+  lv_obj_set_pos(strip, 14, 21);
   lv_obj_set_style_bg_opa(strip, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(strip, 0, 0);
   lv_obj_set_style_pad_all(strip, 4, 0);
   lv_obj_set_style_pad_column(strip, 8, 0);
   lv_obj_set_scroll_dir(strip, LV_DIR_HOR);
   lv_obj_set_flex_flow(strip, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(strip, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   for (int i = 0; i < 7; i++) {
     lv_obj_t *card = makeCard(strip, 92, 158);
     lv_obj_set_style_bg_opa(card, LV_OPA_80, 0);
-    fcDay[i] = makeLabel(card, "", &lv_font_weather_20, 0xC5D6EA);
+    lv_obj_set_style_radius(card, 12, 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_80, 0);
+    fcDay[i] = makeLabel(card, "", &lv_font_weather_14, 0xAFC0D6);
     lv_obj_set_width(fcDay[i], 82);
     lv_obj_set_style_text_align(fcDay[i], LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(fcDay[i], LV_ALIGN_TOP_MID, 0, 5);
@@ -904,7 +964,7 @@ static void build_days(lv_obj_t *t) {
     lv_obj_add_flag(fcCond[i], LV_OBJ_FLAG_HIDDEN);
     fcTemp[i] = makeLabel(card, "", &lv_font_weather_20, 0xFFD477);
     lv_obj_set_style_text_align(fcTemp[i], LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(fcTemp[i], LV_ALIGN_BOTTOM_MID, 0, -12);
+    lv_obj_align(fcTemp[i], LV_ALIGN_CENTER, 0, 27);
   }
 }
 
@@ -1024,7 +1084,16 @@ static void build_ui() {
   lv_obj_set_style_border_width(mainMenu, 0, 0);
   build_main_menu(mainMenu);
 
-  calendarView = lv_obj_create(scr); lv_obj_set_size(calendarView,SCR_W,SCR_H); lv_obj_set_pos(calendarView,0,0); lv_obj_set_style_bg_color(calendarView,lv_color_hex(0x05091C),0); lv_obj_set_style_bg_opa(calendarView,LV_OPA_COVER,0); lv_obj_set_style_border_width(calendarView,0,0); lv_obj_set_style_pad_all(calendarView,0,0); lv_obj_add_flag(calendarView,LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(calendarView,LV_OBJ_FLAG_GESTURE_BUBBLE);
+  financeView=lv_obj_create(scr); lv_obj_set_size(financeView,SCR_W,SCR_H); lv_obj_set_pos(financeView,0,0);
+  lv_obj_add_flag(financeView, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_style_bg_color(financeView,lv_color_hex(0x231C2A),0); lv_obj_set_style_bg_grad_color(financeView,lv_color_hex(0x563A45),0); lv_obj_set_style_bg_grad_dir(financeView,LV_GRAD_DIR_VER,0); lv_obj_set_style_bg_opa(financeView,LV_OPA_COVER,0); lv_obj_set_style_border_width(financeView,0,0); lv_obj_set_style_pad_all(financeView,0,0); lv_obj_remove_flag(financeView,LV_OBJ_FLAG_SCROLLABLE);
+  financeStrip=lv_obj_create(financeView);lv_obj_set_size(financeStrip,SCR_W,260);lv_obj_set_pos(financeStrip,0,54);lv_obj_set_style_bg_opa(financeStrip,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(financeStrip,0,0);lv_obj_set_style_pad_all(financeStrip,0,0);lv_obj_set_style_pad_column(financeStrip,16,0);lv_obj_set_scroll_dir(financeStrip,LV_DIR_HOR);lv_obj_set_flex_flow(financeStrip,LV_FLEX_FLOW_ROW);lv_obj_set_flex_align(financeStrip,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_bottom(financeStrip,28,0);
+  const char *ft[] = {"$  USD/BRL", "€  EUR/BRL", "$  BTC/USD"}; const char *fs[] = {"Dólar para real", "Euro para real", "Bitcoin em dólar"};
+  for(int i=0;i<3;i++){ lv_obj_t *c=financeCard[i]=lv_obj_create(financeStrip); lv_obj_set_size(c,210,240); lv_obj_set_style_bg_color(c,lv_color_hex(0x151719),0); lv_obj_set_style_bg_opa(c,LV_OPA_COVER,0); lv_obj_set_style_radius(c,22,0); lv_obj_set_style_border_width(c,1,0); lv_obj_set_style_border_color(c,lv_color_hex(0x45484D),0); lv_obj_set_style_shadow_width(c,12,0); lv_obj_set_style_shadow_opa(c,LV_OPA_40,0); lv_obj_remove_flag(c,LV_OBJ_FLAG_SCROLLABLE); financeHeader[i]=makeLabel(c,ft[i],&lv_font_weather_14,0xAEB0B8); lv_obj_set_pos(financeHeader[i],14,12); lv_obj_t *s=makeLabel(c,fs[i],&lv_font_weather_14,0xAEB0B8); lv_obj_set_pos(s,14,36); financePlot[i]=lv_obj_create(c);lv_obj_set_size(financePlot[i],164,56);lv_obj_set_pos(financePlot[i],14,62);lv_obj_set_style_bg_opa(financePlot[i],LV_OPA_TRANSP,0);lv_obj_set_style_border_width(financePlot[i],0,0);lv_obj_set_style_pad_all(financePlot[i],0,0);lv_obj_remove_flag(financePlot[i],LV_OBJ_FLAG_SCROLLABLE); financeDelta[i]=makeLabel(c,"",&lv_font_weather_14,0x30C875);lv_obj_set_pos(financeDelta[i],14,128); financeValue[i]=makeLabel(c,"",&lv_font_montserrat_48,0xEEEEEE); lv_obj_align(financeValue[i],LV_ALIGN_BOTTOM_RIGHT,-10,-5); }
+  lv_obj_t *financeTitle=makeLabel(financeView,"Finance",&lv_font_weather_20,0xFFFFFF); lv_obj_align(financeTitle,LV_ALIGN_TOP_LEFT,62,8); addBackButton(financeView); lv_obj_move_foreground(lv_obj_get_child(financeView,lv_obj_get_child_cnt(financeView)-1));
+
+  calendarView = lv_obj_create(scr); lv_obj_set_size(calendarView,SCR_W,SCR_H); lv_obj_set_pos(calendarView,0,0); lv_obj_set_style_bg_color(calendarView,lv_color_hex(0x05091C),0); lv_obj_set_style_bg_opa(calendarView,LV_OPA_COVER,0); lv_obj_set_style_border_width(calendarView,0,0); lv_obj_set_style_pad_all(calendarView,0,0); lv_obj_remove_flag(calendarView,LV_OBJ_FLAG_SCROLLABLE); lv_obj_add_flag(calendarView,LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(calendarView,LV_OBJ_FLAG_GESTURE_BUBBLE);
   calendarTitle=makeLabel(calendarView,"",&lv_font_weather_20,0xFFFFFF); lv_obj_align(calendarTitle,LV_ALIGN_TOP_MID,0,30);
   calendarGrid=lv_obj_create(calendarView); lv_obj_set_size(calendarGrid,430,265); lv_obj_align(calendarGrid,LV_ALIGN_CENTER,0,40); lv_obj_set_style_bg_opa(calendarGrid,LV_OPA_TRANSP,0); lv_obj_set_style_border_width(calendarGrid,0,0); lv_obj_set_style_pad_all(calendarGrid,0,0); lv_obj_remove_flag(calendarGrid,LV_OBJ_FLAG_SCROLLABLE); lv_obj_add_flag(calendarGrid,LV_OBJ_FLAG_CLICKABLE); lv_obj_add_event_cb(calendarGrid,calendarGesture,LV_EVENT_PRESSED,NULL); lv_obj_add_event_cb(calendarGrid,calendarGesture,LV_EVENT_RELEASED,NULL); addBackButton(calendarView); drawCalendar();
 
@@ -1116,6 +1185,7 @@ void setup() {
   cmdQ = xQueueCreate(8, sizeof(int));
 
   prefs.begin("clock", false);
+  sh.financeDefaults[0]=prefs.getFloat("fxusd",1.0f); sh.financeDefaults[1]=prefs.getFloat("fxbrl",5.44f); sh.financeDefaults[2]=prefs.getFloat("fxeur",1.0f); sh.financeDefaults[3]=prefs.getFloat("fxbtc",78565.0f);
   cfg.lat = prefs.getFloat("lat", cfg.lat);
   cfg.lon = prefs.getFloat("lon", cfg.lon);
   cfg.utcOffset = prefs.getInt("tz", cfg.utcOffset);

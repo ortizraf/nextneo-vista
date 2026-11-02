@@ -349,7 +349,7 @@ pio device monitor</code></pre>
     <p>Flashing one app on its own overwrites the launcher slot. Run <code>tools/flash_hub.sh</code> to restore the hub. If an upload will not start, hold BOOT, tap RESET, release BOOT, and retry.</p>
     <h3>Add a game</h3>
     <ul class="tight">
-      <li>Create <code>examples/&lt;name&gt;/main.cpp</code> and an <code>[env:&lt;name&gt;]</code> in <code>platformio.ini</code> with <code>build_src_filter = -&lt;*&gt; +&lt;&lt;name&gt;/&gt;</code>.</li>
+      <li>Built-in samples stay under <code>examples/</code>. The customized weather app is under <code>src/nextneo-vista/</code>; set its source filter in <code>platformio.ini</code>.</li>
       <li>Include <code>../common/hub_home.h</code> and wrap the touch read so it calls <code>hubTouchNote()</code>.</li>
       <li>Add a tile in <code>examples/hub/main.cpp</code> and the name in <code>tools/flash_hub.sh</code>. Slot offsets are <code>0x1B0000 + (N-1) &times; 0x100000</code>.</li>
     </ul>

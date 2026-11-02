@@ -14,6 +14,9 @@ if [[ -z "$PORT" ]]; then
   exit 1
 fi
 PIO="$(command -v pio || true)"
+if [[ -z "$PIO" && -x "$HOME/.platformio/penv/bin/pio" ]]; then
+  PIO="$HOME/.platformio/penv/bin/pio"
+fi
 if [[ -z "$PIO" ]]; then
   echo "Erro: PlatformIO CLI (pio) não encontrado. Instale PlatformIO Core e tente novamente." >&2
   exit 1

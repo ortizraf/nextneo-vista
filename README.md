@@ -52,7 +52,7 @@ Setup and spec notes for the Guition **JC3248W535C_I_Y** — ESP32-S3 3.5" capac
 
 | Sample | What it is |
 |---|---|
-| [`examples/weather-clock`](examples/weather-clock/main.cpp) | Wi-Fi clock + weather dashboard (NTP time, Open-Meteo weather, hourly and 7-day forecasts). Settings has Wi-Fi scan/connect, city search, 12/24h switch and brightness. Wi-Fi credentials stay on the board. |
+| [`src/nextneo-vista`](src/nextneo-vista/main.cpp) | Wi-Fi clock + weather dashboard (NTP time, Open-Meteo weather, hourly and 7-day forecasts). Settings has Wi-Fi scan/connect, city search, 12/24h switch and brightness. Wi-Fi credentials stay on the board. |
 | [`examples/media-player`](examples/media-player/main.cpp) | Photo frame + MJPEG video player from a microSD card. Reads `/pic/*.jpg` and `/mjpeg/*.mjpeg` (also `/photos`, `/video`). Landscape media (e.g. 480x320) is rotated 90° to fill the portrait screen. Tap = pause, swipe = next/prev, long-press = switch photos/video. |
 | [`examples/music-player`](examples/music-player/main.cpp) | MP3/WAV/FLAC/AAC player from `/music` on the SD card with an LVGL track list, prev/play/next, volume and progress bar; auto-advances. **Audio output UNVERIFIED** (no speaker was connected when tested; UI and track scan work). |
 | [`examples/paint`](examples/paint/main.cpp) | Finger-paint app: 8 colours incl. eraser, brush size, clear, and SAVE to `/paint/paintN.bmp` on the SD card (16-bit RGB565 BMP, opens on Mac/PC). Screen display/touch verified; BMP save not yet checked on a computer. |
@@ -88,7 +88,7 @@ pio device monitor
 ```
 
 To add a sample, create `examples/<name>/main.cpp` and an `[env:<name>]` entry
-in `platformio.ini` with `build_src_filter = -<*> +<<name>/>`.
+in `platformio.ini`; built-in samples remain under `examples/`, while the customized weather app is under `src/nextneo-vista/`.
 
 ## Status
 
@@ -134,7 +134,7 @@ The attached board and manual identify a Guition JC3248W535C family board: ESP32
 The downloaded listing/manual establishes the processor and display specs, but does not prove that
 all sample apps or audio output work on this particular unit.
 
-`examples/weather-clock/main.cpp` has a locally customized weather dashboard: dark, condition-colored
+`src/nextneo-vista/main.cpp` has a locally customized weather dashboard: dark, condition-colored
 backgrounds, Portuguese labels, current conditions, 3-hour forecast, and a 7-day summary that scrolls
 horizontally. The original “Agora” weather illustration stays intact; the hourly and daily cards use
 the same condition-based artwork scaled down to fit. The app opens on a recreated main menu matching the supplied factory screenshot: two
@@ -252,8 +252,8 @@ UTF-8 bytes and passes only ASCII unreserved characters through. The browser for
 both in its page metadata and form.
 The old default `Sao Paulo` preference is migrated to `São Paulo` on startup.
 
-Generated font sources are checked into `examples/weather-clock/lv_font_weather_14.c` and
-`examples/weather-clock/lv_font_weather_20.c`; normal builds do not need the font converter or source
+Generated font sources are checked into `src/nextneo-vista/lv_font_weather_14.c` and
+`src/nextneo-vista/lv_font_weather_20.c`; normal builds do not need the font converter or source
 TTF. Portuguese labels now retain their accents, including `São Paulo`, `Previsão`, `Próximos`,
 `Relógio`, and `Sáb`.
 
@@ -286,6 +286,6 @@ O script compila `weather-clock`, detecta a porta `/dev/cu.usbmodem*` e grava **
 
 Ao final, confirme a mensagem `Hash of data verified`. Não use `pio run -e weather-clock -t upload` neste dispositivo: esse comando pode gravar também dados de boot e partições. O script depende do Python e do esptool instalados pelo PlatformIO em `~/.platformio`; a primeira compilação pode baixar a plataforma ESP32 e bibliotecas e demorar alguns minutos. O build cache em `.pio/` pode ser apagado: será recriado na próxima compilação.
 
-**Conteúdo do projeto:** fontes e documentação estão neste repositório; as fontes Latin UTF-8 geradas estão em `examples/weather-clock/lv_font_weather_14.c` e `lv_font_weather_20.c`. Elas já estão incluídas no firmware e não precisam ser regeneradas. A pasta original `JC3248W535EN`, `backups`, `desktop-ornaments`, `toolchain_gcc_t-head_macos` e `tools-vendor` não são dependências do build atual. O dump parcial antigo em `backups` não é recuperável como firmware completo.
+**Conteúdo do projeto:** fontes e documentação estão neste repositório; as fontes Latin UTF-8 geradas estão em `src/nextneo-vista/lv_font_weather_14.c` e `lv_font_weather_20.c`. Elas já estão incluídas no firmware e não precisam ser regeneradas. A pasta original `JC3248W535EN`, `backups`, `desktop-ornaments`, `toolchain_gcc_t-head_macos` e `tools-vendor` não são dependências do build atual. O dump parcial antigo em `backups` não é recuperável como firmware completo.
 
 **Componentes do build do clima:** PlatformIO Core 6.x, plataforma pioarduino ESP32-S3, Arduino-ESP32 3.x, LVGL 9.x, GFX Library for Arduino, ArduinoJson e JPEGDEC; as versões efetivamente resolvidas ficam registradas no log do PlatformIO. O aplicativo consulta o Open-Meteo sem chave, sincroniza hora via NTP e atualiza a previsão a cada 15 minutos; a reconexão Wi-Fi é verificada a cada minuto.
