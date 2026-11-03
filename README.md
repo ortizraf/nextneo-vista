@@ -146,7 +146,12 @@ checked every 60 seconds and the app retries the saved network credentials autom
 The menu Wi-Fi icon and dashboard indicator both reflect the current connection state. Weather views
 use shorter titles and compact values with reduced card heights. Unselected weather tabs use brighter
 text and visible borders for contrast. The Weather tile uses a droplet symbol.
-Weather is fetched from Open-Meteo, with city search/geocoding. Portuguese text and accented city
+Weather is fetched from Open-Meteo every 15 minutes, with city search/geocoding. Transient HTTPS
+and server errors are retried once after one second; continued failures use increasing retry intervals
+of 1, 2, 4, 8 and up to 15 minutes. A successful refresh resets the normal 15-minute interval, and
+weather is refreshed immediately after Wi-Fi reconnects. Invalid or incomplete responses do not
+replace the last valid forecast. The status message and Serial log report connection, HTTP, JSON, or
+incomplete-response errors. Portuguese text and accented city
 names use UTF-8; the weather app includes extended Montserrat fonts for Latin accented characters.
 The web form accepts UTF-8 city names and can save the city and 24-hour clock preference.
 
@@ -288,4 +293,6 @@ Ao final, confirme a mensagem `Hash of data verified`. Não use `pio run -e weat
 
 **Conteúdo do projeto:** fontes e documentação estão neste repositório; as fontes Latin UTF-8 geradas estão em `src/nextneo-vista/lv_font_weather_14.c` e `lv_font_weather_20.c`. Elas já estão incluídas no firmware e não precisam ser regeneradas. A pasta original `JC3248W535EN`, `backups`, `desktop-ornaments`, `toolchain_gcc_t-head_macos` e `tools-vendor` não são dependências do build atual. O dump parcial antigo em `backups` não é recuperável como firmware completo.
 
-**Componentes do build do clima:** PlatformIO Core 6.x, plataforma pioarduino ESP32-S3, Arduino-ESP32 3.x, LVGL 9.x, GFX Library for Arduino, ArduinoJson e JPEGDEC; as versões efetivamente resolvidas ficam registradas no log do PlatformIO. O aplicativo consulta o Open-Meteo sem chave, sincroniza hora via NTP e atualiza a previsão a cada 15 minutos; a reconexão Wi-Fi é verificada a cada minuto.
+**Componentes do build do clima:** PlatformIO Core 6.x, plataforma pioarduino ESP32-S3, Arduino-ESP32 3.x, LVGL 9.x, GFX Library for Arduino, ArduinoJson e JPEGDEC; as versões efetivamente resolvidas ficam registradas no log do PlatformIO. O aplicativo consulta o Open-Meteo sem chave, sincroniza hora via NTP e aplica o retry descrito acima; a reconexão Wi-Fi é verificada a cada minuto. O gráfico financeiro inclui a cotação atual ao final da série quando a API não fornece uma vela recente.
+
+O ciclo automático financeiro chama o endpoint Yahoo Spark uma vez a cada quatro minutos para USD/BRL (`USDBRL=X`), EUR/BRL (`EURBRL=X`) e BTC/USD (`BTC-USD`). Respostas incompletas mantêm os últimos dados válidos e usam retry crescente até 16 minutos, respeitando `Retry-After`. Tocar em qualquer ponto de um cartão faz uma consulta individual daquele ativo; o cartão não ganha aparência de botão. Ao reconectar o Wi-Fi, o app consulta os três novamente.

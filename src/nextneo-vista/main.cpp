@@ -33,9 +33,12 @@ Config cfg;
 Preferences prefs;
 WebServer configServer(80);
 bool configServerStarted = false;
-static uint32_t financeRetryAfterMs = 0;
+static uint32_t financeRetryAfterMs[3] = {0, 0, 0};
 static constexpr uint32_t FINANCE_REFRESH_MS = 240000UL;
 static constexpr uint32_t FINANCE_MAX_BACKOFF_MS = 16UL * 60 * 1000;
+static constexpr uint32_t FINANCE_RETRY_MS = 120000UL;
+static constexpr uint32_t WEATHER_REFRESH_MS = 15UL * 60 * 1000;
+static constexpr uint32_t WEATHER_RETRY_MS = 60UL * 1000;
 
 // ---------------------------------------------------------------- helpers
 const char *weatherText(int c) {
@@ -56,7 +59,7 @@ bool isRainCode(int c) {
   return (c >= 51 && c <= 67) || (c >= 80 && c <= 82) || c >= 95;
 }
 
-static bool fetchYahoo(const char *symbol, float &price, float &changePct, float &previousClose, uint32_t &quoteEpoch, float *series, uint8_t &count) {
+static bool fetchYahoo(const char *symbol, float &price, float &changePct, float &previousClose, uint32_t &quoteEpoch, float *series, uint8_t &count, uint32_t &retryAfterMs) {
   String url = String("https://query1.finance.yahoo.com/v8/finance/chart/") + symbol + "?range=1d&interval=5m&nocache=" + String(millis());
   String body;
   int status = 0;
@@ -72,7 +75,7 @@ static bool fetchYahoo(const char *symbol, float &price, float &changePct, float
     body = status == HTTP_CODE_OK ? http.getString() : "";
     if (status == HTTP_CODE_TOO_MANY_REQUESTS) {
       uint32_t retrySeconds = (uint32_t)http.header("Retry-After").toInt();
-      if (retrySeconds) financeRetryAfterMs = max(financeRetryAfterMs, min(retrySeconds, FINANCE_MAX_BACKOFF_MS / 1000UL) * 1000UL);
+      if (retrySeconds) retryAfterMs = max(retryAfterMs, min(retrySeconds, FINANCE_MAX_BACKOFF_MS / 1000UL) * 1000UL);
     }
     http.end();
     if (status == HTTP_CODE_OK && !body.isEmpty()) break;
@@ -100,29 +103,110 @@ static bool fetchYahoo(const char *symbol, float &price, float &changePct, float
   if (!isfinite(pct) && prev > 0) pct = (p - prev) * 100.0f / prev;
   if (!isfinite(pct)) pct = 0;
   JsonArray close=doc["chart"]["result"][0]["indicators"]["quote"][0]["close"].as<JsonArray>();
-  uint8_t n=0; for(JsonVariant v:close){float x=v|0.0f;if(x>0){if(n<24)series[n++]=x;else {for(int k=1;k<24;k++)series[k-1]=series[k];series[23]=x;}}}
+  uint8_t n=0;
+  for(JsonVariant v:close){
+    float x=v|0.0f;
+    if(x>0){if(n<24)series[n++]=x;else {for(int k=1;k<24;k++)series[k-1]=series[k];series[23]=x;}}
+  }
+  // Yahoo may stop returning intraday candles before the current quote time
+  // (for example outside FX trading hours). Append its current market quote so
+  // the plotted line does not visually stop at the last historical candle.
+  if (n == 0 || fabsf(series[n - 1] - p) > 0.0001f) {
+    if (n < 24) series[n++] = p;
+    else { for (int k = 1; k < 24; k++) series[k - 1] = series[k]; series[23] = p; }
+  }
   price=p;changePct=pct;previousClose=prev;quoteEpoch=quoteTime;count=n;return true;
 }
 
-static uint8_t doFinance() {
+static bool fetchYahooSpark(bool ok[3], float price[3], float changePct[3], float previousClose[3], uint32_t quoteEpoch[3], float series[3][24], uint8_t count[3]) {
+  const char *symbols[] = {"USDBRL=X", "EURBRL=X", "BTC-USD"};
+  String url = "https://query1.finance.yahoo.com/v7/finance/spark?symbols=EURBRL=X,USDBRL=X,BTC-USD&range=1d&interval=5m";
+  String body;
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    WiFiClientSecure client; client.setInsecure(); HTTPClient http; http.setTimeout(15000);
+    if (!http.begin(client, url)) return false;
+    const char *headers[] = {"Retry-After"};
+    http.collectHeaders(headers, 1);
+    http.addHeader("Cache-Control", "no-cache, no-store, max-age=0");
+    http.addHeader("Pragma", "no-cache");
+    http.addHeader("User-Agent", "Mozilla/5.0");
+    int status = http.GET();
+    body = status == HTTP_CODE_OK ? http.getString() : "";
+    uint32_t retrySeconds = status == HTTP_CODE_TOO_MANY_REQUESTS ? (uint32_t)http.header("Retry-After").toInt() : 0;
+    http.end();
+    if (status == HTTP_CODE_OK && !body.isEmpty()) break;
+    Serial.printf("Finance spark HTTP %d (tentativa %d/2)\n", status, attempt + 1);
+    if (retrySeconds) for (int i=0; i<3; ++i) financeRetryAfterMs[i] = max(financeRetryAfterMs[i], min(retrySeconds, FINANCE_MAX_BACKOFF_MS / 1000UL) * 1000UL);
+    if (attempt == 0 && (status <= 0 || status >= HTTP_CODE_INTERNAL_SERVER_ERROR)) { vTaskDelay(pdMS_TO_TICKS(500)); continue; }
+    return false;
+  }
+  if (body.isEmpty()) return false;
+  JsonDocument doc;
+  if (deserializeJson(doc, body)) { Serial.println("Finance spark: resposta JSON inválida"); return false; }
+  JsonArray result = doc["spark"]["result"].as<JsonArray>();
+  for (JsonVariant item : result) {
+    String symbol = item["symbol"] | "";
+    int index = symbol == "USDBRL=X" ? 0 : symbol == "EURBRL=X" ? 1 : symbol == "BTC-USD" ? 2 : -1;
+    if (index < 0) continue;
+    JsonVariant response = item["response"][0];
+    JsonObject meta = response["meta"].as<JsonObject>();
+    float p = meta["regularMarketPrice"] | 0.0f;
+    float prev = meta["previousClose"] | (meta["chartPreviousClose"] | 0.0f);
+    float pct = meta["regularMarketChangePercent"] | NAN;
+    if (p <= 0 || !isfinite(p)) continue;
+    if (!isfinite(pct) && prev > 0) pct = (p - prev) * 100.0f / prev;
+    if (!isfinite(pct)) pct = 0;
+    JsonArray close = response["indicators"]["quote"][0]["close"].as<JsonArray>();
+    for (JsonVariant v : close) {
+      float x = v | 0.0f;
+      if (x > 0) { if (count[index] < 24) series[index][count[index]++] = x; else { for (int k=1; k<24; ++k) series[index][k-1] = series[index][k]; series[index][23] = x; } }
+    }
+    if (count[index] == 0 || fabsf(series[index][count[index]-1] - p) > 0.0001f) {
+      if (count[index] < 24) series[index][count[index]++] = p;
+      else { for (int k=1; k<24; ++k) series[index][k-1] = series[index][k]; series[index][23] = p; }
+    }
+    price[index] = p; previousClose[index] = prev; changePct[index] = pct;
+    quoteEpoch[index] = meta["regularMarketTime"] | 0U;
+    ok[index] = true;
+  }
+  for (int i=0; i<3; ++i) if (!ok[i]) Serial.printf("Finance spark: símbolo %s ausente/sem cotação\n", symbols[i]);
+  return true;
+}
+
+static void doFinance(const bool requested[3], bool results[3]) {
+  memset(results, 0, sizeof(bool) * 3);
   if (WiFi.status() != WL_CONNECTED) {
     xSemaphoreTake(mtx, portMAX_DELAY);
     sh.financeRefreshing = false;
     sh.financeSuccessCount = 0;
     sh.financeVersion++;
     xSemaphoreGive(mtx);
-    return 0;
+    return;
   }
   xSemaphoreTake(mtx, portMAX_DELAY);
   sh.financeRefreshing = true;
   xSemaphoreGive(mtx);
   const char *symbols[] = {"BRL=X", "EURBRL=X", "BTC-USD"};
-  uint8_t successes = 0;
+  bool anySuccess = false;
+  bool allRequested = requested[0] && requested[1] && requested[2];
+  bool sparkOk[3] = {false, false, false};
+  float sparkPrice[3] = {0}, sparkChange[3] = {0}, sparkPrevious[3] = {0}, sparkSeries[3][24] = {};
+  uint32_t sparkEpoch[3] = {0};
+  uint8_t sparkCount[3] = {0};
+  bool sparkRequestOk = allRequested && fetchYahooSpark(sparkOk, sparkPrice, sparkChange, sparkPrevious, sparkEpoch, sparkSeries, sparkCount);
   for (int i=0; i<3; ++i) {
-    float v=0,pct=0,prev=0,points[24]={0};uint32_t quoteEpoch=0;uint8_t n=0;bool ok=fetchYahoo(symbols[i],v,pct,prev,quoteEpoch,points,n);
+    if (!requested[i]) continue;
+    float v=0,pct=0,prev=0,points[24]={0};uint32_t quoteEpoch=0;uint8_t n=0;
+    bool ok = allRequested ? (sparkRequestOk && sparkOk[i])
+                           : fetchYahoo(symbols[i],v,pct,prev,quoteEpoch,points,n,financeRetryAfterMs[i]);
+    if (allRequested && ok) { v=sparkPrice[i]; pct=sparkChange[i]; prev=sparkPrevious[i]; quoteEpoch=sparkEpoch[i]; n=sparkCount[i]; memcpy(points,sparkSeries[i],sizeof points); }
+    results[i] = ok;
     xSemaphoreTake(mtx, portMAX_DELAY);
+    sh.financeApiKnown[i] = true;
+    sh.financeApiOk[i] = ok;
     if(ok){
-      successes++;
+      anySuccess = true;
+      financeRetryAfterMs[i] = 0;
       sh.previousFinance[i]=prev;sh.financeChange[i]=pct;sh.haveChange[i]=fabsf(pct)>0.0001f;sh.finance[i]=v;sh.haveFinance[i]=true;
       sh.financeQuoteEpoch[i]=quoteEpoch;
       // When Yahoo omits intraday candles (often outside active FX hours), keep the
@@ -138,11 +222,14 @@ static uint8_t doFinance() {
   }
   xSemaphoreTake(mtx, portMAX_DELAY);
   sh.financeRefreshing = false;
-  sh.financeSuccessCount = successes;
-  if (successes) sh.financeLastSuccessMs = millis();
+  uint8_t totalSuccesses = 0;
+  for (int i=0; i<3; ++i) {
+    if (sh.financeApiKnown[i] && sh.financeApiOk[i]) totalSuccesses++;
+  }
+  sh.financeSuccessCount = totalSuccesses;
+  if (anySuccess) sh.financeLastSuccessMs = millis();
   sh.financeVersion++;
   xSemaphoreGive(mtx);
-  return successes;
 }
 
 static String urlEncode(const String &s) {
@@ -163,25 +250,48 @@ static void setStatus(const String &s) {
   xSemaphoreGive(mtx);
 }
 
-static bool httpGetJson(const String &url, JsonDocument &doc) {
-  WiFiClientSecure client;
-  client.setInsecure();  // public read-only weather data; no secrets are sent
-  HTTPClient http;
-  http.setTimeout(10000);
-  if (!http.begin(client, url)) return false;
-  int code = http.GET();
-  bool ok = false;
-  if (code == 200) ok = !deserializeJson(doc, http.getString());
-  else Serial.printf("HTTP %d for %s\n", code, url.c_str());
-  http.end();
-  return ok;
+static bool httpGetJson(const String &url, JsonDocument &doc, String &error) {
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    WiFiClientSecure client;
+    client.setInsecure();  // public read-only weather data; no secrets are sent
+    HTTPClient http;
+    http.setTimeout(10000);
+    if (!http.begin(client, url)) {
+      error = "falha ao iniciar HTTPS";
+      Serial.printf("Weather: %s\n", error.c_str());
+      return false;
+    }
+    int code = http.GET();
+    if (code == HTTP_CODE_OK) {
+      String body = http.getString();
+      http.end();
+      DeserializationError jsonError = deserializeJson(doc, body);
+      if (!jsonError) return true;
+      error = String("JSON inválido: ") + jsonError.c_str();
+      Serial.printf("Weather: %s\n", error.c_str());
+      return false;
+    }
+
+    error = code <= 0 ? String("erro de conexão: ") + HTTPClient::errorToString(code)
+                      : String("HTTP ") + code;
+    Serial.printf("Weather: %s (tentativa %d/2)\n", error.c_str(), attempt + 1);
+    http.end();
+    // Retry only transient transport/server errors; client errors such as 429
+    // are handled by the worker's slower retry schedule.
+    if (attempt == 0 && (code <= 0 || code >= HTTP_CODE_INTERNAL_SERVER_ERROR)) {
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
+    return false;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------- worker task
 static void applyTime() { configTime(cfg.utcOffset, 0, "pool.ntp.org", "time.google.com"); }
 
-static void doWeather() {
-  if (WiFi.status() != WL_CONNECTED) return;
+static bool doWeather() {
+  if (WiFi.status() != WL_CONNECTED) return false;
   String url = "https://api.open-meteo.com/v1/forecast?latitude=" + String(cfg.lat, 4) +
                "&longitude=" + String(cfg.lon, 4) +
                "&current=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m"
@@ -189,7 +299,28 @@ static void doWeather() {
                "&daily=weather_code,temperature_2m_max,temperature_2m_min"
                "&timezone=auto&forecast_days=7&forecast_hours=24";
   JsonDocument doc;
-  if (!httpGetJson(url, doc)) { setStatus("Falha ao atualizar a previsão"); return; }
+  String error;
+  if (!httpGetJson(url, doc, error)) {
+    setStatus(String("Falha clima: ") + error);
+    return false;
+  }
+  JsonArray hourlyTimes = doc["hourly"]["time"].as<JsonArray>();
+  JsonArray hourlyTemps = doc["hourly"]["temperature_2m"].as<JsonArray>();
+  JsonArray hourlyCodes = doc["hourly"]["weather_code"].as<JsonArray>();
+  JsonArray hourlyRain = doc["hourly"]["precipitation_probability"].as<JsonArray>();
+  JsonArray dailyTimes = doc["daily"]["time"].as<JsonArray>();
+  JsonArray dailyMax = doc["daily"]["temperature_2m_max"].as<JsonArray>();
+  JsonArray dailyMin = doc["daily"]["temperature_2m_min"].as<JsonArray>();
+  JsonArray dailyCodes = doc["daily"]["weather_code"].as<JsonArray>();
+  if (doc["current"]["temperature_2m"].isNull() || hourlyTimes.isNull() ||
+      hourlyTimes.size() == 0 || hourlyTemps.size() != hourlyTimes.size() ||
+      hourlyCodes.size() != hourlyTimes.size() || hourlyRain.size() != hourlyTimes.size() ||
+      dailyTimes.isNull() || dailyTimes.size() < 7 || dailyMax.size() < 7 ||
+      dailyMin.size() < 7 || dailyCodes.size() < 7) {
+    setStatus("Falha clima: resposta incompleta da API");
+    Serial.println("Weather: resposta incompleta da API");
+    return false;
+  }
 
   int off = doc["utc_offset_seconds"] | cfg.utcOffset;
   if (off != cfg.utcOffset) {
@@ -203,10 +334,9 @@ static void doWeather() {
   sh.humidity = doc["current"]["relative_humidity_2m"] | 0;
   sh.wind = doc["current"]["wind_speed_10m"] | 0.0f;
   sh.hourCount = 0;
-  JsonArray times = doc["hourly"]["time"].as<JsonArray>();
-  JsonArray hourlyTemp = doc["hourly"]["temperature_2m"].as<JsonArray>();
-  JsonArray hourlyCode = doc["hourly"]["weather_code"].as<JsonArray>();
-  JsonArray hourlyRain = doc["hourly"]["precipitation_probability"].as<JsonArray>();
+  JsonArray times = hourlyTimes;
+  JsonArray hourlyTemp = hourlyTemps;
+  JsonArray hourlyCode = hourlyCodes;
   String currentHour = String(doc["current"]["time"] | "");
   currentHour = currentHour.substring(0, 13);
   int first = 0;
@@ -244,13 +374,14 @@ static void doWeather() {
   sh.haveWeather = true;
   sh.status = "Previsão atualizada";
   xSemaphoreGive(mtx);
+  return true;
 }
 
-static void doGeocode() {
+static bool doGeocode() {
   xSemaphoreTake(mtx, portMAX_DELAY);
   String city = sh.pendingCity;
   xSemaphoreGive(mtx);
-  if (city.isEmpty() || WiFi.status() != WL_CONNECTED) { setStatus("Conecte ao Wi-Fi primeiro"); return; }
+  if (city.isEmpty() || WiFi.status() != WL_CONNECTED) { setStatus("Conecte ao Wi-Fi primeiro"); return false; }
   String countryCode;
   int comma = city.lastIndexOf(',');
   if (comma >= 0) {
@@ -263,10 +394,14 @@ static void doGeocode() {
   String lookup = "https://geocoding-api.open-meteo.com/v1/search?count=1&name=" + urlEncode(city);
   if (countryCode.length() == 2) lookup += "&countryCode=" + countryCode;
   JsonDocument doc;
-  if (!httpGetJson(lookup, doc) ||
-      doc["results"].isNull()) {
+  String error;
+  if (!httpGetJson(lookup, doc, error)) {
+    setStatus(String("Falha geocodificação: ") + error);
+    return false;
+  }
+  if (doc["results"].isNull()) {
     setStatus("Cidade não encontrada");
-    return;
+    return false;
   }
   cfg.lat = doc["results"][0]["latitude"] | cfg.lat;
   cfg.lon = doc["results"][0]["longitude"] | cfg.lon;
@@ -279,7 +414,7 @@ static void doGeocode() {
   xSemaphoreTake(mtx, portMAX_DELAY);
   sh.cityName = name;
   xSemaphoreGive(mtx);
-  doWeather();
+  return true;
 }
 
 static void doScan() {
@@ -314,7 +449,6 @@ static void doConnect() {
     prefs.putString("pass", pass);
     setStatus("Conectado: " + WiFi.localIP().toString());
     applyTime();
-    doWeather();
   } else {
     setStatus("Falha ao conectar (verifique a senha)");
   }
@@ -322,39 +456,82 @@ static void doConnect() {
 
 static void workerTask(void *) {
   uint32_t lastWeather = 0;
-  uint32_t lastFinance = 0;
-  uint32_t financeIntervalMs = FINANCE_REFRESH_MS;
-  uint8_t financeFailureStreak = 0;
+  uint32_t weatherIntervalMs = WEATHER_REFRESH_MS;
+  uint8_t weatherFailureStreak = 0;
+  uint32_t lastFinance[3] = {0, 0, 0};
+  uint32_t financeIntervalMs[3] = {FINANCE_REFRESH_MS, FINANCE_REFRESH_MS, FINANCE_REFRESH_MS};
+  uint8_t financeFailureStreak[3] = {0, 0, 0};
   uint32_t lastReconnectCheck = millis();
   uint32_t reconnectStarted = 0;
   bool first = true;
+  bool wasConnected = false;
+  auto refreshWeather = [&]() {
+    bool success = doWeather();
+    lastWeather = millis();
+    if (success) {
+      weatherIntervalMs = WEATHER_REFRESH_MS;
+      weatherFailureStreak = 0;
+    } else {
+      uint8_t shift = min(weatherFailureStreak, (uint8_t)4);
+      weatherIntervalMs = min(WEATHER_RETRY_MS << shift, WEATHER_REFRESH_MS);
+      if (weatherFailureStreak < 5) weatherFailureStreak++;
+    }
+  };
+  auto refreshFinance = [&](const bool requested[3]) {
+    bool results[3] = {false, false, false};
+    doFinance(requested, results);
+    for (int i=0; i<3; ++i) {
+      if (!requested[i]) continue;
+      lastFinance[i] = millis();
+      if (results[i]) {
+        financeIntervalMs[i] = FINANCE_REFRESH_MS;
+        financeFailureStreak[i] = 0;
+        financeRetryAfterMs[i] = 0;
+      } else {
+        uint8_t shift = min(financeFailureStreak[i], (uint8_t)3);
+        uint32_t retry = min(FINANCE_RETRY_MS << shift, FINANCE_MAX_BACKOFF_MS);
+        financeFailureStreak[i]++;
+        financeIntervalMs[i] = max(retry, financeRetryAfterMs[i]);
+        financeRetryAfterMs[i] = 0;
+      }
+    }
+  };
   for (;;) {
     int cmd;
     if (xQueueReceive(cmdQ, &cmd, pdMS_TO_TICKS(1000)) == pdTRUE) {
       switch (cmd) {
         case CMD_SCAN: doScan(); break;
-        case CMD_CONNECT: doConnect(); lastWeather = millis(); break;
-        case CMD_GEOCODE: doGeocode(); lastWeather = millis(); break;
-        case CMD_WEATHER: doWeather(); lastWeather = millis(); break;
+        case CMD_CONNECT:
+          doConnect();
+          if (WiFi.status() == WL_CONNECTED) refreshWeather();
+          else lastWeather = 0;
+          break;
+        case CMD_GEOCODE:
+          if (doGeocode()) refreshWeather();
+          break;
+        case CMD_WEATHER: refreshWeather(); break;
         case CMD_FINANCE: {
-          uint8_t successes = doFinance();
-          if (WiFi.status() == WL_CONNECTED) {
-            lastFinance = millis();
-            if (successes == 3) { financeIntervalMs = FINANCE_REFRESH_MS; financeFailureStreak = 0; financeRetryAfterMs = 0; }
-            else {
-              uint8_t shift = min(financeFailureStreak, (uint8_t)2);
-              uint32_t backoff = min(FINANCE_REFRESH_MS << shift, FINANCE_MAX_BACKOFF_MS);
-              financeFailureStreak++;
-              financeIntervalMs = max(backoff, financeRetryAfterMs);
-              financeRetryAfterMs = 0;
-            }
-          } else lastFinance = 0;
+          const bool all[3] = {true, true, true};
+          refreshFinance(all);
           break;
         }
+        case CMD_FINANCE_USD: { const bool one[3] = {true, false, false}; refreshFinance(one); break; }
+        case CMD_FINANCE_EUR: { const bool one[3] = {false, true, false}; refreshFinance(one); break; }
+        case CMD_FINANCE_BTC: { const bool one[3] = {false, false, true}; refreshFinance(one); break; }
       }
     }
     bool up = WiFi.status() == WL_CONNECTED;
     uint32_t now = millis();
+    if (!up) {
+      lastWeather = 0;
+      for (int i=0; i<3; ++i) lastFinance[i] = 0;
+    } else if (!wasConnected) {
+      // Fetch fresh data immediately after Wi-Fi returns, even if the previous
+      // scheduled interval had not elapsed when connectivity was lost.
+      lastWeather = 0;
+      for (int i=0; i<3; ++i) lastFinance[i] = 0;
+    }
+    wasConnected = up;
     if (up) {
       reconnectStarted = 0;
     } else if (now - lastReconnectCheck >= 60000UL) {
@@ -373,22 +550,21 @@ static void workerTask(void *) {
     xSemaphoreTake(mtx, portMAX_DELAY);
     sh.wifiUp = up;
     xSemaphoreGive(mtx);
-    if (up && (first || millis() - lastWeather > 15UL * 60 * 1000)) {
+    if (up && (first || lastWeather == 0 || millis() - lastWeather >= weatherIntervalMs)) {
       if (first) { applyTime(); setStatus("Conectado: " + WiFi.localIP().toString()); }
       first = false;
-      doWeather();
-      lastWeather = millis();
+      refreshWeather();
     }
-    if (up && (lastFinance == 0 || millis() - lastFinance >= financeIntervalMs)) {
-      lastFinance = millis();
-      uint8_t successes = doFinance();
-      if (successes == 3) { financeIntervalMs = FINANCE_REFRESH_MS; financeFailureStreak = 0; financeRetryAfterMs = 0; }
-      else {
-        uint8_t shift = min(financeFailureStreak, (uint8_t)2);
-        uint32_t backoff = min(FINANCE_REFRESH_MS << shift, FINANCE_MAX_BACKOFF_MS);
-        financeFailureStreak++;
-        financeIntervalMs = max(backoff, financeRetryAfterMs);
-        financeRetryAfterMs = 0;
+    if (up) {
+      bool due[3] = {false, false, false};
+      bool anyDue = false;
+      for (int i=0; i<3; ++i) {
+        due[i] = lastFinance[i] == 0 || millis() - lastFinance[i] >= financeIntervalMs[i];
+        anyDue |= due[i];
+      }
+      if (anyDue) {
+        const bool all[3] = {true, true, true};
+        refreshFinance(all);
       }
     }
   }

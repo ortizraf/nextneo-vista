@@ -41,6 +41,8 @@ struct Shared {
   bool haveFinance[3] = {false, false, false};
   bool financeRefreshing = false;
   uint8_t financeSuccessCount = 0;
+  bool financeApiKnown[3] = {false, false, false};
+  bool financeApiOk[3] = {false, false, false};
   uint32_t financeLastSuccessMs = 0;
   uint32_t financeVersion = 0;
   uint32_t financeQuoteEpoch[3] = {0,0,0};
@@ -60,7 +62,7 @@ extern SemaphoreHandle_t mtx;
 extern Preferences prefs;
 extern QueueHandle_t cmdQ;
 
-enum Cmd { CMD_SCAN, CMD_CONNECT, CMD_GEOCODE, CMD_WEATHER, CMD_FINANCE };
+enum Cmd { CMD_SCAN, CMD_CONNECT, CMD_GEOCODE, CMD_WEATHER, CMD_FINANCE, CMD_FINANCE_USD, CMD_FINANCE_EUR, CMD_FINANCE_BTC };
 
 extern lv_obj_t *mainMenu, *weatherView, *settingsView, *weatherTabs, *financeView, *calendarView;
 extern lv_obj_t *lblClock, *lblDate, *lblCity, *lblTemp, *lblCond, *lblStatus, *lblWifiDot;
