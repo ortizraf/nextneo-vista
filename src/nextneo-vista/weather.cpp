@@ -3,6 +3,14 @@
 static int renderedCode = -999;
 static int renderedHourCodes[8] = {-999,-999,-999,-999,-999,-999,-999,-999};
 static int renderedDayCodes[7] = {-999,-999,-999,-999,-999,-999,-999};
+static uint32_t renderedWeatherVersion = UINT32_MAX;
+static int renderedWifiState = -1;
+
+// On-Enter: force one full repaint from the cached forecast.
+void weatherOnEnter() {
+  renderedWeatherVersion = UINT32_MAX;
+  renderedWifiState = -1;
+}
 
 static lv_obj_t *makeWeatherIcon(lv_obj_t *parent, int x, int y, int size, int code) {
   lv_obj_t *icon = lv_obj_create(parent);
@@ -235,9 +243,12 @@ void buildWeatherScreen(lv_obj_t *scr) {
 
 }
 
+// UI thread, active Weather screen only. Widgets are rewritten only when the
+// forecast changed (version) or the Wi-Fi state changed.
 void updateWeatherScreen() {
   String city;
   bool up, have;
+  uint32_t version;
   float temp, wind, mx[7], mn[7], htemp[8];
   int code, humidity, hourCount, hcode[8], hrain[8], dc[7];
   char hours[8][6], dn[7][6];
@@ -258,7 +269,11 @@ void updateWeatherScreen() {
   memcpy(mx, sh.tmax, sizeof mx);
   memcpy(mn, sh.tmin, sizeof mn);
   memcpy(dc, sh.dcode, sizeof dc);
+  version = sh.weatherVersion;
   xSemaphoreGive(mtx);
+  if (version == renderedWeatherVersion && renderedWifiState == (int)up) return;
+  renderedWeatherVersion = version;
+  renderedWifiState = up;
   lv_label_set_text(lblCity, city.c_str());
   if (have) {
     lv_label_set_text_fmt(lblTemp, "%.0f°C", temp);

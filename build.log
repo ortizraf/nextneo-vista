@@ -1,0 +1,433 @@
+Processing weather-clock (platform: https://github.com/pioarduino/platform-espressif32/releases/download/stable/platform-espressif32.zip; board: esp32-s3-devkitc-1; framework: arduino)
+--------------------------------------------------------------------------------
+Verbose mode can be enabled via `-v, --verbose` option
+CONFIGURATION: https://docs.platformio.org/page/boards/espressif32/esp32-s3-devkitc-1.html
+PLATFORM: Espressif 32 (55.3.312) > Espressif ESP32-S3-DevKitC-1-N8 (8 MB QD, No PSRAM)
+HARDWARE: ESP32S3 240MHz, 320KB RAM, 8MB Flash
+DEBUG: Current (esp-builtin) On-board (esp-builtin) External (cmsis-dap, esp-bridge, esp-prog, esp-prog-2, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa)
+PACKAGES: 
+ - contrib-piohome @ 3.4.4 
+ - framework-arduinoespressif32 @ 3.3.12 
+ - framework-arduinoespressif32-libs @ 5.5.5+sha.b774170ff46 
+ - tool-esptoolpy @ 5.4.0 
+ - tool-xtensa-esp-elf-gdb @ 17.1.0+20260402 
+ - toolchain-xtensa-esp-elf @ 14.2.0+20260121
+LDF: Library Dependency Finder -> https://bit.ly/configure-pio-ldf
+LDF Modes: Finder ~ chain, Compatibility ~ soft
+Found 49 compatible libraries
+Scanning dependencies...
+Dependency Graph
+|-- GFX Library for Arduino @ 1.6.9
+|-- lvgl @ 9.6.0
+|-- ArduinoJson @ 7.4.3
+|-- JPEGDEC @ 1.8.5
+|-- WiFi @ 3.3.12
+|-- HTTPClient @ 3.3.12
+|-- Preferences @ 3.3.12
+|-- WebServer @ 3.3.12
+|-- NetworkClientSecure @ 3.3.12
+|-- Wire @ 3.3.12
+|-- FS @ 3.3.12
+|-- SPI @ 3.3.12
+Building in release mode
+Compiling .pio/build/weather-clock/src/src/nextneo-vista/modules/flight_radar/flight_radar.cpp.o
+In file included from .pio/libdeps/weather-clock/lvgl/include/lvgl/3d/lv_3dmath.h:17,
+                 from .pio/libdeps/weather-clock/lvgl/include/lvgl/lvgl.h:5,
+                 from .pio/libdeps/weather-clock/lvgl/lvgl.h:1,
+                 from src/nextneo-vista/modules/flight_radar/flight_radar.h:2,
+                 from src/nextneo-vista/modules/flight_radar/flight_radar.cpp:16:
+.pio/libdeps/weather-clock/lvgl/include/lvgl/3d/../config/lv_conf_internal.h:166:6: warning: #warning LV_COLOR_DEPTH is deprecated and will be removed in a future release. Define LV_COLOR_FORMAT_DEFAULT instead [-Wcpp]
+  166 |     #warning LV_COLOR_DEPTH is deprecated and will be removed in a future release. Define LV_COLOR_FORMAT_DEFAULT instead
+      |      ^~~~~~~
+Compiling .pio/build/weather-clock/FrameworkArduino/USBHost.cpp.o
+Compiling .pio/build/weather-clock/FrameworkArduino/USBMSC.cpp.o
+Compiling .pio/build/weather-clock/FrameworkArduino/WMath.cpp.o
+Compiling .pio/build/weather-clock/FrameworkArduino/WString.cpp.o
+Compiling .pio/build/weather-clock/FrameworkArduino/base64.cpp.o
+Compiling .pio/build/weather-clock/FrameworkArduino/cbuf.cpp.o
+Compiling .pio/build/weather-clock/FrameworkArduino/chip-debug-report.cpp.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-adc.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-bt.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-cpu.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-dac.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-gpio.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-hosted.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-i2c-ng.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-i2c-slave.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-i2c.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-ldo.c.o
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp: In function 'lv_obj_t* {anonymous}::makeBox(lv_obj_t*, int, int, uint32_t, lv_opa_t, int)':
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:225:21: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  225 |   lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+      |   ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from .pio/libdeps/weather-clock/lvgl/include/lvgl/lvgl.h:21:
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:226:21: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  226 |   lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
+      |   ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp: In function 'lv_obj_t* {anonymous}::makePill(lv_obj_t*, int, int, int, lv_event_cb_t)':
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:237:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  237 |     lv_obj_add_flag(pill, LV_OBJ_FLAG_CLICKABLE);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp: In function 'lv_obj_t* {anonymous}::makeText(lv_obj_t*, const char*, const lv_font_t*, uint32_t)':
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:247:21: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  247 |   lv_obj_remove_flag(label, LV_OBJ_FLAG_CLICKABLE);
+      |   ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp: In function 'void {anonymous}::placeTrail(const FlightRadarSnapshot&, int, int, int)':
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:343:40: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  343 |   if (!t || t->n < 1) { lv_obj_add_flag(trailLine, LV_OBJ_FLAG_HIDDEN); return; }
+      |                         ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:356:21: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  356 |   lv_obj_remove_flag(trailLine, LV_OBJ_FLAG_HIDDEN);
+      |   ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp: In function 'void {anonymous}::placeAircraft(const FlightRadarSnapshot&)':
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:367:43: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  367 |     if (i >= data.count) { lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN); continue; }
+      |                            ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:372:49: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  372 |     if (!insideScope(x, y, 4)) { lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN); continue; }
+      |                                  ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:375:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  375 |     lv_obj_remove_flag(img, LV_OBJ_FLAG_HIDDEN);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:407:25: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  407 |       lv_obj_remove_flag(tag, LV_OBJ_FLAG_HIDDEN);
+      |       ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:411:61: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  411 |   for (uint8_t t = tags; t < TAG_COUNT; ++t) lv_obj_add_flag(tagLabel[t], LV_OBJ_FLAG_HIDDEN);
+      |                                              ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:415:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  415 |     lv_obj_remove_flag(selRing, LV_OBJ_FLAG_HIDDEN);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:418:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  418 |     lv_obj_add_flag(selRing, LV_OBJ_FLAG_HIDDEN);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:419:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  419 |     lv_obj_add_flag(trailLine, LV_OBJ_FLAG_HIDDEN);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp: In function 'void {anonymous}::renderList(const FlightRadarSnapshot&)':
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:438:18: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  438 |   lv_obj_add_flag(detailView, LV_OBJ_FLAG_HIDDEN);
+      |   ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:439:21: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  439 |   lv_obj_remove_flag(listView, LV_OBJ_FLAG_HIDDEN);
+      |   ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:441:56: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  441 |     if (!showList || r >= data.count) { lv_obj_add_flag(listRow[r], LV_OBJ_FLAG_HIDDEN); continue; }
+      |                                         ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:443:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  443 |     lv_obj_remove_flag(listRow[r], LV_OBJ_FLAG_HIDDEN);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:453:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  453 |     lv_obj_add_flag(listEmpty, LV_OBJ_FLAG_HIDDEN);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:456:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  456 |     lv_obj_remove_flag(listEmpty, LV_OBJ_FLAG_HIDDEN);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp: In function 'void {anonymous}::renderDetails(const Aircraft&)':
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:467:18: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  467 |   lv_obj_add_flag(listView, LV_OBJ_FLAG_HIDDEN);
+      |   ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:468:21: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  468 |   lv_obj_remove_flag(detailView, LV_OBJ_FLAG_HIDDEN);
+      |   ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp: In function 'void {anonymous}::renderMap()':
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:534:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  534 |     lv_obj_add_flag(mapImg, LV_OBJ_FLAG_HIDDEN);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:535:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  535 |     lv_obj_add_flag(attribution, LV_OBJ_FLAG_HIDDEN);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:542:21: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  542 |   lv_obj_remove_flag(mapImg, LV_OBJ_FLAG_HIDDEN);
+      |   ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:543:21: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  543 |   lv_obj_remove_flag(attribution, LV_OBJ_FLAG_HIDDEN);
+      |   ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp: In function 'void {anonymous}::mapClickEvent(lv_event_t*)':
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:616:5: warning: '++' expression of 'volatile'-qualified type is deprecated [-Wvolatile]
+  616 |   ++mapVersion;
+      |     ^~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp: In function 'void {anonymous}::buildScope(lv_obj_t*)':
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:640:18: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  640 |   lv_obj_add_flag(scopeFill, LV_OBJ_FLAG_CLICKABLE);
+      |   ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:655:21: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  655 |   lv_obj_remove_flag(mapImg, LV_OBJ_FLAG_CLICKABLE);
+      |   ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:656:18: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  656 |   lv_obj_add_flag(mapImg, LV_OBJ_FLAG_HIDDEN);
+      |   ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:675:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  675 |     lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:677:40: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  677 |     if (!SWEEP_ENABLED) lv_obj_add_flag(arc, LV_OBJ_FLAG_HIDDEN);
+      |                         ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:688:21: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  688 |   lv_obj_remove_flag(sweepLine, LV_OBJ_FLAG_CLICKABLE);
+      |   ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:690:38: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  690 |   if (!SWEEP_ENABLED) lv_obj_add_flag(sweepLine, LV_OBJ_FLAG_HIDDEN);
+      |                       ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:712:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  712 |     lv_obj_remove_flag(line, LV_OBJ_FLAG_CLICKABLE);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:740:21: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  740 |   lv_obj_remove_flag(scale, LV_OBJ_FLAG_CLICKABLE);
+      |   ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:756:21: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  756 |   lv_obj_remove_flag(trailLine, LV_OBJ_FLAG_CLICKABLE);
+      |   ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:757:18: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  757 |   lv_obj_add_flag(trailLine, LV_OBJ_FLAG_HIDDEN);
+      |   ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:761:18: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  761 |   lv_obj_add_flag(selRing, LV_OBJ_FLAG_HIDDEN);
+      |   ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:771:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  771 |     lv_obj_add_flag(img, LV_OBJ_FLAG_CLICKABLE);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:774:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  774 |     lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:785:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  785 |     lv_obj_add_flag(tag, LV_OBJ_FLAG_HIDDEN);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:803:18: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  803 |   lv_obj_add_flag(attribution, LV_OBJ_FLAG_HIDDEN);
+      |   ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp: In function 'void {anonymous}::buildPanel(lv_obj_t*)':
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:837:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  837 |     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:848:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  848 |     lv_obj_add_flag(row, LV_OBJ_FLAG_HIDDEN);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:855:18: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  855 |   lv_obj_add_flag(detailView, LV_OBJ_FLAG_HIDDEN);
+      |   ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp: In function 'void maybeFetchMap(double, double, float)':
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:928:5: warning: '++' expression of 'volatile'-qualified type is deprecated [-Wvolatile]
+  928 |   ++mapVersion;
+      |     ^~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp: In function 'bool setFlightRadarAirportCode(const char*)':
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:1042:5: warning: '++' expression of 'volatile'-qualified type is deprecated [-Wvolatile]
+ 1042 |   ++mapVersion;
+      |     ^~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp: In function 'bool setFlightRadarRadiusKm(uint8_t)':
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:1060:5: warning: '++' expression of 'volatile'-qualified type is deprecated [-Wvolatile]
+ 1060 |   ++mapVersion;
+      |     ^~~~~~~~~~
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp: In function 'void buildFlightRadarScreen(lv_obj_t*)':
+src/nextneo-vista/modules/flight_radar/flight_radar.cpp:1088:21: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+ 1088 |   lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+      |   ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.pio/libdeps/weather-clock/lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-ledc.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-log-wrapper.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-matrix.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-misc.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-periman.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-psram.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-rgb-led.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-rmt.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-sigmadelta.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-spi.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-time.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-timer.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-tinyusb.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-touch-ng.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-touch.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/esp32-hal-uart.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/firmware_msc_fat.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/freertos_stats.cpp.o
+Compiling .pio/build/weather-clock/FrameworkArduino/idf_openthread_mpool_wrapper.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/libb64/cdecode.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/libb64/cencode.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/main.cpp.o
+Compiling .pio/build/weather-clock/FrameworkArduino/stdlib_noniso.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/wiring_pulse.c.o
+Compiling .pio/build/weather-clock/FrameworkArduino/wiring_shift.c.o
+Archiving .pio/build/weather-clock/libFrameworkArduino.a
+Indexing .pio/build/weather-clock/libFrameworkArduino.a
+Linking .pio/build/weather-clock/firmware.elf
+                            Memory Type Usage Summary                             
+┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ Memory Type/Section ┃ Used [bytes] ┃ Used [%] ┃ Remain [bytes] ┃ Total [bytes] ┃
+┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ Flash Code          │      1246648 │          │                │               │
+│    .text            │      1246648 │          │                │               │
+│ Flash Data          │       492516 │          │                │               │
+│    .rodata          │       468848 │          │                │               │
+│    .eh_frame        │        23412 │          │                │               │
+│    .appdesc         │          256 │          │                │               │
+│ DIRAM               │       121574 │    35.57 │         220186 │        341760 │
+│    .text            │        67375 │    19.71 │                │               │
+│    .bss             │        30496 │     8.92 │                │               │
+│    .data            │        23703 │     6.94 │                │               │
+│ IRAM                │        16384 │    100.0 │              0 │         16384 │
+│    .text            │        15356 │    93.73 │                │               │
+│    .vectors         │         1028 │     6.27 │                │               │
+└─────────────────────┴──────────────┴──────────┴────────────────┴───────────────┘
+Total image size: 1846626 bytes (.bin may be padded larger)
+Note: The reported total sizes may be smaller than those in the technical reference manual due to reserved memory and application configuration. The total flash size available for the application is not included by default, as it cannot be reliably determined due to the presence of other data like the bootloader, partition table, and application partition size. The total external RAM size is not included either, because the amount of RAM connected to the chip is detected at boot and is not known during the build.
+Retrieving maximum program size .pio/build/weather-clock/firmware.elf
+Checking size .pio/build/weather-clock/firmware.elf
+Advanced Memory Usage is available via "PlatformIO Home > Project Inspect"
+RAM:   [==        ]  16.5% (used 54200 bytes from 327680 bytes)
+Flash: [=====     ]  54.5% (used 1822958 bytes from 3342336 bytes)
+Building .pio/build/weather-clock/firmware.bin
+esptool v5.4.0
+Creating ESP32-S3 image...
+Merged 3 ELF sections.
+Successfully created ESP32-S3 image.
+Creating binary "firmware.factory.bin" with:
+    Offset   | File
+ -  0x0000   | bootloader.bin
+ -  0x8000   | partitions.bin
+ -  0xe000   | boot_app0.bin
+ -  0x10000  | firmware.bin
+Successfully created combined binary image.
+========================= [SUCCESS] Took 22.31 seconds =========================
+
+Environment    Status    Duration
+-------------  --------  ------------
+weather-clock  SUCCESS   00:00:22.305
+========================= 1 succeeded in 00:00:22.305 =========================

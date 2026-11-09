@@ -1,5 +1,10 @@
 #include "app_screens.h"
+#include "modules/flight_radar/flight_radar.h"
 #include <WiFi.h>
+
+static lv_obj_t *taAirport;
+static lv_obj_t *airportConfigStatus;
+static lv_obj_t *radarRadiusDropdown;
 
 static void ta_event(lv_event_t *e) {
   lv_obj_t *ta = (lv_obj_t *)lv_event_get_target(e);
@@ -22,6 +27,9 @@ static void kb_event(lv_event_t *e) {
     sh.status = "Buscando cidade...";
     xSemaphoreGive(mtx);
     post(CMD_GEOCODE);
+  } else if (c == LV_EVENT_READY && ta == taAirport) {
+    const bool ok = setFlightRadarAirportCode(lv_textarea_get_text(taAirport));
+    lv_label_set_text(airportConfigStatus, ok ? "Aeroporto salvo para o radar." : "Código não reconhecido. Confira o código IATA/ICAO.");
   }
 }
 
@@ -35,6 +43,20 @@ static void connect_event(lv_event_t *) {
   sh.pendingPass = lv_textarea_get_text(taPass);
   xSemaphoreGive(mtx);
   post(CMD_CONNECT);
+}
+
+static void apply_airport_event(lv_event_t *) {
+  const bool ok = setFlightRadarAirportCode(lv_textarea_get_text(taAirport));
+  lv_label_set_text(airportConfigStatus, ok ? "Aeroporto salvo para o radar." : "Código não reconhecido. Confira o código IATA/ICAO.");
+}
+
+static void radar_radius_event(lv_event_t *e) {
+  lv_obj_t *dropdown = (lv_obj_t *)lv_event_get_target(e);
+  static const uint8_t radii[] = {5, 10, 25, 50};
+  const uint32_t selected = lv_dropdown_get_selected(dropdown);
+  const uint8_t radiusKm = radii[selected < 4 ? selected : 1];
+  setFlightRadarRadiusKm(radiusKm);
+  lv_label_set_text_fmt(airportConfigStatus, "Raio salvo: %u km", radiusKm);
 }
 
 static void h24_event(lv_event_t *e) {
@@ -118,6 +140,43 @@ static void build_settings(lv_obj_t *t) {
   lv_obj_set_width(wifiInfoLbl, 430);
   lv_label_set_long_mode(wifiInfoLbl, LV_LABEL_LONG_DOT);
 
+  makeLabel(t, "Aeroporto do radar (IATA/ICAO)", &lv_font_weather_14, 0xFFFFFF);
+  taAirport = lv_textarea_create(t);
+  String airport = prefs.getString("radarAirport", "CGH");
+  lv_textarea_set_text(taAirport, airport.c_str());
+  lv_textarea_set_one_line(taAirport, true);
+  lv_textarea_set_max_length(taAirport, 4);
+  lv_textarea_set_placeholder_text(taAirport, "CGH");
+  lv_obj_set_width(taAirport, 430);
+  lv_obj_set_style_bg_color(taAirport, lv_color_hex(0x17243A), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(taAirport, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_text_color(taAirport, lv_color_hex(0xEAF2FF), LV_PART_MAIN);
+  lv_obj_set_style_border_color(taAirport, lv_color_hex(0x3A506D), LV_PART_MAIN);
+  lv_obj_set_style_border_width(taAirport, 1, LV_PART_MAIN);
+  lv_obj_set_style_radius(taAirport, 12, LV_PART_MAIN);
+  lv_obj_add_event_cb(taAirport, ta_event, LV_EVENT_FOCUSED, NULL);
+  lv_obj_t *bAirport = lv_button_create(t);
+  lv_obj_set_size(bAirport, 430, 40);
+  lv_obj_add_event_cb(bAirport, apply_airport_event, LV_EVENT_CLICKED, NULL);
+  lv_label_set_text(lv_label_create(bAirport), "Aplicar aeroporto");
+  lv_obj_center(lv_obj_get_child(bAirport, 0));
+  airportConfigStatus = makeLabel(t, "Padrão: Congonhas (CGH), raio 10 km", &lv_font_weather_14, 0x8FE0B6);
+  makeLabel(t, "Raio do radar", &lv_font_weather_14, 0xFFFFFF);
+  radarRadiusDropdown = lv_dropdown_create(t);
+  lv_dropdown_set_options(radarRadiusDropdown, "5 km\n10 km (padrão)\n25 km\n50 km");
+  {
+    const uint8_t saved = prefs.getUChar("radarRadiusKm", 10);
+    lv_dropdown_set_selected(radarRadiusDropdown, saved == 5 ? 0 : saved == 25 ? 2 : saved == 50 ? 3 : 1);
+  }
+  lv_obj_set_width(radarRadiusDropdown, 430);
+  lv_obj_set_style_bg_color(radarRadiusDropdown, lv_color_hex(0x17243A), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(radarRadiusDropdown, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_text_color(radarRadiusDropdown, lv_color_hex(0xEAF2FF), LV_PART_MAIN);
+  lv_obj_set_style_border_color(radarRadiusDropdown, lv_color_hex(0x3A506D), LV_PART_MAIN);
+  lv_obj_set_style_border_width(radarRadiusDropdown, 1, LV_PART_MAIN);
+  lv_obj_set_style_radius(radarRadiusDropdown, 12, LV_PART_MAIN);
+  lv_obj_add_event_cb(radarRadiusDropdown, radar_radius_event, LV_EVENT_VALUE_CHANGED, NULL);
+
   makeLabel(t, "Cidade (Enter para aplicar)", &lv_font_weather_14, 0xFFFFFF);
   taCity = lv_textarea_create(t);
   lv_obj_set_width(taCity, 430);
@@ -176,4 +235,18 @@ void buildConfigKeyboard() {
   lv_obj_set_style_pad_gap(kb, 5, 0);
   lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_event_cb(kb, kb_event, LV_EVENT_ALL, NULL);
+}
+
+// Keeps the radar fields in Settings in sync when the airport/radius was
+// changed elsewhere (radar range pill or the web page). UI thread.
+void configSyncRadarUi() {
+  if (!taAirport || !radarRadiusDropdown) return;
+  char code[8];
+  uint8_t radius = 10;
+  getFlightRadarSettings(code, sizeof code, nullptr, 0, radius);
+  const uint32_t index = radius == 5 ? 0 : radius == 25 ? 2 : radius == 50 ? 3 : 1;
+  if (lv_dropdown_get_selected(radarRadiusDropdown) != index && !lv_dropdown_is_open(radarRadiusDropdown))
+    lv_dropdown_set_selected(radarRadiusDropdown, index);
+  if (!lv_obj_has_state(taAirport, LV_STATE_FOCUSED) && strcmp(lv_textarea_get_text(taAirport), code) != 0)
+    lv_textarea_set_text(taAirport, code);
 }
