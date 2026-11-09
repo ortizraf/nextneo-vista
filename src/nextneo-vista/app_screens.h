@@ -40,6 +40,7 @@ struct Shared {
   float wind = 0;
   char dayName[7][6] = {{0}};
   float tmax[7] = {0}, tmin[7] = {0};
+  int dayRain[7] = {0};               // daily precipitation_probability_max (%)
   int dcode[7] = {0};
   // ---- Finance (configurable list of Yahoo Finance symbols, see finance_assets.h)
   FinanceAsset financeAssets[FINANCE_MAX_ASSETS];

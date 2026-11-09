@@ -112,6 +112,74 @@ static void build_home(lv_obj_t *t) {
   lv_obj_align(lblStatus, LV_ALIGN_BOTTOM_RIGHT, 8, -10);
 }
 
+// ---- Forecast tabs (Horas / Dias): same horizontally scrolling cards as
+// before, refined: aligned cards, first card highlighted, rain shown only when
+// relevant, discreet scrollbar and a one-line summary below the cards.
+static lv_obj_t *fcMin[7], *fcRain[7], *fcBarFill[7], *fcCard[7], *hourCard[8];
+static constexpr int FC_BAR_W = 68;
+
+static void styleForecastStrip(lv_obj_t *strip) {
+  lv_obj_set_style_bg_opa(strip, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(strip, 0, 0);
+  lv_obj_set_style_pad_hor(strip, 4, 0);
+  lv_obj_set_style_pad_top(strip, 4, 0);
+  lv_obj_set_style_pad_bottom(strip, 10, 0);          // room for the scrollbar under the cards
+  lv_obj_set_style_pad_column(strip, 8, 0);
+  lv_obj_set_scroll_dir(strip, LV_DIR_HOR);
+  lv_obj_set_flex_flow(strip, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(strip, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+  // Thin, translucent scrollbar instead of the default thick grey bar.
+  lv_obj_set_style_width(strip, 3, LV_PART_SCROLLBAR);
+  lv_obj_set_style_height(strip, 3, LV_PART_SCROLLBAR);
+  lv_obj_set_style_bg_color(strip, lv_color_hex(0xFFFFFF), LV_PART_SCROLLBAR);
+  lv_obj_set_style_bg_opa(strip, LV_OPA_30, LV_PART_SCROLLBAR);
+  lv_obj_set_style_radius(strip, 2, LV_PART_SCROLLBAR);
+  lv_obj_set_style_pad_bottom(strip, 2, LV_PART_SCROLLBAR);
+}
+
+static lv_obj_t *makeForecastCard(lv_obj_t *strip, int h, bool highlight) {
+  lv_obj_t *card = makeCard(strip, 92, h);
+  lv_obj_set_style_bg_opa(card, highlight ? LV_OPA_COVER : LV_OPA_80, 0);
+  lv_obj_set_style_bg_color(card, lv_color_hex(highlight ? 0x2C4566 : 0x243247), 0);
+  lv_obj_set_style_border_width(card, highlight ? 1 : 0, 0);
+  lv_obj_set_style_border_color(card, lv_color_hex(0x5AA9FF), 0);
+  lv_obj_set_style_border_opa(card, LV_OPA_60, 0);
+  lv_obj_remove_flag(card, LV_OBJ_FLAG_CLICKABLE);
+  return card;
+}
+
+static lv_obj_t *centeredLabel(lv_obj_t *parent, const lv_font_t *font, uint32_t color, int y) {
+  lv_obj_t *l = makeLabel(parent, "", font, color);
+  lv_obj_set_width(l, 76);
+  lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(l, LV_LABEL_LONG_CLIP);
+  lv_obj_align(l, LV_ALIGN_TOP_MID, 0, y);
+  return l;
+}
+
+// Rain chance row: drop icon + "30%", centred, in grey.
+extern "C" const lv_image_dsc_t weather_icon_drop;
+static constexpr uint32_t RAIN_COLOR = 0x9AA8BA;
+static lv_obj_t *rainRow(lv_obj_t *card, int y, lv_obj_t **label) {
+  lv_obj_t *row = lv_obj_create(card);
+  lv_obj_set_size(row, 76, 18);
+  lv_obj_align(row, LV_ALIGN_TOP_MID, 0, y);
+  lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(row, 0, 0);
+  lv_obj_set_style_pad_all(row, 0, 0);
+  lv_obj_set_style_pad_column(row, 4, 0);
+  lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(row, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_t *drop = lv_image_create(row);
+  lv_image_set_src(drop, &weather_icon_drop);
+  lv_obj_set_style_image_recolor(drop, lv_color_hex(0x7FB6E8), 0);
+  lv_obj_set_style_image_recolor_opa(drop, LV_OPA_COVER, 0);
+  *label = makeLabel(row, "", &lv_font_weather_14, RAIN_COLOR);
+  return row;
+}
+
 static void build_hours(lv_obj_t *t) {
   lv_obj_set_style_bg_color(t, lv_color_hex(0x111C2E), 0);
   lv_obj_set_style_bg_grad_color(t, lv_color_hex(0x1B2D47), 0);
@@ -120,36 +188,22 @@ static void build_hours(lv_obj_t *t) {
   lv_obj_remove_flag(t, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_t *title = makeLabel(t, "Previsão por hora", &lv_font_weather_20, 0xEAF2FF);
   lv_obj_set_pos(title, 82, 8);
+  lv_obj_t *every = makeLabel(t, "a cada 3 h", &lv_font_weather_14, 0x8FA6C2);
+  lv_obj_align(every, LV_ALIGN_TOP_RIGHT, -16, 13);
 
   lv_obj_t *strip = lv_obj_create(t);
-  lv_obj_set_size(strip, 452, 232);
-  lv_obj_set_pos(strip, 14, 29);
-  lv_obj_set_style_bg_opa(strip, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(strip, 0, 0);
-  lv_obj_set_style_pad_all(strip, 4, 0);
-  lv_obj_set_style_pad_column(strip, 8, 0);
-  lv_obj_set_scroll_dir(strip, LV_DIR_HOR);
-  lv_obj_set_flex_flow(strip, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(strip, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_size(strip, 452, 226);
+  lv_obj_set_pos(strip, 14, 40);
+  styleForecastStrip(strip);
   for (int i = 0; i < 8; i++) {
-    lv_obj_t *card = makeCard(strip, 92, 158);
-    lv_obj_set_style_translate_y(card, -16, 0);
-    lv_obj_set_style_bg_opa(card, LV_OPA_80, 0);
-    hourTime[i] = makeLabel(card, "--", &lv_font_weather_14, 0xAFC0D6);
-    lv_obj_align(hourTime[i], LV_ALIGN_TOP_MID, 0, 5);
-    hourArt[i] = NULL;
+    lv_obj_t *card = hourCard[i] = makeForecastCard(strip, 196, i == 0);
+    hourTime[i] = centeredLabel(card, &lv_font_weather_14, i == 0 ? 0xFFFFFF : 0xAFC0D6, 6);
+    hourArt[i] = NULL;                                   // icon drawn at (14, 40), 48 px
     hourCond[i] = makeLabel(card, "", &lv_font_weather_14, 0xDCE8F7);
     lv_obj_add_flag(hourCond[i], LV_OBJ_FLAG_HIDDEN);
-    hourTemp[i] = makeLabel(card, "--", &lv_font_weather_20, 0xFFFFFF);
-    lv_obj_align(hourTemp[i], LV_ALIGN_CENTER, 0, 27);
-    hourRain[i] = makeLabel(card, "", &lv_font_weather_14, 0x74D2FF);
-    lv_obj_set_width(hourRain[i], 80);
-    lv_label_set_long_mode(hourRain[i], LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_align(hourRain[i], LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(hourRain[i], LV_ALIGN_BOTTOM_MID, 0, -5);
+    hourTemp[i] = centeredLabel(card, &lv_font_weather_20, 0xFFFFFF, 110);
+    rainRow(card, 148, &hourRain[i]);
   }
-  lv_obj_t *hint = makeLabel(t, "A cada 3 h  ·  deslize para ver mais", &lv_font_weather_14, 0x9FB0C7);
-  lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -2);
 }
 
 static void build_days(lv_obj_t *t) {
@@ -161,31 +215,47 @@ static void build_days(lv_obj_t *t) {
   lv_obj_t *title = makeLabel(t, "Próximos 7 dias", &lv_font_weather_20, 0xEAF2FF);
   lv_obj_set_pos(title, 82, 8);
   lv_obj_t *strip = lv_obj_create(t);
-  lv_obj_set_size(strip, 452, 232);
-  lv_obj_set_pos(strip, 14, 21);
-  lv_obj_set_style_bg_opa(strip, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(strip, 0, 0);
-  lv_obj_set_style_pad_all(strip, 4, 0);
-  lv_obj_set_style_pad_column(strip, 8, 0);
-  lv_obj_set_scroll_dir(strip, LV_DIR_HOR);
-  lv_obj_set_flex_flow(strip, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(strip, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_size(strip, 452, 226);
+  lv_obj_set_pos(strip, 14, 40);
+  styleForecastStrip(strip);
   for (int i = 0; i < 7; i++) {
-    lv_obj_t *card = makeCard(strip, 92, 158);
-    lv_obj_set_style_bg_opa(card, LV_OPA_80, 0);
-    lv_obj_set_style_radius(card, 12, 0);
-    lv_obj_set_style_bg_opa(card, LV_OPA_80, 0);
-    fcDay[i] = makeLabel(card, "", &lv_font_weather_14, 0xAFC0D6);
-    lv_obj_set_width(fcDay[i], 82);
-    lv_obj_set_style_text_align(fcDay[i], LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(fcDay[i], LV_ALIGN_TOP_MID, 0, 5);
-    dayArt[i] = NULL;
+    lv_obj_t *card = fcCard[i] = makeForecastCard(strip, 196, i == 0);
+    fcDay[i] = centeredLabel(card, &lv_font_weather_14, i == 0 ? 0xFFFFFF : 0xAFC0D6, 6);
+    dayArt[i] = NULL;                                    // icon drawn at (14, 36), 48 px
     fcCond[i] = makeLabel(card, "", &lv_font_weather_14, 0xEAF2FF);
     lv_obj_add_flag(fcCond[i], LV_OBJ_FLAG_HIDDEN);
-    fcTemp[i] = makeLabel(card, "", &lv_font_weather_20, 0xFFD477);
-    lv_obj_set_style_text_align(fcTemp[i], LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(fcTemp[i], LV_ALIGN_CENTER, 0, 27);
+    fcTemp[i] = centeredLabel(card, &lv_font_weather_20, 0xFFFFFF, 98);      // máxima
+    fcMin[i] = centeredLabel(card, &lv_font_weather_14, 0x8FA6C2, 124);      // mínima
+    // Week-scaled range bar: where this day's min..max sits in the week.
+    lv_obj_t *track = lv_obj_create(card);
+    lv_obj_set_size(track, FC_BAR_W, 6);
+    lv_obj_align(track, LV_ALIGN_TOP_MID, 0, 148);
+    lv_obj_set_style_bg_color(track, lv_color_hex(0x0E1828), 0);
+    lv_obj_set_style_bg_opa(track, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(track, 3, 0);
+    lv_obj_set_style_border_width(track, 0, 0);
+    lv_obj_set_style_pad_all(track, 0, 0);
+    lv_obj_remove_flag(track, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(track, LV_OBJ_FLAG_CLICKABLE);
+    fcBarFill[i] = lv_obj_create(track);
+    lv_obj_set_size(fcBarFill[i], FC_BAR_W, 6);
+    lv_obj_set_pos(fcBarFill[i], 0, 0);
+    lv_obj_set_style_radius(fcBarFill[i], 3, 0);
+    lv_obj_set_style_border_width(fcBarFill[i], 0, 0);
+    lv_obj_set_style_bg_opa(fcBarFill[i], LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_grad_dir(fcBarFill[i], LV_GRAD_DIR_HOR, 0);
+    lv_obj_remove_flag(fcBarFill[i], LV_OBJ_FLAG_CLICKABLE);
+    rainRow(card, 162, &fcRain[i]);
   }
+}
+
+// Cold -> hot colour used by the range bars.
+static lv_color_t tempColor(float c) {
+  if (c < 12) return lv_color_hex(0x5AA9FF);
+  if (c < 18) return lv_color_hex(0x4FD1C5);
+  if (c < 24) return lv_color_hex(0xB5E36B);
+  if (c < 29) return lv_color_hex(0xFFB547);
+  return lv_color_hex(0xFF6B4A);
 }
 
 
@@ -250,7 +320,7 @@ void updateWeatherScreen() {
   bool up, have;
   uint32_t version;
   float temp, wind, mx[7], mn[7], htemp[8];
-  int code, humidity, hourCount, hcode[8], hrain[8], dc[7];
+  int code, humidity, hourCount, hcode[8], hrain[8], dc[7], drain[7];
   char hours[8][6], dn[7][6];
   xSemaphoreTake(mtx, portMAX_DELAY);
   city = sh.cityName;
@@ -269,6 +339,7 @@ void updateWeatherScreen() {
   memcpy(mx, sh.tmax, sizeof mx);
   memcpy(mn, sh.tmin, sizeof mn);
   memcpy(dc, sh.dcode, sizeof dc);
+  memcpy(drain, sh.dayRain, sizeof drain);
   version = sh.weatherVersion;
   xSemaphoreGive(mtx);
   if (version == renderedWeatherVersion && renderedWifiState == (int)up) return;
@@ -281,37 +352,42 @@ void updateWeatherScreen() {
     lv_label_set_text_fmt(lblRange, "%.0f° / %.0f°", mx[0], mn[0]);
     lv_label_set_text_fmt(lblHumidity, "%d%% umid.", humidity);
     lv_label_set_text_fmt(lblWind, "%.0f km/h vento", wind);
+    float weekLo = mn[0], weekHi = mx[0];
+    for (int i = 1; i < 7; i++) { weekLo = min(weekLo, mn[i]); weekHi = max(weekHi, mx[i]); }
+    if (weekHi - weekLo < 1) weekHi = weekLo + 1;
     for (int i = 0; i < 7; i++) {
       lv_label_set_text(fcDay[i], i == 0 ? "Hoje" : dn[i]);
       lv_label_set_text(fcCond[i], weatherText(dc[i]));
-      lv_label_set_text_fmt(fcTemp[i], "%.0f° / %.0f°", mx[i], mn[i]);
+      lv_label_set_text_fmt(fcTemp[i], "%.0f°", mx[i]);
+      lv_label_set_text_fmt(fcMin[i], "mín %.0f°", mn[i]);
+      const int x0 = (int)((mn[i] - weekLo) * FC_BAR_W / (weekHi - weekLo));
+      const int x1 = (int)((mx[i] - weekLo) * FC_BAR_W / (weekHi - weekLo));
+      lv_obj_set_pos(fcBarFill[i], x0, 0);
+      lv_obj_set_width(fcBarFill[i], max(6, x1 - x0));
+      lv_obj_set_style_bg_color(fcBarFill[i], tempColor(mn[i]), 0);
+      lv_obj_set_style_bg_grad_color(fcBarFill[i], tempColor(mx[i]), 0);
+      lv_label_set_text_fmt(fcRain[i], "%d%%", drain[i]);
       if (renderedDayCodes[i] != dc[i]) {
         if (dayArt[i]) lv_obj_del(dayArt[i]);
-        dayArt[i] = makeWeatherIcon(lv_obj_get_parent(fcDay[i]), 17, 35, 40, dc[i]);
+        dayArt[i] = makeWeatherIcon(fcCard[i], 14, 36, 48, dc[i]);
         renderedDayCodes[i] = dc[i];
       }
-      lv_obj_move_foreground(fcDay[i]);
-      lv_obj_move_foreground(fcTemp[i]);
     }
     for (int i = 0; i < 8; i++) {
       if (i < hourCount) {
-        lv_label_set_text_fmt(hourTime[i], "%sh", hours[i]);
+        if (i == 0) lv_label_set_text(hourTime[i], "Agora");
+        else lv_label_set_text_fmt(hourTime[i], "%sh", hours[i]);
         lv_label_set_text(hourCond[i], weatherText(hcode[i]));
         lv_label_set_text_fmt(hourTemp[i], "%.0f°", htemp[i]);
         lv_label_set_text_fmt(hourRain[i], "%d%%", hrain[i]);
         if (renderedHourCodes[i] != hcode[i]) {
           if (hourArt[i]) lv_obj_del(hourArt[i]);
-          hourArt[i] = makeWeatherIcon(lv_obj_get_parent(hourTime[i]), 17, 35, 40, hcode[i]);
+          hourArt[i] = makeWeatherIcon(hourCard[i], 14, 40, 48, hcode[i]);
           renderedHourCodes[i] = hcode[i];
         }
-        lv_obj_move_foreground(hourTime[i]);
-        lv_obj_move_foreground(hourTemp[i]);
-        lv_obj_move_foreground(hourRain[i]);
+        lv_obj_remove_flag(hourCard[i], LV_OBJ_FLAG_HIDDEN);
       } else {
-        lv_label_set_text(hourTime[i], "--");
-        lv_label_set_text(hourCond[i], "--");
-        lv_label_set_text(hourTemp[i], "--");
-        lv_label_set_text(hourRain[i], "");
+        lv_obj_add_flag(hourCard[i], LV_OBJ_FLAG_HIDDEN);
       }
     }
     if (renderedCode != code) {

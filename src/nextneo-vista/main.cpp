@@ -344,7 +344,7 @@ static bool doWeather() {
                "&longitude=" + String(cfg.lon, 4) +
                "&current=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m"
                "&hourly=temperature_2m,weather_code,precipitation_probability"
-               "&daily=weather_code,temperature_2m_max,temperature_2m_min"
+               "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
                "&timezone=auto&forecast_days=7&forecast_hours=24";
   JsonDocument doc(SpiRamJsonAllocator::instance());  // PSRAM: keep internal RAM for TLS
   String error;
@@ -409,6 +409,7 @@ static bool doWeather() {
     sh.tmax[i] = doc["daily"]["temperature_2m_max"][i] | 0.0f;
     sh.tmin[i] = doc["daily"]["temperature_2m_min"][i] | 0.0f;
     sh.dcode[i] = doc["daily"]["weather_code"][i] | 0;
+    sh.dayRain[i] = doc["daily"]["precipitation_probability_max"][i] | 0;
     const char *d = doc["daily"]["time"][i] | "";
     int y, m, dd;
     struct tm t = {};
