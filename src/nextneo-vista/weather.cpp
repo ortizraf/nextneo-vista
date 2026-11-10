@@ -66,6 +66,40 @@ static lv_obj_t *makeWeatherIcon(lv_obj_t *parent, int x, int y, int size, int c
 }
 
 
+// Agora: city/date top-left, clock + Wi-Fi top-right, big temperature and the
+// big weather artwork in the middle (unchanged emphasis), and four detail
+// cards (chuva, umidade, vento, UV) above the tab bar.
+extern "C" const lv_image_dsc_t weather_icon_drop;
+static lv_obj_t *lblRainNow, *lblUv;
+
+static lv_obj_t *detailCard(lv_obj_t *t, int index, const char *title, lv_obj_t **value, bool drop) {
+  // The tab already has ~16 px side padding: 4 x 104 + 3 x 10 = 446 px.
+  lv_obj_t *card = makeCard(t, 104, 56);
+  lv_obj_set_pos(card, index * 114, 196);
+  lv_obj_set_style_bg_opa(card, LV_OPA_60, 0);
+  lv_obj_set_style_pad_all(card, 0, 0);
+  lv_obj_t *head = lv_obj_create(card);
+  lv_obj_set_size(head, 92, 18);
+  lv_obj_set_pos(head, 10, 6);
+  lv_obj_set_style_bg_opa(head, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(head, 0, 0);
+  lv_obj_set_style_pad_all(head, 0, 0);
+  lv_obj_set_style_pad_column(head, 4, 0);
+  lv_obj_remove_flag(head, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_flex_flow(head, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(head, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  if (drop) {
+    lv_obj_t *icon = lv_image_create(head);
+    lv_image_set_src(icon, &weather_icon_drop);
+    lv_obj_set_style_image_recolor(icon, lv_color_hex(0x7FB6E8), 0);
+    lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+  }
+  makeLabel(head, title, &lv_font_weather_14, 0x9AA8BA);
+  *value = makeLabel(card, "--", &lv_font_weather_20, 0xFFFFFF);
+  lv_obj_set_pos(*value, 10, 26);
+  return card;
+}
+
 static void build_home(lv_obj_t *t) {
   homeTab = t;
   lv_obj_set_style_bg_color(t, lv_color_hex(0x17253D), 0);
@@ -75,41 +109,50 @@ static void build_home(lv_obj_t *t) {
   lv_obj_remove_flag(t, LV_OBJ_FLAG_SCROLLABLE);
 
   lblCity = makeLabel(t, "São Paulo", &lv_font_weather_20, 0xEAF2FF);
-  lv_obj_set_width(lblCity, 370);
+  lv_obj_set_width(lblCity, 250);
   lv_label_set_long_mode(lblCity, LV_LABEL_LONG_DOT);
-  lv_obj_set_pos(lblCity, 52, 13);
+  lv_obj_set_pos(lblCity, 52, 8);
   lblDate = makeLabel(t, "", &lv_font_weather_14, 0xAFC0D6);
-  lv_obj_set_pos(lblDate, 22, 42);
-  lblClock = makeLabel(t, "--:--", &lv_font_montserrat_28, 0xEFF4FA);
-  lv_obj_set_pos(lblClock, 20, 59);
-  lblWifiDot = makeLabel(t, LV_SYMBOL_WIFI, &lv_font_weather_20, 0xD05050);
-  lv_obj_align(lblWifiDot, LV_ALIGN_TOP_RIGHT, -18, 12);
+  lv_obj_set_pos(lblDate, 52, 34);
+  // Wi-Fi icon: same size and screen position as on the main menu
+  // (font 14, 15 px from the right edge, 7 px from the top). The tab has its
+  // own padding, so compensate for it to land on the same pixels.
+  lblWifiDot = makeLabel(t, LV_SYMBOL_WIFI, &lv_font_weather_14, 0xD05050);
+  lv_obj_align(lblWifiDot, LV_ALIGN_TOP_RIGHT,
+               -15 + lv_obj_get_style_pad_right(t, LV_PART_MAIN),
+               7 - lv_obj_get_style_pad_top(t, LV_PART_MAIN));
+  lblClock = makeLabel(t, "--:--", &lv_font_montserrat_36, 0xEFF4FA);
+  lv_obj_align(lblClock, LV_ALIGN_TOP_RIGHT, -34, 4);
 
+  // Big temperature + condition: same font/size and emphasis as before.
   lblTemp = makeLabel(t, "--°", &lv_font_montserrat_48, 0xFFFFFF);
-  lv_obj_set_pos(lblTemp, 20, 105);
+  lv_obj_set_pos(lblTemp, 20, 60);
   lblCond = makeLabel(t, "Aguardando clima", &lv_font_weather_20, 0xEAF2FF);
-  lv_obj_set_pos(lblCond, 24, 158);
-  lblRange = makeLabel(t, "--° / --°", &lv_font_weather_14, 0xC2D0E3);
-  lv_obj_set_pos(lblRange, 24, 185);
+  lv_obj_set_pos(lblCond, 24, 118);
+  lblRange = makeLabel(t, "", &lv_font_weather_14, 0xC2D0E3);
+  lv_obj_set_pos(lblRange, 24, 148);
 
+  // Big weather artwork (same drawing, drawn in updateWeatherScreen).
   weatherArt = lv_obj_create(t);
-  lv_obj_set_size(weatherArt, 130, 118);
-  lv_obj_align(weatherArt, LV_ALIGN_TOP_RIGHT, -24, 66);
+  lv_obj_set_size(weatherArt, 136, 136);
+  lv_obj_align(weatherArt, LV_ALIGN_TOP_RIGHT, -20, 48);
   lv_obj_set_style_bg_opa(weatherArt, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(weatherArt, 0, 0);
   lv_obj_set_style_pad_all(weatherArt, 0, 0);
   lv_obj_remove_flag(weatherArt, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(weatherArt, LV_OBJ_FLAG_CLICKABLE);
 
-  lv_obj_t *humidityCard = makeCard(t, 142, 38);
-  lv_obj_align(humidityCard, LV_ALIGN_BOTTOM_LEFT, 18, -1);
-  lblHumidity = makeLabel(humidityCard, "Umidade  --%", &lv_font_weather_14, 0xE1EAF6);
-  lv_obj_center(lblHumidity);
-  lv_obj_t *windCard = makeCard(t, 142, 38);
-  lv_obj_align(windCard, LV_ALIGN_BOTTOM_LEFT, 168, -1);
-  lblWind = makeLabel(windCard, "Vento  -- km/h", &lv_font_weather_14, 0xE1EAF6);
-  lv_obj_center(lblWind);
-  lblStatus = makeLabel(t, "", &lv_font_weather_14, 0x9FB0C7);
-  lv_obj_align(lblStatus, LV_ALIGN_BOTTOM_RIGHT, 8, -10);
+  detailCard(t, 0, "Chuva", &lblRainNow, true);
+  detailCard(t, 1, "Umidade", &lblHumidity, false);
+  detailCard(t, 2, "Vento", &lblWind, false);
+  detailCard(t, 3, "Índice UV", &lblUv, false);
+
+  // Only shown when something needs attention (see renderWeather in main.cpp).
+  lblStatus = makeLabel(t, "", &lv_font_weather_14, 0xFFD477);
+  lv_obj_set_width(lblStatus, 200);
+  lv_label_set_long_mode(lblStatus, LV_LABEL_LONG_DOT);
+  lv_obj_set_style_text_align(lblStatus, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_align(lblStatus, LV_ALIGN_TOP_RIGHT, -16, 42);
 }
 
 // ---- Forecast tabs (Horas / Dias): same horizontally scrolling cards as
@@ -307,9 +350,11 @@ void buildWeatherScreen(lv_obj_t *scr) {
   build_home(home);
   build_hours(hours);
   build_days(days);
-  addBackButton(home);
-  addBackButton(hours);
-  addBackButton(days);
+  // One back button on the view itself, above the tabview: buttons inside the
+  // scrollable tab pages lost their clicks to the tab content/swipe handling.
+  lv_obj_t *back = addBackButton(weatherView);
+  lv_obj_set_pos(back, 6, 6);
+  lv_obj_move_foreground(back);
 
 }
 
@@ -319,7 +364,7 @@ void updateWeatherScreen() {
   String city;
   bool up, have;
   uint32_t version;
-  float temp, wind, mx[7], mn[7], htemp[8];
+  float temp, wind, feels, uv, mx[7], mn[7], htemp[8];
   int code, humidity, hourCount, hcode[8], hrain[8], dc[7], drain[7];
   char hours[8][6], dn[7][6];
   xSemaphoreTake(mtx, portMAX_DELAY);
@@ -330,6 +375,8 @@ void updateWeatherScreen() {
   code = sh.code;
   humidity = sh.humidity;
   wind = sh.wind;
+  feels = sh.feels;
+  uv = sh.uv;
   hourCount = sh.hourCount;
   memcpy(hours, sh.hourLabel, sizeof hours);
   memcpy(htemp, sh.hourTemp, sizeof htemp);
@@ -349,9 +396,12 @@ void updateWeatherScreen() {
   if (have) {
     lv_label_set_text_fmt(lblTemp, "%.0f°C", temp);
     lv_label_set_text(lblCond, weatherText(code));
-    lv_label_set_text_fmt(lblRange, "%.0f° / %.0f°", mx[0], mn[0]);
-    lv_label_set_text_fmt(lblHumidity, "%d%% umid.", humidity);
-    lv_label_set_text_fmt(lblWind, "%.0f km/h vento", wind);
+    lv_label_set_text_fmt(lblRange, LV_SYMBOL_UP " %.0f°   " LV_SYMBOL_DOWN " %.0f°   ·   sensação %.0f°", mx[0], mn[0], feels);
+    lv_label_set_text_fmt(lblHumidity, "%d%%", humidity);
+    lv_label_set_text_fmt(lblWind, "%.0f km/h", wind);
+    lv_label_set_text_fmt(lblRainNow, "%d%%", hourCount ? hrain[0] : 0);
+    if (uv >= 0) lv_label_set_text_fmt(lblUv, "%.0f", uv);
+    else lv_label_set_text(lblUv, "--");
     float weekLo = mn[0], weekHi = mx[0];
     for (int i = 1; i < 7; i++) { weekLo = min(weekLo, mn[i]); weekHi = max(weekHi, mx[i]); }
     if (weekHi - weekLo < 1) weekHi = weekLo + 1;

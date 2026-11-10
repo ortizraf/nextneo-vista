@@ -10,6 +10,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
+#include "app_log.h"
 
 inline void *psramMalloc(size_t size) {
   void *p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -81,7 +82,7 @@ class PsramBuffer : public Stream {
 // Internal RAM diagnostics: the largest free block is what decides whether a
 // TLS handshake can succeed, not the total free size.
 inline void logInternalHeap(const char *tag) {
-  Serial.printf("[mem] %s: interno livre %u (maior bloco %u), PSRAM livre %u\n", tag,
+  Log.printf("[mem] %s: interno livre %u (maior bloco %u), PSRAM livre %u\n", tag,
                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));

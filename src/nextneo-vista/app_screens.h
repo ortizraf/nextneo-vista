@@ -38,6 +38,8 @@ struct Shared {
   int hourRain[8] = {0};
   int humidity = 0;
   float wind = 0;
+  float feels = 0;                 // apparent temperature
+  float uv = -1;                   // UV index (-1 = unknown)
   char dayName[7][6] = {{0}};
   float tmax[7] = {0}, tmin[7] = {0};
   int dayRain[7] = {0};               // daily precipitation_probability_max (%)
@@ -88,6 +90,8 @@ enum ScreenID : uint8_t {
   SCREEN_CALENDARIO,
   SCREEN_FLIGHT_RADAR,
   SCREEN_SETTINGS,
+  SCREEN_SERVERS,
+  SCREEN_CLOCK,
   SCREEN_COUNT
 };
 
@@ -113,11 +117,14 @@ static constexpr uint32_t FINANCE_RETRY_INTERVAL_MS       = 60UL * 1000UL;
 static constexpr uint32_t CALENDARIO_UPDATE_INTERVAL_MS   = 10UL * 60UL * 1000UL;
 static constexpr uint32_t FLIGHT_RADAR_UPDATE_INTERVAL_MS = 12UL * 1000UL;
 static constexpr uint32_t FLIGHT_RADAR_RETRY_INTERVAL_MS  = 12UL * 1000UL;
+static constexpr uint32_t SERVERS_UPDATE_INTERVAL_MS      = 10UL * 1000UL;
+static constexpr uint32_t SERVERS_RETRY_INTERVAL_MS       = 10UL * 1000UL;
 
 enum Cmd : uint8_t {
   CMD_SCAN, CMD_CONNECT, CMD_GEOCODE,          // context-free commands (Settings / web page)
   CMD_WEATHER, CMD_FINANCE, CMD_FINANCE_ONE,   // CMD_FINANCE_ONE: asset in financeSingleIndex
   CMD_FLIGHT_RADAR, CMD_FLIGHT_DETAILS,        // screen-bound API jobs
+  CMD_SERVERS,                                 // Beszel status (Servers screen)
   CMD_COUNT
 };
 
@@ -179,3 +186,27 @@ const char *currencySymbol(const char *currency);
 void configSyncRadarUi();
 void weatherOnEnter();
 void updateWeatherScreen();
+
+// ---- Servers screen (servers.cpp): Beszel hub status for the homelab + proxy
+static constexpr uint8_t SERVERS_MAX = 2;
+extern lv_obj_t *serversView;
+void buildServersScreen(lv_obj_t *screen);
+void loadServersConfig();
+void serversOnEnter();
+void serversRender();
+bool serversFetch();                                 // network task only
+bool serversAlert();                                 // any server offline on last check
+bool serversParseLink(const char *link, char *url, size_t urlSize, char *id, size_t idSize);
+void serversSetServer(uint8_t i, const char *label, const char *url, const char *id);
+void serversSetCredentials(const char *user, const char *pass);   // empty pass = keep
+void serversGetConfig(uint8_t i, char *label, char *url, char *id, size_t n);
+String serversUser();
+bool serversHasPassword();
+String serversStatusText(uint8_t i);
+
+// ---- Clock screen (clock.cpp): animated sky + big local time
+extern lv_obj_t *clockView;
+void buildClockScreen(lv_obj_t *screen);
+void clockOnEnter();
+void clockOnExit();
+void clockRender();

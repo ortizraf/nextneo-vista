@@ -1,3 +1,4 @@
+#include "app_log.h"
 #include "aircraft_details_provider.h"
 #include "aircraft_data_provider.h"
 #include "https_fetch.h"
@@ -109,6 +110,6 @@ void fetchAircraftDetails(AircraftDetails &out) {
   if (status == HTTP_CODE_OK) out.state = DetailsState::READY;
   else if (status == HTTP_CODE_NOT_FOUND) out.state = DetailsState::NOT_FOUND;
   else out.state = DetailsState::FAILED;
-  Serial.printf("adsbdb: %s/%s -> %d (%s %s>%s)\n", out.icao24, out.callsign, status,
+  Log.printf("adsbdb: %s/%s -> %d (%s %s>%s)\n", out.icao24, out.callsign, status,
                 out.model, out.originCode, out.destCode);
 }

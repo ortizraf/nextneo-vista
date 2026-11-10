@@ -1,3 +1,4 @@
+#include "app_log.h"
 #include "aircraft_data_provider.h"
 #include "https_fetch.h"
 #include "../modules/flight_radar/flight_parser.h"
@@ -62,7 +63,7 @@ class AdsbLolProvider final : public AircraftDataProvider {
       if (status == HTTPC_ERROR_TOO_LESS_RAM) snprintf(error, errorCapacity, "Memória baixa p/ TLS");
       else if (status < 0) snprintf(error, errorCapacity, "%s", HTTPClient::errorToString(status).c_str());
       else snprintf(error, errorCapacity, "HTTP %d", status);
-      Serial.printf("ADSB.lol: %s\n", error);
+      Log.printf("ADSB.lol: %s\n", error);
       secureClient.stop();
       connectionOpen = false;
       return false;
@@ -100,7 +101,7 @@ class AdsbLolProvider final : public AircraftDataProvider {
       if (a.distanceNm > radiusNm) continue;
       count = insertNearest(aircraft, count, capacity, a);
     }
-    Serial.printf("ADSB.lol: %u bytes, %u aeronaves (%u na área) em %lums + parse %lums\n",
+    Log.printf("ADSB.lol: %u bytes, %u aeronaves (%u na área) em %lums + parse %lums\n",
                   (unsigned)body.length(), total, count,
                   (unsigned long)(downloaded - started), (unsigned long)(millis() - downloaded));
     error[0] = '\0';
@@ -113,7 +114,7 @@ void adsbLolReleaseConnection() {
   if (!connectionOpen) return;
   secureClient.stop();
   connectionOpen = false;
-  Serial.println("ADSB.lol: conexão TLS liberada");
+  Log.println("ADSB.lol: conexão TLS liberada");
 }
 
 AircraftDataProvider &adsbLolProvider() {

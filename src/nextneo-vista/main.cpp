@@ -13,6 +13,7 @@
 #include "modules/flight_radar/flight_radar.h"
 #include "services/aircraft_data_provider.h"
 #include "services/psram_alloc.h"
+#include "services/app_log.h"
 #include "services/https_fetch.h"
 #include <esp_heap_caps.h>
 
@@ -93,7 +94,7 @@ static void financeReleaseConnection() {
   if (!financeClientOpen) return;
   financeClient.stop();
   financeClientOpen = false;
-  Serial.println("Finance: conexão TLS liberada");
+  Log.println("Finance: conexão TLS liberada");
 }
 
 // GET on Yahoo into financeBody (PSRAM). Returns the HTTP status.
@@ -109,7 +110,7 @@ static int financeGet(const String &url, uint32_t &retryAfterSeconds, uint32_t t
   const int status = httpsFetch(financeClient, url.c_str(), financeBody, timeoutMs, true, nullptr,
                                 "application/json", options);
   if (status <= 0) {
-    Serial.printf("Finance: erro de transporte %d (%s)\n", status, HTTPClient::errorToString(status).c_str());
+    Log.printf("Finance: erro de transporte %d (%s)\n", status, HTTPClient::errorToString(status).c_str());
     logInternalHeap("finance");
   }
   return status;
@@ -174,7 +175,7 @@ static bool financeGetWithRetry(const String &url, const char *what, uint32_t &r
     if (retrySeconds)
       retryAfterMs = max(retryAfterMs, min(retrySeconds, FINANCE_MAX_BACKOFF_MS / 1000UL) * 1000UL);
     if (status == HTTP_CODE_OK && financeBody.length()) return screenJobStillCurrent();
-    Serial.printf("Finance %s HTTP %d (tentativa %d/2)\n", what, status, attempt + 1);
+    Log.printf("Finance %s HTTP %d (tentativa %d/2)\n", what, status, attempt + 1);
     if (attempt == 0 && (status <= 0 || status >= HTTP_CODE_INTERNAL_SERVER_ERROR)) {
       vTaskDelay(pdMS_TO_TICKS(500));
       continue;
@@ -191,11 +192,11 @@ static bool fetchYahooChart(const char *symbol, Quote &q, uint32_t &retryAfterMs
   if (!financeGetWithRetry(url, symbol, retryAfterMs, 12000)) return false;
   JsonDocument doc(SpiRamJsonAllocator::instance());  // PSRAM: keep internal RAM for TLS
   if (deserializeJson(doc, financeBody.c_str(), financeBody.length())) {
-    Serial.printf("Finance %s: resposta JSON inválida\n", symbol);
+    Log.printf("Finance %s: resposta JSON inválida\n", symbol);
     return false;
   }
   if (!parseYahooResult(doc["chart"]["result"][0], q)) {
-    Serial.printf("Finance %s: símbolo inexistente ou sem cotação\n", symbol);
+    Log.printf("Finance %s: símbolo inexistente ou sem cotação\n", symbol);
     return false;
   }
   return true;
@@ -210,14 +211,14 @@ static bool fetchYahooSpark(const FinanceAsset *assets, uint8_t count, Quote *qu
   if (retryAfterMs) for (uint8_t i = 0; i < count; ++i) financeRetryAfterMs[i] = max(financeRetryAfterMs[i], retryAfterMs);
   if (!got) return false;
   JsonDocument doc(SpiRamJsonAllocator::instance());
-  if (deserializeJson(doc, financeBody.c_str(), financeBody.length())) { Serial.println("Finance spark: resposta JSON inválida"); return false; }
+  if (deserializeJson(doc, financeBody.c_str(), financeBody.length())) { Log.println("Finance spark: resposta JSON inválida"); return false; }
   for (JsonVariantConst item : doc["spark"]["result"].as<JsonArrayConst>()) {
     const char *symbol = item["symbol"] | "";
     for (uint8_t i = 0; i < count; ++i)
       if (!strcmp(symbol, assets[i].symbol)) { parseYahooResult(item["response"][0], quotes[i]); break; }
   }
   for (uint8_t i = 0; i < count; ++i)
-    if (!quotes[i].ok) Serial.printf("Finance spark: símbolo %s ausente/sem cotação\n", assets[i].symbol);
+    if (!quotes[i].ok) Log.printf("Finance spark: símbolo %s ausente/sem cotação\n", assets[i].symbol);
   return true;
 }
 
@@ -226,7 +227,7 @@ static bool fetchYahooSpark(const FinanceAsset *assets, uint8_t count, Quote *qu
 static bool doFinance(int onlyIndex) {
   if (WiFi.status() != WL_CONNECTED) return false;
   if ((int32_t)(millis() - financeBlockedUntilMs) < 0) {
-    Serial.println("Finance: aguardando Retry-After da API");
+    Log.println("Finance: aguardando Retry-After da API");
     return false;
   }
   static FinanceAsset assets[FINANCE_MAX_ASSETS];
@@ -256,7 +257,7 @@ static bool doFinance(int onlyIndex) {
       Quote &q = quotes[i];
       sh.financeApiKnown[i] = true;
       sh.financeApiOk[i] = q.ok;
-      if (!q.ok) { Serial.printf("Finance %s: atualização falhou; mantendo última cotação válida\n", assets[i].symbol); continue; }
+      if (!q.ok) { Log.printf("Finance %s: atualização falhou; mantendo última cotação válida\n", assets[i].symbol); continue; }
       anySuccess = true;
       financeRetryAfterMs[i] = 0;
       sh.previousFinance[i] = q.previousClose; sh.financeChange[i] = q.changePct;
@@ -317,12 +318,12 @@ static bool httpGetJson(const String &url, JsonDocument &doc, String &error) {
       DeserializationError jsonError = deserializeJson(doc, body.c_str(), body.length());
       if (!jsonError) return true;
       error = String("JSON inválido: ") + jsonError.c_str();
-      Serial.printf("Weather: %s\n", error.c_str());
+      Log.printf("Weather: %s\n", error.c_str());
       return false;
     }
     error = code <= 0 ? String("erro de conexão: ") + HTTPClient::errorToString(code)
                       : String("HTTP ") + code;
-    Serial.printf("Weather: %s (tentativa %d/2)\n", error.c_str(), attempt + 1);
+    Log.printf("Weather: %s (tentativa %d/2)\n", error.c_str(), attempt + 1);
     if (code <= 0) logInternalHeap("weather");
     // Retry only transient transport/server errors; client errors such as 429
     // are handled by the worker's slower retry schedule.
@@ -342,7 +343,7 @@ static bool doWeather() {
   if (WiFi.status() != WL_CONNECTED) return false;
   String url = "https://api.open-meteo.com/v1/forecast?latitude=" + String(cfg.lat, 4) +
                "&longitude=" + String(cfg.lon, 4) +
-               "&current=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m"
+               "&current=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m,apparent_temperature,uv_index"
                "&hourly=temperature_2m,weather_code,precipitation_probability"
                "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
                "&timezone=auto&forecast_days=7&forecast_hours=24";
@@ -366,7 +367,7 @@ static bool doWeather() {
       dailyTimes.isNull() || dailyTimes.size() < 7 || dailyMax.size() < 7 ||
       dailyMin.size() < 7 || dailyCodes.size() < 7) {
     setStatus("Falha clima: resposta incompleta da API");
-    Serial.println("Weather: resposta incompleta da API");
+    Log.println("Weather: resposta incompleta da API");
     return false;
   }
 
@@ -381,6 +382,8 @@ static bool doWeather() {
   sh.code = doc["current"]["weather_code"] | 0;
   sh.humidity = doc["current"]["relative_humidity_2m"] | 0;
   sh.wind = doc["current"]["wind_speed_10m"] | 0.0f;
+  sh.feels = doc["current"]["apparent_temperature"] | sh.temp;
+  sh.uv = doc["current"]["uv_index"] | -1.0f;
   sh.hourCount = 0;
   JsonArray times = hourlyTimes;
   JsonArray hourlyTemp = hourlyTemps;
@@ -515,6 +518,7 @@ static const char *cmdName(uint8_t cmd) {
     case CMD_FINANCE_ONE: return "finance-one";
     case CMD_FLIGHT_RADAR: return "flight-radar";
     case CMD_FLIGHT_DETAILS: return "flight-details";
+    case CMD_SERVERS: return "servers";
   }
   return "?";
 }
@@ -546,20 +550,21 @@ static void runJob(const NetJob &job) {
       case CMD_FINANCE_ONE: ok = doFinance(financeSingleIndex); break;
       case CMD_FLIGHT_RADAR: ok = updateFlightRadarData(); break;
       case CMD_FLIGHT_DETAILS: ok = updateFlightRadarDetails(); break;
+      case CMD_SERVERS: ok = serversFetch(); break;
       default: ran = false; break;
     }
   }
   if (job.screen != SCREEN_NONE) {
     if (!ran) {
-      Serial.printf("[net] %s descartado (tela inativa)\n", cmdName(job.cmd));
+      Log.printf("[net] %s descartado (tela inativa)\n", cmdName(job.cmd));
     } else if (screenJobStillCurrent()) {
       gJobOutcome[job.screen] = ok ? JOB_OK : JOB_FAILED;
-      Serial.printf("[net] %s %s em %lums (interno livre %u, maior bloco %u)\n", cmdName(job.cmd),
+      Log.printf("[net] %s %s em %lums (interno livre %u, maior bloco %u)\n", cmdName(job.cmd),
                     ok ? "ok" : "falhou", (unsigned long)(millis() - started),
                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     } else {
-      Serial.printf("[net] %s concluído fora de contexto; resultado ignorado\n", cmdName(job.cmd));
+      Log.printf("[net] %s concluído fora de contexto; resultado ignorado\n", cmdName(job.cmd));
     }
   }
   gCurrentJob = {CMD_COUNT, SCREEN_NONE, 0};
@@ -599,7 +604,7 @@ static void workerTask(void *) {
       xSemaphoreGive(mtx);
       if (!savedSsid.isEmpty() && (!reconnectStarted || now - reconnectStarted >= 30000UL)) {
         reconnectStarted = now;
-        Serial.printf("Wi-Fi offline; retrying saved network: %s\n", savedSsid.c_str());
+        Log.printf("Wi-Fi offline; retrying saved network: %s\n", savedSsid.c_str());
         WiFi.disconnect(false, false);
         WiFi.begin(savedSsid.c_str(), savedPass.c_str());
       }
@@ -656,6 +661,9 @@ lv_obj_t *financeView, *financeStrip, *financeStatusLabel, *financeAgeLabel[FINA
 lv_obj_t *flightRadarView;
 lv_point_precise_t financeLinePoints[FINANCE_MAX_ASSETS][24] = {};
 static lv_obj_t *menuWifiIcon;
+static lv_obj_t *menuServersBadge;
+static lv_obj_t *menuClock;
+static lv_obj_t *menuCalDay, *menuCalWeek;
 lv_obj_t *calendarView;
 int calendarOffset = 0;
 lv_obj_t *calendarTitle;
@@ -699,8 +707,26 @@ static void renderMenu() {
   xSemaphoreGive(mtx);
   if (!renderedWifiKnown || renderedWifiUp != up) {
     renderWifiIndicator(menuWifiIcon, up);
+    if (up) lv_obj_add_flag(menuWifiIcon, LV_OBJ_FLAG_HIDDEN);
+    else { lv_obj_remove_flag(menuWifiIcon, LV_OBJ_FLAG_HIDDEN); lv_obj_move_foreground(menuWifiIcon); }
     renderedWifiUp = up;
     renderedWifiKnown = true;
+  }
+  if (menuClock) {
+    struct tm ti; char b[12];
+    if (getLocalTime(&ti, 0)) {
+      strftime(b, sizeof b, cfg.h24 ? "%H:%M" : "%I:%M", &ti); setLabelIfChanged(menuClock, b);
+      static const char *wd[] = {"DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SAB"};
+      if (menuCalWeek) setLabelIfChanged(menuCalWeek, wd[ti.tm_wday]);
+      if (menuCalDay) { snprintf(b, sizeof b, "%d", ti.tm_mday); setLabelIfChanged(menuCalDay, b); }
+    }
+  }
+  if (menuServersBadge) {
+    const bool alert = serversAlert();
+    if (alert != !lv_obj_has_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN)) {
+      if (alert) lv_obj_remove_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);
+      else lv_obj_add_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);
+    }
   }
 }
 
@@ -722,7 +748,10 @@ static void renderWeather() {
   String status = sh.status;
   bool up = sh.wifiUp;
   xSemaphoreGive(mtx);
-  setLabelIfChanged(lblStatus, status.c_str());
+  // Agora tab: only show the status when something needs attention (errors,
+  // searching); "Previsão atualizada" / "Conectado" stay hidden.
+  const bool showStatus = status.startsWith("Falha") || status.startsWith("Buscando") || !up;
+  setLabelIfChanged(lblStatus, showStatus ? status.c_str() : "");
   static int renderedDot = -1;
   if (renderedDot != (int)up) { renderWifiIndicator(lblWifiDot, up); renderedDot = up; }
   updateWeatherScreen();
@@ -754,6 +783,8 @@ static void requestWeather() { postScreenJob(CMD_WEATHER); }
 static void requestFinance() { postScreenJob(CMD_FINANCE); }
 static void requestFlightRadar() { postScreenJob(CMD_FLIGHT_RADAR); }
 static void requestFlightDetails() { postScreenJob(CMD_FLIGHT_DETAILS); }
+static void requestServers() { postScreenJob(CMD_SERVERS); }
+static void requestClockWeather() { postScreenJob(CMD_WEATHER); }   // sky follows the weather
 
 // ---------------------------------------------------------------- screen manager
 static const ScreenLifecycle kScreens[] = {
@@ -768,6 +799,10 @@ static const ScreenLifecycle kScreens[] = {
   {SCREEN_FLIGHT_RADAR, "flight-radar", &flightRadarView, flightRadarOnEnter, flightRadarOnExit, requestFlightRadar,
    updateFlightRadarScreen, FLIGHT_RADAR_UPDATE_INTERVAL_MS, FLIGHT_RADAR_RETRY_INTERVAL_MS},
   {SCREEN_SETTINGS, "settings", &settingsView, nullptr, settingsOnExit, nullptr, renderSettings, 0, 0},
+  {SCREEN_SERVERS, "servers", &serversView, serversOnEnter, nullptr, requestServers, serversRender,
+   SERVERS_UPDATE_INTERVAL_MS, SERVERS_RETRY_INTERVAL_MS},
+  {SCREEN_CLOCK, "clock", &clockView, clockOnEnter, clockOnExit, requestClockWeather, clockRender,
+   WEATHER_UPDATE_INTERVAL_MS, WEATHER_RETRY_INTERVAL_MS},
 };
 static_assert(sizeof(kScreens) / sizeof(kScreens[0]) == SCREEN_COUNT, "kScreens must list every ScreenID in order");
 
@@ -825,7 +860,7 @@ void switchScreen(ScreenID id) {
 
   // ---- On-Enter: paint cached data now, request fresh data after the debounce.
   const ScreenLifecycle &next = screenInfo(id);
-  Serial.printf("[ctx] %s -> %s\n", old.name, next.name);
+  Log.printf("[ctx] %s -> %s\n", old.name, next.name);
   if (next.onEnter) next.onEnter();
   if (next.render) next.render();
   if (next.requestUpdate && contextTimer) {
@@ -921,10 +956,11 @@ button{margin-top:14px;width:100%;padding:13px;border:0;border-radius:12px;backg
 button.sec{background:#ffffff1a;color:#edf4ff}small{display:block;margin-top:12px;line-height:1.5;color:#adbed2}.row{display:flex;gap:12px;align-items:center}.row input{width:auto}
 .asset{display:grid;grid-template-columns:1fr 1.4fr 44px;gap:8px;margin-top:10px}.asset .info{grid-column:1/4;font-size:13px;color:#9fb6d0;margin:-2px 0 4px 4px}
 .del{margin:0;padding:0;background:#ff5a5a33;color:#ffb3b3;font-size:22px}.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
-.chip{width:auto;margin:0;padding:6px 10px;border-radius:999px;background:#ffffff14;color:#cfe2f7;font-size:13px;font-weight:600}code{color:#9fe3ff}</style>
+.chip{width:auto;margin:0;padding:6px 10px;border-radius:999px;background:#ffffff14;color:#cfe2f7;font-size:13px;font-weight:600}code{color:#9fe3ff}.btnlink{display:block;margin-top:14px;padding:12px;border-radius:12px;background:#ffffff1a;color:#edf4ff;text-align:center;text-decoration:none;font-weight:700}</style>
 <main>
 <div class="card"><h1>NextNeo Vista</h1><div class="muted">Ajustes do aparelho</div>
-<div class="status %NOTICECLASS%">%NOTICE%Wi-Fi: %STATUS%<br>Endereço: http://%IP%</div></div>
+<div class="status %NOTICECLASS%">%NOTICE%Wi-Fi: %STATUS%<br>Endereço: http://%IP%</div>
+<a class="btnlink" href="/log">Ver log da aplicação</a></div>
 
 <form class="card" method="post" action="/save-city" accept-charset="UTF-8"><h2>Clima e relógio</h2>
 <label class="label" for="city">Cidade (ex.: São Paulo, BR)</label><input id="city" name="city" value="%CITY%" required>
@@ -947,6 +983,13 @@ button.sec{background:#ffffff1a;color:#edf4ff}small{display:block;margin-top:12p
 <button type="button" class="sec" onclick="addRow('','')">+ Adicionar ativo</button>
 <button type="submit">Salvar Finance</button>
 <small>Exemplos: moedas <code>USDBRL=X</code>, <code>GBPBRL=X</code>; cripto <code>BTC-USD</code>, <code>ETH-USD</code>; ações dos EUA <code>AAPL</code>, <code>MSFT</code>; B3 com <code>.SA</code>: <code>PETR4.SA</code>, <code>VALE3.SA</code>; índices <code>^BVSP</code> (Ibovespa), <code>^GSPC</code> (S&amp;P 500). Confira o símbolo em finance.yahoo.com.</small></form>
+<form class="card" method="post" action="/save-servers" accept-charset="UTF-8"><h2>Servidores (Beszel)</h2>
+<div class="muted">Use um usuário <b>somente leitura</b> do Beszel, com acesso aos dois sistemas.</div>
+<label class="label" for="bzuser">E-mail do usuário</label><input id="bzuser" name="bzuser" type="email" value="%BZUSER%" autocomplete="username">
+<label class="label" for="bzpass">Senha</label><input id="bzpass" name="bzpass" type="password" placeholder="%BZPASSPH%" autocomplete="current-password">
+%BZROWS%
+<button type="submit">Salvar servidores</button>
+<small>Cole o link da página do sistema no Beszel (ex.: <code>http://nextneo.local:8090/system/abc123</code>); a URL do hub e o ID são extraídos automaticamente.</small></form>
 </main>
 <script>
 const MAX=8;
@@ -975,11 +1018,105 @@ const c=document.createElement('button');c.type='button';c.className='chip';c.te
   page.replace("%R25%", radius == 25 ? "selected" : "");
   page.replace("%R50%", radius == 50 ? "selected" : "");
   page.replace("%ROWS%", rows);
+  String bzRows;
+  for (uint8_t i = 0; i < SERVERS_MAX; ++i) {
+    char lbl[64], url[64], id[64];
+    serversGetConfig(i, lbl, url, id, sizeof lbl);
+    const String n = String(i);
+    bzRows += "<label class=\"label\">Servidor " + String(i + 1) + "</label><div class=\"asset\" style=\"grid-template-columns:1fr 1.6fr\">"
+              "<input name=\"bzlbl" + n + "\" value=\"" + htmlEscape(lbl) + "\" placeholder=\"Apelido\" maxlength=\"23\">"
+              "<input name=\"bzlink" + n + "\" value=\"" + htmlEscape(String(url) + "/system/" + id) + "\" placeholder=\"http://host:8090/system/ID\">"
+              "<span class=\"info\" style=\"grid-column:1/3\">" + htmlEscape(serversStatusText(i)) + "</span></div>";
+  }
+  page.replace("%BZROWS%", bzRows);
+  page.replace("%BZUSER%", htmlEscape(serversUser()));
+  page.replace("%BZPASSPH%", serversHasPassword() ? "•••••• (salva; deixe vazio para manter)" : "senha do usuário");
   return page;
 }
 
 static void sendConfigPage(const String &notice) {
   configServer.send(200, "text/html; charset=utf-8", configPage(notice));
+}
+
+// ---------------------------------------------------------------- log page
+// Last 30 minutes of log, newest first. Errors in red, warnings in yellow.
+// Streamed in chunks so no big String is built in RAM.
+static void sendLogPage() {
+  static LogLine *snapshot = nullptr;
+  if (!snapshot) snapshot = (LogLine *)psramCalloc(APP_LOG_CAPACITY, sizeof(LogLine));
+  const String filter = configServer.arg("f");          // "", "warn" or "err"
+  const uint32_t window = 30UL * 60UL * 1000UL;
+  const uint32_t nowMs = millis();
+  const uint32_t since = nowMs > window ? nowMs - window : 0;
+  const size_t n = snapshot ? appLogSnapshot(snapshot, APP_LOG_CAPACITY, since) : 0;
+  size_t errors = 0, warnings = 0;
+  for (size_t i = 0; i < n; ++i) {
+    if (snapshot[i].level == LogLevel::ERROR) ++errors;
+    else if (snapshot[i].level == LogLevel::WARN) ++warnings;
+  }
+  const time_t nowEpoch = time(nullptr);
+  const bool haveClock = nowEpoch > 1700000000;
+
+  configServer.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  configServer.send(200, "text/html; charset=utf-8", "");
+  String chunk = R"HTML(<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NextNeo Vista | Log</title>
+<style>*{box-sizing:border-box}body{margin:0;background:#0b1424;color:#d9e4f2;font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:16px}
+main{max-width:900px;margin:0 auto}h1{font-size:22px;margin:0 0 4px}.muted{color:#8fa6c2}.bar{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+.bar a,.bar label{padding:8px 12px;border-radius:10px;background:#ffffff14;color:#d9e4f2;text-decoration:none;font-weight:600}.bar a.on{background:#18a4ef;color:#071525}
+table{width:100%;border-collapse:collapse;font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace}td{padding:5px 8px;border-bottom:1px solid #ffffff10;vertical-align:top}
+td.t{color:#7f93ad;white-space:nowrap}td.m{word-break:break-word}tr.e td.m{color:#ff6b6b}tr.w td.m{color:#ffd477}
+.b{display:inline-block;min-width:44px;text-align:center;border-radius:6px;padding:1px 6px;font-size:11px;font-weight:700}.b.e{background:#ff6b6b33;color:#ff8f8f}.b.w{background:#ffd47733;color:#ffd477}.b.i{background:#ffffff14;color:#9fb6d0}
+.empty{padding:24px;text-align:center;color:#8fa6c2}</style>
+<main><h1>Log da aplicação</h1><div class="muted">Últimos 30 minutos · mais recentes primeiro · %COUNT% linhas (%ERR% erros, %WARN% avisos)</div>
+<div class="bar"><a href="/">&larr; Ajustes</a><a href="/log" class="%ALL%">Tudo</a><a href="/log?f=warn" class="%FW%">Avisos e erros</a><a href="/log?f=err" class="%FE%">Só erros</a>
+<label><input type="checkbox" id="auto" onchange="tick()"> Atualizar a cada 5 s</label></div><table>)HTML";
+  chunk.replace("%COUNT%", String((unsigned)n));
+  chunk.replace("%ERR%", String((unsigned)errors));
+  chunk.replace("%WARN%", String((unsigned)warnings));
+  chunk.replace("%ALL%", filter.isEmpty() ? "on" : "");
+  chunk.replace("%FW%", filter == "warn" ? "on" : "");
+  chunk.replace("%FE%", filter == "err" ? "on" : "");
+  configServer.sendContent(chunk);
+
+  size_t shown = 0;
+  chunk = "";
+  for (size_t k = n; k-- > 0;) {
+    const LogLine &l = snapshot[k];
+    if (filter == "err" && l.level != LogLevel::ERROR) continue;
+    if (filter == "warn" && l.level == LogLevel::INFO) continue;
+    char when[16];
+    const uint32_t agoS = (nowMs - l.ms) / 1000;
+    if (haveClock) {
+      const time_t at = nowEpoch - agoS;
+      struct tm tmv;
+      localtime_r(&at, &tmv);
+      strftime(when, sizeof when, "%H:%M:%S", &tmv);
+    } else {
+      snprintf(when, sizeof when, "-%lus", (unsigned long)agoS);
+    }
+    const char *cls = l.level == LogLevel::ERROR ? "e" : l.level == LogLevel::WARN ? "w" : "i";
+    const char *tag = l.level == LogLevel::ERROR ? "ERRO" : l.level == LogLevel::WARN ? "AVISO" : "info";
+    chunk += "<tr class=\"";
+    chunk += cls;
+    chunk += "\"><td class=\"t\">";
+    chunk += when;
+    chunk += "</td><td><span class=\"b ";
+    chunk += cls;
+    chunk += "\">";
+    chunk += tag;
+    chunk += "</span></td><td class=\"m\">";
+    chunk += htmlEscape(l.text);
+    chunk += "</td></tr>";
+    ++shown;
+    if (chunk.length() > 3000) { configServer.sendContent(chunk); chunk = ""; }
+  }
+  if (!shown) chunk += "<tr><td class=\"empty\" colspan=\"3\">Nada registrado neste período.</td></tr>";
+  chunk += R"HTML(</table></main><script>
+const a=document.getElementById('auto');a.checked=location.hash=='#auto';let t;
+function tick(){clearTimeout(t);if(a.checked){history.replaceState(null,'','#auto');t=setTimeout(()=>location.reload(),5000)}else history.replaceState(null,'',location.pathname+location.search)}
+tick();</script></html>)HTML";
+  configServer.sendContent(chunk);
+  configServer.sendContent("");   // end of chunked response
 }
 
 static void startConfigServer() {
@@ -1043,6 +1180,23 @@ static void startConfigServer() {
     if (!invalid.isEmpty()) notice += " Ignorados (caracteres inválidos): " + invalid + ".";
     sendConfigPage(notice);
   });
+  configServer.on("/save-servers", HTTP_POST, []() {
+    String user = configServer.arg("bzuser"); user.trim();
+    String pass = configServer.arg("bzpass");
+    serversSetCredentials(user.c_str(), pass.c_str());
+    String notice = "Servidores salvos.";
+    for (uint8_t i = 0; i < SERVERS_MAX; ++i) {
+      String lbl = configServer.arg("bzlbl" + String(i)); lbl.trim();
+      char url[64] = "", id[24] = "";
+      if (!serversParseLink(configServer.arg("bzlink" + String(i)).c_str(), url, sizeof url, id, sizeof id)) continue;
+      if (!id[0]) notice += " Servidor " + String(i + 1) + ": link sem /system/ID (ID mantido).";
+      serversSetServer(i, lbl.c_str(), url, id);
+    }
+    if (activeScreenId() == SCREEN_SERVERS) postScreenJob(CMD_SERVERS);
+    else notice += " Abra a tela Servers para consultar.";
+    sendConfigPage(notice);
+  });
+  configServer.on("/log", HTTP_GET, []() { sendLogPage(); });
   configServer.onNotFound([]() { configServer.send(404, "text/plain; charset=utf-8", "Nao encontrado"); });
   configServer.begin();
   configServerStarted = true;
@@ -1075,73 +1229,166 @@ static void showSettingsEvent(lv_event_t *) { showView(settingsView); }
 static void showFinanceEvent(lv_event_t *) { showView(financeView); }
 static void showCalendarEvent(lv_event_t *) { showView(calendarView); }
 static void showFlightRadarEvent(lv_event_t *) { showView(flightRadarView); }
+static void showServersEvent(lv_event_t *) { showView(serversView); }
+static void showClockEvent(lv_event_t *) { showView(clockView); }
+
+// iOS-style app icon: 64 px squircle-ish tile, vertical gradient (lighter on top),
+// 1 px top highlight, soft drop shadow, press = shrink to 92 % + darken.
+static constexpr int TILE_W = 112, TILE_H = 94, ICON = 72;
+
+static void noClickBox(lv_obj_t *o) {
+  lv_obj_set_style_border_width(o, 0, 0); lv_obj_set_style_pad_all(o, 0, 0);
+  lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE); lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+// ---- hand-drawn app glyphs (shapes only, no bitmaps) --------------------------
+
+static lv_obj_t *blob(lv_obj_t *p, int x, int y, int w, int h, uint32_t color, int radius = LV_RADIUS_CIRCLE,
+                      lv_opa_t opa = LV_OPA_COVER) {
+  lv_obj_t *o = lv_obj_create(p); noClickBox(o);
+  lv_obj_set_size(o, w, h); lv_obj_set_pos(o, x, y);
+  lv_obj_set_style_radius(o, radius, 0);
+  lv_obj_set_style_bg_color(o, lv_color_hex(color), 0); lv_obj_set_style_bg_opa(o, opa, 0);
+  return o;
+}
+static lv_obj_t *polyline(lv_obj_t *p, const lv_point_precise_t *pts, int n, int width, uint32_t color) {
+  lv_obj_t *l = lv_line_create(p);
+  lv_line_set_points(l, pts, n);
+  lv_obj_set_style_line_width(l, width, 0);
+  lv_obj_set_style_line_color(l, lv_color_hex(color), 0);
+  lv_obj_set_style_line_rounded(l, true, 0);
+  lv_obj_set_pos(l, 0, 0);
+  lv_obj_remove_flag(l, LV_OBJ_FLAG_CLICKABLE);
+  return l;
+}
+static void iconBg(lv_obj_t *box, uint32_t top, uint32_t bottom) {
+  lv_obj_set_style_bg_color(box, lv_color_hex(top), 0);
+  lv_obj_set_style_bg_grad_color(box, lv_color_hex(bottom), 0);
+}
+
+static void drawAppGlyph(lv_obj_t *box, const char *app, const char *symbol) {
+  if (!strcmp(app, "Clima")) {                       // sun behind a cloud
+    iconBg(box, 0x4FB3FF, 0x1A6FE0);
+    blob(box, 34, 12, 24, 24, 0xFFD43B);
+    blob(box, 14, 34, 22, 22, 0xFFFFFF); blob(box, 26, 26, 26, 26, 0xFFFFFF);
+    blob(box, 42, 34, 18, 18, 0xFFFFFF); blob(box, 14, 42, 46, 14, 0xFFFFFF, 7);
+  } else if (!strcmp(app, "Finanças")) {             // rising chart
+    iconBg(box, 0x2FD27A, 0x0E9F54);
+    static const lv_point_precise_t up[] = {{14, 52}, {28, 38}, {38, 44}, {56, 22}};
+    static const lv_point_precise_t ah[] = {{46, 22}, {56, 22}, {56, 32}};
+    polyline(box, up, 4, 5, 0xFFFFFF); polyline(box, ah, 3, 5, 0xFFFFFF);
+    blob(box, 12, 56, 48, 3, 0xFFFFFF, 2, LV_OPA_50);
+  } else if (!strcmp(app, "Servidores")) {           // 3-unit rack with LEDs
+    iconBg(box, 0x3A4558, 0x161B24);
+    for (int r = 0; r < 3; ++r) {
+      lv_obj_t *u = blob(box, 14, 14 + r * 16, 44, 12, 0xDDE3EC, 4);
+      lv_obj_set_style_bg_grad_color(u, lv_color_hex(0xA9B3C2), 0); lv_obj_set_style_bg_grad_dir(u, LV_GRAD_DIR_VER, 0);
+      blob(u, 6, 4, 4, 4, r == 2 ? 0xFFB020 : 0x2EE07A);
+      blob(u, 14, 5, 22, 2, 0x6B7585, 1);
+    }
+  } else if (!strcmp(app, "Ajustes")) {              // iOS-like grey gear
+    iconBg(box, 0xB7BDC6, 0x7D848F);
+    lv_obj_t *g = lv_label_create(box); lv_label_set_text(g, LV_SYMBOL_SETTINGS);
+    lv_obj_set_style_text_font(g, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_color(g, lv_color_hex(0x3B4049), 0); lv_obj_center(g);
+  } else if (!strcmp(app, "Calendário")) {           // live: weekday + day number
+    iconBg(box, 0xFFFFFF, 0xF1F2F5);
+    menuCalWeek = lv_label_create(box); lv_label_set_text(menuCalWeek, "SEG");
+    lv_obj_set_style_text_font(menuCalWeek, &lv_font_weather_14, 0);
+    lv_obj_set_style_text_color(menuCalWeek, lv_color_hex(0xF23B38), 0);
+    lv_obj_align(menuCalWeek, LV_ALIGN_TOP_MID, 0, 6);
+    menuCalDay = lv_label_create(box); lv_label_set_text(menuCalDay, "--");
+    lv_obj_set_style_text_font(menuCalDay, &lv_font_montserrat_36, 0);
+    lv_obj_set_style_text_color(menuCalDay, lv_color_hex(0x15171C), 0);
+    lv_obj_align(menuCalDay, LV_ALIGN_CENTER, 0, 8);
+  } else if (!strcmp(app, "Radar")) {                // rings + sweep + blips
+    iconBg(box, 0x1FA27A, 0x0A4F3C);
+    for (int i = 0; i < 3; ++i) {
+      const int d = 56 - i * 18;
+      lv_obj_t *ring = blob(box, (ICON - d) / 2, (ICON - d) / 2, d, d, 0, LV_RADIUS_CIRCLE, LV_OPA_TRANSP);
+      lv_obj_set_style_border_width(ring, 2, 0);
+      lv_obj_set_style_border_color(ring, lv_color_hex(0xB9FBE0), 0);
+      lv_obj_set_style_border_opa(ring, i == 0 ? LV_OPA_70 : LV_OPA_40, 0);
+    }
+    static const lv_point_precise_t sw[] = {{36, 36}, {56, 18}};
+    polyline(box, sw, 2, 3, 0xE9FFF6);
+    blob(box, 33, 33, 6, 6, 0xFFFFFF);
+    blob(box, 46, 42, 5, 5, 0xFFE066); blob(box, 20, 22, 4, 4, 0xFFE066);
+  } else if (!strcmp(app, "Relógio")) {              // white face, 10:10 hands
+    iconBg(box, 0x22252B, 0x0B0C0F);
+    lv_obj_t *face = blob(box, 8, 8, 56, 56, 0xFFFFFF);
+    for (int k = 0; k < 12; ++k) {
+      const float a = k * 0.5235988f;
+      blob(face, 27 + (int)lroundf(sinf(a) * 23), 27 - (int)lroundf(cosf(a) * 23), 2, 2, 0x2A2D34, 1);
+    }
+    static const lv_point_precise_t hh[] = {{28, 28}, {17, 21}}, mh[] = {{28, 28}, {44, 17}};
+    polyline(face, hh, 2, 4, 0x15171C); polyline(face, mh, 2, 3, 0x15171C);
+    blob(face, 25, 25, 6, 6, 0xF49B35);
+  } else if (!strcmp(app, "Fotos")) {                // 8-petal colour flower
+    iconBg(box, 0xFFFFFF, 0xF3F4F7);
+    static const uint32_t pc[8] = {0xFF9F0A, 0xFFD60A, 0x8FD14F, 0x34C759, 0x32ADE6, 0x5E5CE6, 0xBF5AF2, 0xFF375F};
+    for (int k = 0; k < 8; ++k) {
+      const float a = k * 0.7853982f;
+      blob(box, 26 + (int)lroundf(sinf(a) * 14), 26 - (int)lroundf(cosf(a) * 14), 20, 20, pc[k], LV_RADIUS_CIRCLE, LV_OPA_80);
+    }
+  } else {
+    lv_obj_t *icon = lv_label_create(box); lv_label_set_text(icon, symbol);
+    lv_obj_set_style_text_font(icon, &lv_font_montserrat_36, 0);
+    lv_obj_set_style_text_color(icon, lv_color_hex(0xFFFFFF), 0); lv_obj_center(icon);
+  }
+}
 
 static lv_obj_t *menuTile(lv_obj_t *parent, const char *symbol, const char *caption,
                           uint32_t tileColor, lv_event_cb_t callback) {
   lv_obj_t *tile = callback ? lv_button_create(parent) : lv_obj_create(parent);
-  lv_obj_set_size(tile, 96, 104);
-  lv_obj_set_style_bg_opa(tile, LV_OPA_TRANSP, LV_PART_MAIN);
-  lv_obj_set_style_border_width(tile, 0, LV_PART_MAIN);
-  lv_obj_set_style_shadow_width(tile, 0, LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(tile, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_PRESSED);
-  lv_obj_set_style_bg_opa(tile, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_CHECKED);
-  lv_obj_set_style_radius(tile, 12, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(tile, 0, LV_PART_MAIN);
+  lv_obj_set_size(tile, TILE_W, TILE_H);
+  lv_obj_set_style_bg_opa(tile, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_bg_opa(tile, LV_OPA_TRANSP, LV_STATE_PRESSED);
+  lv_obj_set_style_border_width(tile, 0, 0);
+  lv_obj_set_style_shadow_width(tile, 0, 0);
+  lv_obj_set_style_pad_all(tile, 0, 0);
+  lv_obj_remove_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
+  // press feedback: scale the whole tile around its centre
+  lv_obj_set_style_transform_pivot_x(tile, TILE_W / 2, 0);
+  lv_obj_set_style_transform_pivot_y(tile, ICON / 2, 0);
+  lv_obj_set_style_transform_scale(tile, 236, LV_STATE_PRESSED);
+  static lv_style_transition_dsc_t tr;
+  static const lv_style_prop_t props[] = {LV_STYLE_TRANSFORM_SCALE_X, LV_STYLE_TRANSFORM_SCALE_Y, LV_STYLE_PROP_INV};
+  static bool trInit = false;
+  if (!trInit) { lv_style_transition_dsc_init(&tr, props, lv_anim_path_ease_out, 90, 0, NULL); trInit = true; }
+  lv_obj_set_style_transition(tile, &tr, 0);
+  lv_obj_set_style_transition(tile, &tr, LV_STATE_PRESSED);
   if (callback) lv_obj_add_event_cb(tile, callback, LV_EVENT_CLICKED, NULL);
-  else lv_obj_clear_flag(tile, LV_OBJ_FLAG_CLICKABLE);
+  else lv_obj_remove_flag(tile, LV_OBJ_FLAG_CLICKABLE);
 
+  const lv_color_t base = lv_color_hex(tileColor);
   lv_obj_t *iconBox = lv_obj_create(tile);
-  lv_obj_set_size(iconBox, 92, 78);
+  lv_obj_set_size(iconBox, ICON, ICON);
   lv_obj_align(iconBox, LV_ALIGN_TOP_MID, 0, 0);
-  lv_obj_set_style_bg_color(iconBox, lv_color_hex(tileColor), 0);
-  lv_obj_set_style_bg_grad_color(iconBox, lv_color_mix(lv_color_white(),lv_color_hex(tileColor),LV_OPA_30), 0);
+  noClickBox(iconBox);
+  lv_obj_set_style_radius(iconBox, 17, 0);                       // ~23 % like iOS
+  lv_obj_set_style_bg_color(iconBox, lv_color_mix(lv_color_white(), base, LV_OPA_20), 0);
+  lv_obj_set_style_bg_grad_color(iconBox, lv_color_mix(lv_color_black(), base, LV_OPA_10), 0);
   lv_obj_set_style_bg_grad_dir(iconBox, LV_GRAD_DIR_VER, 0);
   lv_obj_set_style_bg_opa(iconBox, LV_OPA_COVER, 0);
-  lv_obj_set_style_border_width(iconBox, 0, 0);
-  lv_obj_set_style_radius(iconBox, 18, 0);
-  lv_obj_set_style_shadow_width(iconBox, 9, 0);
-  lv_obj_set_style_shadow_opa(iconBox, LV_OPA_20, 0);
-  lv_obj_set_style_shadow_color(iconBox, lv_color_hex(0x020817), 0);
-  lv_obj_set_style_pad_all(iconBox, 0, 0);
-  lv_obj_remove_flag(iconBox, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_remove_flag(iconBox, LV_OBJ_FLAG_CLICKABLE);
-  if (strcmp(caption, "Calendário") == 0) {
-    lv_obj_t *page = lv_obj_create(iconBox); lv_obj_set_size(page, 62, 68); lv_obj_align(page, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(page, lv_color_hex(0xF8F8FA), 0); lv_obj_set_style_bg_opa(page, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(page, 14, 0); lv_obj_set_style_border_color(page, lv_color_hex(0xD9DDE5), 0); lv_obj_set_style_border_width(page, 1, 0); lv_obj_set_style_pad_all(page, 0, 0); lv_obj_remove_flag(page, LV_OBJ_FLAG_SCROLLABLE); lv_obj_remove_flag(page, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_t *cap = lv_obj_create(page); lv_obj_set_size(cap, 62, 18); lv_obj_align(cap, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_bg_color(cap, lv_color_hex(0xF23B38), 0); lv_obj_set_style_bg_grad_color(cap, lv_color_hex(0xD90018), 0); lv_obj_set_style_bg_grad_dir(cap, LV_GRAD_DIR_VER, 0); lv_obj_set_style_bg_opa(cap, LV_OPA_COVER, 0); lv_obj_set_style_radius(cap, 14, 0); lv_obj_set_style_border_width(cap, 0, 0); lv_obj_remove_flag(cap, LV_OBJ_FLAG_CLICKABLE);
-    for(int r=0;r<3;r++) for(int c=0;c<5;c++){ lv_obj_t *dot=lv_obj_create(page); lv_obj_set_size(dot,5,5); lv_obj_set_pos(dot,10+c*10,28+r*10); lv_obj_set_style_radius(dot,LV_RADIUS_CIRCLE,0); lv_obj_set_style_bg_color(dot,lv_color_hex(0x111318),0); lv_obj_set_style_bg_opa(dot,LV_OPA_COVER,0); lv_obj_set_style_border_width(dot,0,0); lv_obj_remove_flag(dot,LV_OBJ_FLAG_CLICKABLE); }
-    lv_obj_t *todayDot=lv_obj_create(page); lv_obj_set_size(todayDot,9,9); lv_obj_set_pos(todayDot,35,46); lv_obj_set_style_radius(todayDot,LV_RADIUS_CIRCLE,0); lv_obj_set_style_bg_color(todayDot,lv_color_hex(0xF23B38),0); lv_obj_set_style_bg_opa(todayDot,LV_OPA_COVER,0); lv_obj_set_style_border_width(todayDot,0,0); lv_obj_remove_flag(todayDot,LV_OBJ_FLAG_CLICKABLE);
-  } else if (strcmp(caption, "Radar") == 0) {
-    for (int i = 0; i < 3; ++i) {
-      lv_obj_t *ring = lv_obj_create(iconBox);
-      int d = 46 - i * 14;
-      lv_obj_set_size(ring, d, d);
-      lv_obj_center(ring);
-      lv_obj_set_style_bg_opa(ring, LV_OPA_TRANSP, 0);
-      lv_obj_set_style_border_color(ring, lv_color_hex(i == 0 ? 0xD8FFF0 : 0x87E8BF), 0);
-      lv_obj_set_style_border_width(ring, 2, 0);
-      lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
-      lv_obj_remove_flag(ring, LV_OBJ_FLAG_CLICKABLE);
-      lv_obj_remove_flag(ring, LV_OBJ_FLAG_SCROLLABLE);
-    }
-    lv_obj_t *dot = lv_obj_create(iconBox);
-    lv_obj_set_size(dot, 7, 7);
-    lv_obj_center(dot);
-    lv_obj_set_style_bg_color(dot, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(dot, 0, 0);
-    lv_obj_remove_flag(dot, LV_OBJ_FLAG_CLICKABLE);
-  } else {
-    lv_obj_t *icon = lv_label_create(iconBox); lv_label_set_text(icon, symbol); lv_obj_set_style_text_font(icon, &lv_font_montserrat_48, 0); lv_obj_set_style_text_color(icon, lv_color_hex(0xFFFFFF), 0); lv_obj_center(icon);
-  }
+  lv_obj_set_style_border_side(iconBox, LV_BORDER_SIDE_TOP, 0);    // glassy top highlight
+  lv_obj_set_style_border_width(iconBox, 1, 0);
+  lv_obj_set_style_border_color(iconBox, lv_color_white(), 0);
+  lv_obj_set_style_border_opa(iconBox, LV_OPA_30, 0);
+  lv_obj_set_style_shadow_width(iconBox, 14, 0);
+  lv_obj_set_style_shadow_offset_y(iconBox, 4, 0);
+  lv_obj_set_style_shadow_opa(iconBox, LV_OPA_40, 0);
+  lv_obj_set_style_shadow_color(iconBox, lv_color_hex(0x01040C), 0);
+
+  drawAppGlyph(iconBox, caption, symbol);
   lv_obj_t *label = lv_label_create(tile);
   lv_label_set_text(label, caption);
+  lv_obj_set_width(label, TILE_W);
+  lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+  lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_font(label, &lv_font_weather_14, 0);
   lv_obj_set_style_text_color(label, lv_color_hex(0xF4F7FF), 0);
-  lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -1);
+  lv_obj_align(label, LV_ALIGN_TOP_MID, 0, ICON + 4);
   return tile;
 }
 
@@ -1152,29 +1399,42 @@ static void build_main_menu(lv_obj_t *menu) {
   lv_obj_set_style_bg_opa(menu, LV_OPA_COVER, 0);
   lv_obj_remove_flag(menu, LV_OBJ_FLAG_SCROLLABLE);
 
-  lv_obj_t *title = makeLabel(menu, "", &lv_font_weather_20, 0xFFFFFF);
-  lv_obj_add_flag(title, LV_OBJ_FLAG_HIDDEN);
+  // status bar (clock left, Wi-Fi right) like the iPhone
+  menuClock = makeLabel(menu, "--:--", &lv_font_weather_14, 0xEAF2FF);
+  lv_obj_add_flag(menuClock, LV_OBJ_FLAG_HIDDEN);   // no status bar: more room between rows
+
+  // 4 x 3 grid = 12 apps
   lv_obj_t *grid = lv_obj_create(menu);
-  lv_obj_set_size(grid, 436, 220);
-  lv_obj_align(grid, LV_ALIGN_CENTER, 0, 4);
+  lv_obj_set_size(grid, 4 * TILE_W + 3 * 6, 3 * TILE_H + 2 * 11);
+  lv_obj_align(grid, LV_ALIGN_CENTER, 0, 0);
   lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(grid, 0, 0);
   lv_obj_set_style_pad_all(grid, 0, 0);
-  lv_obj_set_style_pad_row(grid, 15, 0);
-  lv_obj_set_style_pad_column(grid, 17, 0);
+  lv_obj_set_style_pad_row(grid, 11, 0);
+  lv_obj_set_style_pad_column(grid, 6, 0);
   lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-  lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
   lv_obj_remove_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
-  menuTile(grid, "$", "Finance", 0x151820, showFinanceEvent);
-  menuTile(grid, LV_SYMBOL_IMAGE, "Photo", 0x39B982, NULL);
-  menuTile(grid, LV_SYMBOL_PLAY, "Video", 0x7353E8, NULL);
-  menuTile(grid, LV_SYMBOL_SETTINGS, "Setting", 0x8993A3, showSettingsEvent);
+  menuTile(grid, "$", "Finanças", 0x0E9F54, showFinanceEvent);
+  menuTile(grid, LV_SYMBOL_IMAGE, "Fotos", 0x39B982, NULL);
+  {
+    lv_obj_t *srv = menuTile(grid, LV_SYMBOL_DRIVE, "Servidores", 0x2E3A4C, showServersEvent);
+    menuServersBadge = lv_obj_create(srv);   // red dot when a server is offline
+    lv_obj_set_size(menuServersBadge, 16, 16); lv_obj_align(menuServersBadge, LV_ALIGN_TOP_RIGHT, -12, -4);
+    lv_obj_set_style_radius(menuServersBadge, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(menuServersBadge, lv_color_hex(0xF0453A), 0);
+    lv_obj_set_style_border_color(menuServersBadge, lv_color_hex(0x06163C), 0);
+    lv_obj_set_style_border_width(menuServersBadge, 2, 0);
+    lv_obj_remove_flag(menuServersBadge, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);
+  }
+  menuTile(grid, LV_SYMBOL_SETTINGS, "Ajustes", 0x8993A3, showSettingsEvent);
   menuTile(grid, "", "Calendário", 0xF8F8FA, showCalendarEvent);
   menuTile(grid, "", "Radar", 0x126E58, showFlightRadarEvent);
-  menuTile(grid, LV_SYMBOL_TINT, "Weather", 0x078BDD, showWeatherEvent);
-  menuTile(grid, LV_SYMBOL_HOME, "Clock", 0xF49B35, NULL);
+  menuTile(grid, LV_SYMBOL_TINT, "Clima", 0x078BDD, showWeatherEvent);
+  menuTile(grid, LV_SYMBOL_HOME, "Relógio", 0x22252B, showClockEvent);
   menuWifiIcon = makeLabel(menu, LV_SYMBOL_WIFI, &lv_font_weather_14, 0xEAF2FF);
-  lv_obj_align(menuWifiIcon, LV_ALIGN_TOP_RIGHT, -15, 7);
+  lv_obj_align(menuWifiIcon, LV_ALIGN_TOP_RIGHT, -3, 3);
 }
 
 lv_obj_t *addBackButton(lv_obj_t *parent) {
@@ -1214,6 +1474,8 @@ static void build_ui() {
   buildFinanceScreen(scr);
   buildCalendarScreen(scr);
   buildWeatherScreen(scr);
+  buildServersScreen(scr);
+  buildClockScreen(scr);
   flightRadarView = lv_obj_create(scr);
   buildFlightRadarScreen(flightRadarView);
   settingsView = lv_obj_create(scr);
@@ -1234,8 +1496,9 @@ static void build_ui() {
 // ---------------------------------------------------------------- setup / loop
 void setup() {
   Serial.begin(115200);
+  appLogBegin();   // keep the last minutes of log in PSRAM for http://IP/log
   delay(1000);
-  Serial.println("NextNeo Vista boot");
+  Log.println("NextNeo Vista boot");
 
   mtx = xSemaphoreCreateMutex();
   cmdQ = xQueueCreate(8, sizeof(NetJob));
@@ -1253,10 +1516,11 @@ void setup() {
   }
 
   loadFinanceAssets();   // Finance symbols (editable on the web page)
+  loadServersConfig();   // Beszel hubs + login (Settings / web page)
 
   gfx->setRotation(1); // Landscape UI in the canvas; keep AXS15231B native portrait mode.
   if (!gfx->begin(40000000)) {
-    Serial.println("gfx->begin FAILED (display or framebuffer allocation)");
+    Log.println("gfx->begin FAILED (display or framebuffer allocation)");
   }
   pinMode(GFX_BL, OUTPUT);
   digitalWrite(GFX_BL, HIGH);

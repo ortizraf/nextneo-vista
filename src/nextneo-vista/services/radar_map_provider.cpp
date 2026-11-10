@@ -1,3 +1,4 @@
+#include "app_log.h"
 #include "radar_map_provider.h"
 #include "aircraft_data_provider.h"
 #include "https_fetch.h"
@@ -115,7 +116,7 @@ bool fetchRadarMap(double lat, double lon, float radiusKm, uint16_t *out, int si
   jpeg->~JPEGDEC();
   heap_caps_free(mem);
   heap_caps_free(target);
-  Serial.printf("Mapa: %u bytes em %lums (%s)\n", (unsigned)jpegBody.length(),
+  Log.printf("Mapa: %u bytes em %lums (%s)\n", (unsigned)jpegBody.length(),
                 (unsigned long)(millis() - started), ok ? "ok" : error);
   return ok;
 }

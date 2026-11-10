@@ -1,3 +1,4 @@
+#include "app_log.h"
 #include "https_fetch.h"
 #include <HTTPClient.h>
 
@@ -5,7 +6,7 @@ bool tlsMemoryAvailable(const char *tag) {
   const size_t block = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
   if (block >= TLS_MIN_INTERNAL_BLOCK) return true;
   logInternalHeap(tag);
-  Serial.printf("[tls] %s: memória interna insuficiente para handshake (%u < %u)\n", tag,
+  Log.printf("[tls] %s: memória interna insuficiente para handshake (%u < %u)\n", tag,
                 (unsigned)block, (unsigned)TLS_MIN_INTERNAL_BLOCK);
   return false;
 }
