@@ -1503,9 +1503,9 @@ static lv_obj_t *menuTile(lv_obj_t *parent, const char *symbol, const char *capt
   lv_obj_set_style_border_width(iconBox, 1, 0);
   lv_obj_set_style_border_color(iconBox, lv_color_white(), 0);
   lv_obj_set_style_border_opa(iconBox, LV_OPA_30, 0);
-  lv_obj_set_style_shadow_width(iconBox, 14, 0);
-  lv_obj_set_style_shadow_offset_y(iconBox, 4, 0);
-  lv_obj_set_style_shadow_opa(iconBox, LV_OPA_40, 0);
+  lv_obj_set_style_shadow_width(iconBox, 6, 0);            // small blur: menu redraw ~200 ms -> much less
+  lv_obj_set_style_shadow_offset_y(iconBox, 3, 0);
+  lv_obj_set_style_shadow_opa(iconBox, LV_OPA_50, 0);
   lv_obj_set_style_shadow_color(iconBox, lv_color_hex(0x01040C), 0);
 
   drawAppGlyph(iconBox, caption, symbol);

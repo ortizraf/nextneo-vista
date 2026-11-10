@@ -32,7 +32,8 @@ static void buildCard(int i) {
   lv_obj_set_style_bg_color(c, lv_color_hex(0x151719), 0); lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
   lv_obj_set_style_radius(c, 22, 0); lv_obj_set_style_border_width(c, 2, 0);
   lv_obj_set_style_border_color(c, lv_color_hex(0x45484D), 0);
-  lv_obj_set_style_shadow_width(c, 12, 0); lv_obj_set_style_shadow_opa(c, LV_OPA_40, 0);
+  // no blurred shadow: it cost 150-700 ms per frame while scrolling (see [perf]); a lighter top edge keeps the depth
+  lv_obj_set_style_shadow_width(c, 0, 0);
   lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(c, refreshQuoteEvent, LV_EVENT_CLICKED, (void *)(intptr_t)i);

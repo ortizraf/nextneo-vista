@@ -526,29 +526,48 @@ void buildServersScreen(lv_obj_t *scr) {
   }
 }
 
+// Setting a style always invalidates the object, even with the same value: keep
+// what each card shows and only touch what changed (cards redrew 70-350 ms).
+static int cardState[SERVERS_MAX] = {-1, -1};
+static uint32_t cardHistMs[SERVERS_MAX] = {UINT32_MAX, UINT32_MAX}, arcColor[SERVERS_MAX][3], footColor[SERVERS_MAX];
+static uint32_t detailHistMs = UINT32_MAX; static int detailShown = -1;
+static void setArcColor(int i, int k, uint32_t c) {
+  if (arcColor[i][k] == c) return;
+  arcColor[i][k] = c;
+  lv_obj_set_style_arc_color(cards[i].arc[k], lv_color_hex(c), LV_PART_INDICATOR);
+}
+
 static void renderCard(int i, const ServerData &d, const ServerCfg &c) {
   CardUi &u = cards[i];
   char b[48];
   setLabelIfChanged(u.name, d.name[0] ? d.name : c.label);
   const bool live = d.reachable && d.up;
-  lv_obj_set_style_bg_color(u.dot, lv_color_hex(!d.known ? 0x6B7685 : live ? C_GREEN : C_RED), 0);
-  lv_obj_set_style_border_color(u.card, lv_color_hex(d.known && !live ? 0x7A2E2E : C_LINE), 0);
+  const int state = !d.known ? 0 : live ? 1 : 2;
+  const bool stateChanged = state != cardState[i];
+  if (stateChanged) {
+    cardState[i] = state;
+    lv_obj_set_style_bg_color(u.dot, lv_color_hex(!d.known ? 0x6B7685 : live ? C_GREEN : C_RED), 0);
+    lv_obj_set_style_border_color(u.card, lv_color_hex(d.known && !live ? 0x7A2E2E : C_LINE), 0);
+  }
   if (!d.known) setLabelIfChanged(u.state, "...");
   else if (!d.reachable) setLabelIfChanged(u.state, "sem dados");
   else if (!d.up) setLabelIfChanged(u.state, "OFFLINE");
   else { fmtAge(d.updatedEpoch, b, sizeof b); setLabelIfChanged(u.state, b); }
-  lv_obj_set_style_text_color(u.state, lv_color_hex(d.known && !live ? C_RED : C_MUTED), 0);
+  if (stateChanged) lv_obj_set_style_text_color(u.state, lv_color_hex(d.known && !live ? C_RED : C_MUTED), 0);
 
   const float vals[3] = {d.cpu, d.ram, d.disk};
   for (int k = 0; k < 3; ++k) {
     lv_arc_set_value(u.arc[k], live ? (int)lroundf(vals[k]) : 0);
-    lv_obj_set_style_arc_color(u.arc[k], lv_color_hex(live ? levelColor(vals[k]) : 0x3A4250), LV_PART_INDICATOR);
+    setArcColor(i, k, live ? levelColor(vals[k]) : 0x3A4250);
     if (d.reachable) snprintf(b, sizeof b, "%.0f%%", vals[k]); else strcpy(b, "--");
     setLabelIfChanged(u.arcVal[k], b);
-    lv_obj_set_style_text_color(u.arcVal[k], lv_color_hex(live ? 0xFFFFFF : 0x6B7685), 0);
+    if (stateChanged) lv_obj_set_style_text_color(u.arcVal[k], lv_color_hex(live ? 0xFFFFFF : 0x6B7685), 0);
   }
-  fillSeries(u.chart, u.sCpu, d.hCpu, d.hCount);
-  fillSeries(u.chart, u.sRam, d.hRam, d.hCount);
+  if (d.histMs != cardHistMs[i] || stateChanged) {          // history changes once a minute, not every poll
+    cardHistMs[i] = d.histMs;
+    fillSeries(u.chart, u.sCpu, d.hCpu, d.hCount);
+    fillSeries(u.chart, u.sRam, d.hRam, d.hCount);
+  }
 
   if (!d.reachable) {
     setLabelIfChanged(u.footVal[0], "--"); setLabelIfChanged(u.footVal[2], "--");
@@ -557,7 +576,8 @@ static void renderCard(int i, const ServerData &d, const ServerCfg &c) {
   }
   if (d.temp >= 0) snprintf(b, sizeof b, "%.0f\xC2\xB0", d.temp); else strcpy(b, "--");
   setLabelIfChanged(u.footVal[0], b);
-  lv_obj_set_style_text_color(u.footVal[0], lv_color_hex(d.temp >= 0 ? tempColor(d.temp) : C_MUTED), 0);
+  const uint32_t fc = d.temp >= 0 ? tempColor(d.temp) : C_MUTED;
+  if (fc != footColor[i]) { footColor[i] = fc; lv_obj_set_style_text_color(u.footVal[0], lv_color_hex(fc), 0); }
   char rx[12], tx[12];
   fmtRate(d.netIn, rx, sizeof rx); fmtRate(d.netOut, tx, sizeof tx);
   snprintf(b, sizeof b, LV_SYMBOL_DOWN "%s " LV_SYMBOL_UP "%s", rx, tx);
@@ -576,8 +596,10 @@ static void renderDetail(const ServerData &d, const ServerCfg &c) {
 
   const float cur[3] = {d.cpu, d.ram, d.disk};
   const float *hist[3] = {d.hCpu, d.hRam, d.hDisk};
+  const bool histChanged = d.histMs != detailHistMs || detailShown != detailIndex;
+  detailHistMs = d.histMs; detailShown = detailIndex;
   for (int k = 0; k < 3; ++k) {
-    fillSeries(mc[k].chart, mc[k].ser, hist[k], d.hCount);
+    if (histChanged) fillSeries(mc[k].chart, mc[k].ser, hist[k], d.hCount);
     if (d.reachable) snprintf(b, sizeof b, "%.0f%%", cur[k]); else strcpy(b, "--");
     setLabelIfChanged(mc[k].value, b);
     lv_obj_set_style_text_color(mc[k].value, lv_color_hex(d.reachable ? levelColor(cur[k]) : C_MUTED), 0);
@@ -586,7 +608,7 @@ static void renderDetail(const ServerData &d, const ServerCfg &c) {
   float peak = 0;
   for (int k = 0; k < d.hCount; ++k) peak = max(peak, d.hNet[k]);
   const float top = niceMax(peak);
-  fillSeries(mc[3].chart, mc[3].ser, d.hNet, d.hCount, 100.0f / top);
+  if (histChanged) fillSeries(mc[3].chart, mc[3].ser, d.hNet, d.hCount, 100.0f / top);
   char t1[12], t2[12];
   fmtRate(top, t1, sizeof t1); fmtRate(top / 2, t2, sizeof t2);
   setLabelIfChanged(mc[3].yTop, t1); setLabelIfChanged(mc[3].yMid, t2);
@@ -609,6 +631,8 @@ static void renderDetail(const ServerData &d, const ServerCfg &c) {
 void serversOnEnter() {
   if (detailIndex >= 0) closeDetail(nullptr);
   renderedVersion = UINT32_MAX;
+  for (int i = 0; i < SERVERS_MAX; ++i) { cardState[i] = -1; cardHistMs[i] = UINT32_MAX; footColor[i] = UINT32_MAX; for (auto &a : arcColor[i]) a = UINT32_MAX; }
+  detailHistMs = UINT32_MAX; detailShown = -1;
 }
 
 void serversRender() {

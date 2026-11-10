@@ -82,7 +82,7 @@ static void build_settings(lv_obj_t *t) {
   t = content;
   lv_obj_set_flex_flow(t, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_style_pad_row(t, 8, 0);
-  lv_obj_set_style_pad_bottom(t, 205, 0);  // room to scroll above the landscape keyboard
+  lv_obj_set_style_pad_bottom(t, 240, 0);  // room to scroll above the landscape keyboard (+close strip)
 
   makeLabel(t, "Wi-Fi", &lv_font_weather_20, 0xFFFFFF);
   lv_obj_t *r1 = lv_obj_create(t);
@@ -222,9 +222,15 @@ void buildConfigScreen(lv_obj_t *screen) {
   build_settings(screen);
 }
 
+static void kb_close_event(lv_event_t *) {
+  lv_obj_t *ta = lv_keyboard_get_textarea(kb);
+  lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+  if (ta) lv_obj_remove_state(ta, LV_STATE_FOCUSED);
+}
+
 void buildConfigKeyboard() {
   kb = lv_keyboard_create(lv_layer_top());
-  lv_obj_set_size(kb, SCR_W, 190);
+  lv_obj_set_size(kb, SCR_W, 190 + 38);      // +38 px strip on top for the close button
   lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
   lv_obj_set_style_text_font(kb, &lv_font_weather_20, LV_PART_ITEMS);
   lv_obj_set_style_bg_color(kb, lv_color_hex(0x0B1424), LV_PART_MAIN);
@@ -233,6 +239,21 @@ void buildConfigKeyboard() {
   lv_obj_set_style_bg_color(kb, lv_color_hex(0x1767A8), LV_PART_ITEMS | LV_STATE_PRESSED);
   lv_obj_set_style_pad_all(kb, 4, 0);
   lv_obj_set_style_pad_gap(kb, 5, 0);
+  lv_obj_set_style_pad_top(kb, 40, 0);       // keys start below the close strip
+  lv_obj_remove_flag(kb, LV_OBJ_FLAG_SCROLLABLE);
+  // "Fechar" button lives inside the keyboard, so it hides/shows with it
+  lv_obj_t *close = lv_button_create(kb);
+  lv_obj_set_size(close, 112, 30);
+  lv_obj_align(close, LV_ALIGN_TOP_RIGHT, 0, -36);
+  lv_obj_set_style_bg_color(close, lv_color_hex(0x2A3A55), 0);
+  lv_obj_set_style_radius(close, 10, 0);
+  lv_obj_set_style_shadow_width(close, 0, 0);
+  lv_obj_t *cl = lv_label_create(close);
+  lv_label_set_text(cl, LV_SYMBOL_CLOSE "  Fechar");
+  lv_obj_set_style_text_font(cl, &lv_font_weather_14, 0);
+  lv_obj_set_style_text_color(cl, lv_color_hex(0xEAF2FF), 0);
+  lv_obj_center(cl);
+  lv_obj_add_event_cb(close, kb_close_event, LV_EVENT_CLICKED, NULL);
   lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_event_cb(kb, kb_event, LV_EVENT_ALL, NULL);
 }
