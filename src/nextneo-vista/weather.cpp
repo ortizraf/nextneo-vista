@@ -1,14 +1,34 @@
 #include "app_screens.h"
+#include <time.h>
 
 static int renderedCode = -999;
 static int renderedHourCodes[8] = {-999,-999,-999,-999,-999,-999,-999,-999};
 static int renderedDayCodes[7] = {-999,-999,-999,-999,-999,-999,-999};
 static uint32_t renderedWeatherVersion = UINT32_MAX;
+// Photo-like sky behind the tabs (same images as the Clock screen, clock.cpp).
+const lv_image_dsc_t *skyImageFor(float hour, int code);
+static lv_obj_t *wxSky;
+static int skyKey = -1;
+
+static void refreshSky(int code, bool force) {
+  struct tm ti;
+  if (!getLocalTime(&ti, 0)) return;
+  const int key = code * 100 + ti.tm_hour * 4 + ti.tm_min / 15;     // re-pick every 15 min or on new code
+  if (!force && key == skyKey) return;
+  skyKey = key;
+  const lv_image_dsc_t *img = skyImageFor(ti.tm_hour + ti.tm_min / 60.0f, code);
+  if (!img) return;
+  lv_image_set_src(wxSky, img);
+  lv_obj_invalidate(wxSky);
+  lv_obj_remove_flag(wxSky, LV_OBJ_FLAG_HIDDEN);       // shown only with the right picture
+}
 static int renderedWifiState = -1;
 
 // On-Enter: force one full repaint from the cached forecast.
 void weatherOnEnter() {
   renderedWeatherVersion = UINT32_MAX;
+  skyKey = -1;            // Clock may have reused the buffer: reload
+  lv_obj_add_flag(wxSky, LV_OBJ_FLAG_HIDDEN);   // never show a stale picture
   renderedWifiState = -1;
 }
 
@@ -76,7 +96,7 @@ static lv_obj_t *detailCard(lv_obj_t *t, int index, const char *title, lv_obj_t 
   // The tab already has ~16 px side padding: 4 x 104 + 3 x 10 = 446 px.
   lv_obj_t *card = makeCard(t, 104, 56);
   lv_obj_set_pos(card, index * 114, 196);
-  lv_obj_set_style_bg_opa(card, LV_OPA_60, 0);
+  lv_obj_set_style_bg_opa(card, LV_OPA_80, 0);
   lv_obj_set_style_pad_all(card, 0, 0);
   lv_obj_t *head = lv_obj_create(card);
   lv_obj_set_size(head, 92, 18);
@@ -94,7 +114,7 @@ static lv_obj_t *detailCard(lv_obj_t *t, int index, const char *title, lv_obj_t 
     lv_obj_set_style_image_recolor(icon, lv_color_hex(0x7FB6E8), 0);
     lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
   }
-  makeLabel(head, title, &lv_font_weather_14, 0x9AA8BA);
+  makeLabel(head, title, &lv_font_weather_14, 0xE3EAF3);     // brighter: readable over the photo
   *value = makeLabel(card, "--", &lv_font_weather_20, 0xFFFFFF);
   lv_obj_set_pos(*value, 10, 26);
   return card;
@@ -102,17 +122,14 @@ static lv_obj_t *detailCard(lv_obj_t *t, int index, const char *title, lv_obj_t 
 
 static void build_home(lv_obj_t *t) {
   homeTab = t;
-  lv_obj_set_style_bg_color(t, lv_color_hex(0x17253D), 0);
-  lv_obj_set_style_bg_grad_color(t, lv_color_hex(0x334C70), 0);
-  lv_obj_set_style_bg_grad_dir(t, LV_GRAD_DIR_VER, 0);
-  lv_obj_set_style_bg_opa(t, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_opa(t, LV_OPA_TRANSP, 0);                 // sky shown as is (same as Clock)
   lv_obj_remove_flag(t, LV_OBJ_FLAG_SCROLLABLE);
 
   lblCity = makeLabel(t, "São Paulo", &lv_font_weather_20, 0xEAF2FF);
   lv_obj_set_width(lblCity, 250);
   lv_label_set_long_mode(lblCity, LV_LABEL_LONG_DOT);
   lv_obj_set_pos(lblCity, 52, 8);
-  lblDate = makeLabel(t, "", &lv_font_weather_14, 0xAFC0D6);
+  lblDate = makeLabel(t, "", &lv_font_weather_14, 0xF2F6FB);
   lv_obj_set_pos(lblDate, 52, 34);
   // Wi-Fi icon: same size and screen position as on the main menu
   // (font 14, 15 px from the right edge, 7 px from the top). The tab has its
@@ -129,7 +146,7 @@ static void build_home(lv_obj_t *t) {
   lv_obj_set_pos(lblTemp, 20, 60);
   lblCond = makeLabel(t, "Aguardando clima", &lv_font_weather_20, 0xEAF2FF);
   lv_obj_set_pos(lblCond, 24, 118);
-  lblRange = makeLabel(t, "", &lv_font_weather_14, 0xC2D0E3);
+  lblRange = makeLabel(t, "", &lv_font_weather_14, 0xF2F6FB);
   lv_obj_set_pos(lblRange, 24, 148);
 
   // Big weather artwork (same drawing, drawn in updateWeatherScreen).
@@ -224,10 +241,8 @@ static lv_obj_t *rainRow(lv_obj_t *card, int y, lv_obj_t **label) {
 }
 
 static void build_hours(lv_obj_t *t) {
-  lv_obj_set_style_bg_color(t, lv_color_hex(0x111C2E), 0);
-  lv_obj_set_style_bg_grad_color(t, lv_color_hex(0x1B2D47), 0);
-  lv_obj_set_style_bg_grad_dir(t, LV_GRAD_DIR_VER, 0);
-  lv_obj_set_style_bg_opa(t, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(t, lv_color_hex(0x050A14), 0);      // very light veil: lists stay readable
+  lv_obj_set_style_bg_opa(t, LV_OPA_20, 0);
   lv_obj_remove_flag(t, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_t *title = makeLabel(t, "Previsão por hora", &lv_font_weather_20, 0xEAF2FF);
   lv_obj_set_pos(title, 82, 8);
@@ -250,10 +265,8 @@ static void build_hours(lv_obj_t *t) {
 }
 
 static void build_days(lv_obj_t *t) {
-  lv_obj_set_style_bg_color(t, lv_color_hex(0x111C2E), 0);
-  lv_obj_set_style_bg_grad_color(t, lv_color_hex(0x253750), 0);
-  lv_obj_set_style_bg_grad_dir(t, LV_GRAD_DIR_VER, 0);
-  lv_obj_set_style_bg_opa(t, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(t, lv_color_hex(0x050A14), 0);
+  lv_obj_set_style_bg_opa(t, LV_OPA_20, 0);
   lv_obj_remove_flag(t, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_t *title = makeLabel(t, "Próximos 7 dias", &lv_font_weather_20, 0xEAF2FF);
   lv_obj_set_pos(title, 82, 8);
@@ -309,15 +322,24 @@ void buildWeatherScreen(lv_obj_t *scr) {
   lv_obj_set_style_pad_all(weatherView, 0, 0);
   lv_obj_set_style_border_width(weatherView, 0, 0);
   lv_obj_set_style_bg_opa(weatherView, LV_OPA_TRANSP, 0);
+  wxSky = lv_image_create(weatherView);
+  lv_obj_set_pos(wxSky, 0, 0);
+  lv_obj_set_size(wxSky, SCR_W, SCR_H);
+  lv_obj_remove_flag(wxSky, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_flag(wxSky, LV_OBJ_FLAG_HIDDEN);
   weatherTabs = lv_tabview_create(weatherView);
   lv_obj_set_size(weatherTabs, SCR_W, SCR_H);
   lv_obj_set_pos(weatherTabs, 0, 0);
   lv_tabview_set_tab_bar_position(weatherTabs, LV_DIR_BOTTOM);
   lv_tabview_set_tab_bar_size(weatherTabs, 42);
-  lv_obj_set_style_bg_color(weatherTabs, lv_color_hex(0x101820), 0);
+  lv_obj_set_style_bg_opa(weatherTabs, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_bg_opa(lv_tabview_get_content(weatherTabs), LV_OPA_TRANSP, 0);
+  // Instant tab switch: sliding three full-screen pages over the photo redraws the
+  // whole screen every frame.
+  lv_obj_set_style_anim_duration(lv_tabview_get_content(weatherTabs), 0, 0);
   lv_obj_t *tabBar = lv_tabview_get_tab_bar(weatherTabs);
   lv_obj_set_style_bg_color(tabBar, lv_color_hex(0x0B1424), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(tabBar, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(tabBar, LV_OPA_70, LV_PART_MAIN);
   lv_obj_set_style_border_width(tabBar, 0, LV_PART_MAIN);
   lv_obj_set_style_bg_color(tabBar, lv_color_hex(0x203C5C), LV_PART_ITEMS);
   lv_obj_set_style_text_color(tabBar, lv_color_hex(0xFFFFFF), LV_PART_ITEMS);
@@ -389,6 +411,7 @@ void updateWeatherScreen() {
   memcpy(drain, sh.dayRain, sizeof drain);
   version = sh.weatherVersion;
   xSemaphoreGive(mtx);
+  if (have) refreshSky(code, false);           // sky only once the real condition is known
   if (version == renderedWeatherVersion && renderedWifiState == (int)up) return;
   renderedWeatherVersion = version;
   renderedWifiState = up;
@@ -443,10 +466,7 @@ void updateWeatherScreen() {
     if (renderedCode != code) {
       renderedCode = code;
       // Change the scene colours to suit the current condition.
-      uint32_t top = (code == 0) ? 0x17253D : (isRainCode(code) ? 0x101B30 : 0x1A263B);
-      uint32_t bottom = (code == 0) ? 0x334C70 : (isRainCode(code) ? 0x203B5C : 0x344960);
-      lv_obj_set_style_bg_color(homeTab, lv_color_hex(top), 0);
-      lv_obj_set_style_bg_grad_color(homeTab, lv_color_hex(bottom), 0);
+      refreshSky(code, true);      // the sky photo now carries the condition
       lv_obj_clean(weatherArt);
       // Keep the original large weather artwork on Agora; card icons below
       // are a compact rendering of this same cloud/sun/drop visual language.

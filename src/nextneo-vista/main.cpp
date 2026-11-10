@@ -38,6 +38,9 @@ QueueHandle_t cmdQ;
 Config cfg;
 Preferences prefs;
 WebServer configServer(80);
+// LVGL renders on the Arduino loop task. Deep widget trees (Weather tabs over the
+// sky photo) overflowed the default 8 KB stack ("Stack canary watchpoint (loopTask)").
+SET_LOOP_TASK_STACK_SIZE(24 * 1024);
 bool configServerStarted = false;
 static uint32_t financeRetryAfterMs[FINANCE_MAX_ASSETS] = {};
 volatile int8_t financeSingleIndex = -1;

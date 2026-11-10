@@ -16,7 +16,7 @@ LV_FONT_DECLARE(lv_font_clock_120);
 
 lv_obj_t *clockView;
 
-static constexpr int STARS = 14, DROPS = 22, FOG = 3, HOURS = 5;
+static constexpr int STARS = 14, DROPS = 30, FOG = 3, HOURS = 5, SPLASH = 8;
 static constexpr uint32_t FRAME_MS = 66;      // ~15 fps: every frame pushes the full panel
 
 static lv_obj_t *sky, *star[STARS], *shoot, *drop[DROPS], *fog[FOG], *flash;
@@ -27,6 +27,17 @@ static constexpr int CARD_W0 = 300, CARD_H0 = 52, CARD_W1 = 452, CARD_H1 = 136;
 static lv_obj_t *card, *nowIcon, *nowTemp, *nowCond, *nowRange, *hourCol[HOURS], *hourLbl[HOURS], *hourIco[HOURS], *hourTmp[HOURS];
 static lv_timer_t *animTimer;
 static float dropX[DROPS], dropY[DROPS], dropSpeed[DROPS], fogX[FOG];
+// Rain in 3 depth layers (far: thin/slow/faint, near: long/fast/bright), drawn as
+// slanted streaks that match their motion, plus small splashes on the ground.
+static uint8_t dropLayer[DROPS];
+static constexpr float RAIN_SLANT = 0.22f;                   // dx/dy of the fall
+static const lv_point_precise_t kStreak[3][2] = {{{2, 0}, {0, 9}}, {{4, 0}, {0, 16}}, {{6, 0}, {0, 25}}};
+static const lv_opa_t kStreakOpa[3] = {70, 120, 175};
+static const uint8_t kStreakW[3] = {1, 1, 2};
+static const float kStreakSpeed[3][2] = {{230, 290}, {320, 400}, {430, 520}};
+static lv_obj_t *splash[SPLASH];
+static uint32_t splashStart[SPLASH];
+static int splashX[SPLASH], splashY[SPLASH];
 static uint8_t starPhase[STARS];
 static bool minimal = false, night = false, dimmed = false;
 static int wxCode = -1, renderedMinute = -1;
@@ -152,6 +163,12 @@ static int pickSky(float h, int code) {
   return code >= 1 ? SKY_DAY_PARTLY : SKY_DAY_CLEAR;
 }
 
+// Shared with the Weather screen: same PSRAM buffer, only one screen is visible.
+const lv_image_dsc_t *skyImageFor(float hour, int code) {
+  loadSky(pickSky(hour, code));
+  return skyLoaded >= 0 ? &skyDsc : nullptr;
+}
+
 // ---------------------------------------------------------------- per-minute scene
 static void updateScene(const struct tm &ti) {
   const float hour = ti.tm_hour + ti.tm_min / 60.0f;
@@ -162,6 +179,7 @@ static void updateScene(const struct tm &ti) {
   const bool clearNight = !minimal && night && wxCode <= 2;
   for (int i = 0; i < STARS; ++i) show(star[i], clearNight);
   for (int i = 0; i < DROPS; ++i) show(drop[i], !minimal && isWet(wxCode));
+  if (!isWet(wxCode) || minimal) for (int k = 0; k < SPLASH; ++k) { splashStart[k] = 0; show(splash[k], false); }
   for (int i = 0; i < FOG; ++i) show(fog[i], !minimal && isFog(wxCode));
 
   const bool wantDim = ti.tm_hour >= 23 || ti.tm_hour < 6;          // night dimming
@@ -181,12 +199,28 @@ static void animCb(lv_timer_t *) {
 
   if (!lv_obj_has_flag(drop[0], LV_OBJ_FLAG_HIDDEN)) {
     for (int i = 0; i < DROPS; ++i) {
-      dropY[i] += dropSpeed[i] * dt; dropX[i] -= dropSpeed[i] * 0.2f * dt;
-      if (dropY[i] > SCR_H) {                        // respawn; keep rain out of the clock digits
-        dropY[i] = frand(-50, -10);
-        do dropX[i] = frand(0, SCR_W + 70); while (dropX[i] > 70 && dropX[i] < 470 && frand(0, 1) < 0.6f);
+      dropY[i] += dropSpeed[i] * dt; dropX[i] -= dropSpeed[i] * RAIN_SLANT * dt;
+      const int ground = dropLayer[i] == 2 ? 300 : dropLayer[i] == 1 ? 270 : 245;   // nearer drops fall lower
+      if (dropY[i] > ground) {
+        if (dropLayer[i] == 2) {                       // near drop landed: splash
+          for (int k = 0; k < SPLASH; ++k) if (!splashStart[k]) {
+            splashStart[k] = now; splashX[k] = (int)dropX[i]; splashY[k] = ground + 18; break;
+          }
+        }
+        dropY[i] = frand(-60, -20);                    // respawn; keep most rain off the clock digits
+        do dropX[i] = frand(0, SCR_W + 80); while (dropX[i] > 70 && dropX[i] < 470 && frand(0, 1) < 0.5f);
       }
       lv_obj_set_pos(drop[i], (int)dropX[i], (int)dropY[i]);
+    }
+    for (int k = 0; k < SPLASH; ++k) {                 // splash: small ellipse ring growing and fading
+      if (!splashStart[k]) continue;
+      const uint32_t e = now - splashStart[k];
+      if (e > 260) { splashStart[k] = 0; show(splash[k], false); continue; }
+      const int w = 4 + (int)(e * 14 / 260), h = 2 + (int)(e * 3 / 260);
+      lv_obj_set_size(splash[k], w, h);
+      lv_obj_set_pos(splash[k], splashX[k] - w / 2, splashY[k] - h / 2);
+      lv_obj_set_style_border_opa(splash[k], (lv_opa_t)(150 - e * 150 / 260), 0);
+      show(splash[k], true);
     }
   }
   if (!lv_obj_has_flag(fog[0], LV_OBJ_FLAG_HIDDEN)) {
@@ -284,11 +318,23 @@ void buildClockScreen(lv_obj_t *scr) {
     lv_obj_set_pos(fog[i], -60, 140 + i * 44); fogX[i] = -20 - i * 25;
   }
   for (int i = 0; i < DROPS; ++i) {
-    drop[i] = shape(clockView, 2, 16, 0xD6E8FF, LV_OPA_COVER, 1);
-    lv_obj_set_style_bg_grad_dir(drop[i], LV_GRAD_DIR_VER, 0);
-    lv_obj_set_style_bg_main_opa(drop[i], LV_OPA_TRANSP, 0); lv_obj_set_style_bg_grad_opa(drop[i], LV_OPA_70, 0);
-    lv_obj_set_style_bg_grad_color(drop[i], lv_color_hex(0xD6E8FF), 0);
-    dropX[i] = frand(0, SCR_W + 70); dropY[i] = frand(-SCR_H, SCR_H); dropSpeed[i] = frand(300, 420);
+    const int L = i % 5 == 0 ? 2 : i % 2 ? 1 : 0;      // ~20 % near, ~40 % mid, ~40 % far
+    dropLayer[i] = (uint8_t)L;
+    drop[i] = lv_line_create(clockView);
+    lv_line_set_points(drop[i], kStreak[L], 2);
+    lv_obj_set_style_line_width(drop[i], kStreakW[L], 0);
+    lv_obj_set_style_line_color(drop[i], lv_color_hex(0xDDEBFF), 0);
+    lv_obj_set_style_line_opa(drop[i], kStreakOpa[L], 0);
+    lv_obj_set_style_line_rounded(drop[i], true, 0);
+    lv_obj_remove_flag(drop[i], LV_OBJ_FLAG_CLICKABLE);
+    dropX[i] = frand(0, SCR_W + 80); dropY[i] = frand(-SCR_H, SCR_H);
+    dropSpeed[i] = frand(kStreakSpeed[L][0], kStreakSpeed[L][1]);
+  }
+  for (int k = 0; k < SPLASH; ++k) {
+    splash[k] = shape(clockView, 4, 2, 0xDDEBFF, LV_OPA_TRANSP);
+    lv_obj_set_style_border_width(splash[k], 1, 0);
+    lv_obj_set_style_border_color(splash[k], lv_color_hex(0xDDEBFF), 0);
+    show(splash[k], false); splashStart[k] = 0;
   }
   flash = shape(clockView, SCR_W, SCR_H, 0xFFFFFF, LV_OPA_TRANSP, 0);
 
