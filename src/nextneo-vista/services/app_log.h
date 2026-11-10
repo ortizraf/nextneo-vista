@@ -9,7 +9,7 @@
 // its text, so the page can colour errors red and warnings yellow.
 #include <Arduino.h>
 
-enum class LogLevel : uint8_t { INFO, WARN, ERROR };
+enum class LogLevel : uint8_t { INFO, WARN, ERROR, VERBOSE };
 
 struct LogLine {
   uint32_t ms;        // millis() when the line was completed
@@ -19,10 +19,15 @@ struct LogLine {
 
 class AppLog : public Print {
  public:
+  explicit AppLog(bool verbose = false) : verbose_(verbose) {}
   size_t write(uint8_t c) override;
   size_t write(const uint8_t *buffer, size_t size) override;
+ private:
+  bool verbose_;
 };
-extern AppLog Log;
+extern AppLog Log;    // always recorded (info / aviso / erro)
+extern AppLog LogV;   // routine detail (cycles, timings, fps): recorded only when verbose is on
+extern volatile bool gLogVerbose;   // toggled on the web page (/log), saved in prefs
 
 void appLogBegin();     // allocate the buffer and hook ets_printf; call early in setup()
 // Copies up to `max` lines newer than `sinceMs` (oldest first). Returns the count.

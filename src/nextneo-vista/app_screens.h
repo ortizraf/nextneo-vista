@@ -92,6 +92,7 @@ enum ScreenID : uint8_t {
   SCREEN_SETTINGS,
   SCREEN_SERVERS,
   SCREEN_CLOCK,
+  SCREEN_AIRPORT,
   SCREEN_COUNT
 };
 
@@ -119,12 +120,17 @@ static constexpr uint32_t FLIGHT_RADAR_UPDATE_INTERVAL_MS = 12UL * 1000UL;
 static constexpr uint32_t FLIGHT_RADAR_RETRY_INTERVAL_MS  = 12UL * 1000UL;
 static constexpr uint32_t SERVERS_UPDATE_INTERVAL_MS      = 10UL * 1000UL;
 static constexpr uint32_t SERVERS_RETRY_INTERVAL_MS       = 10UL * 1000UL;
+// The screen timer restarts when a job ends, so the real cycle is job time + this.
+// ~1.5-3 s job (keep-alive) + 2.5 s = about one update every 5 s.
+static constexpr uint32_t AIRPORT_UPDATE_INTERVAL_MS      = 7000UL;    // ~3 s of requests + 7 s = ~10 s, no cache
+static constexpr uint32_t AIRPORT_RETRY_INTERVAL_MS       = 10000UL;
 
 enum Cmd : uint8_t {
   CMD_SCAN, CMD_CONNECT, CMD_GEOCODE,          // context-free commands (Settings / web page)
   CMD_WEATHER, CMD_FINANCE, CMD_FINANCE_ONE,   // CMD_FINANCE_ONE: asset in financeSingleIndex
   CMD_FLIGHT_RADAR, CMD_FLIGHT_DETAILS,        // screen-bound API jobs
   CMD_SERVERS,                                 // Beszel status (Servers screen)
+  CMD_AIRPORT,                                 // OSM map + ADSB.lol traffic (Airport screen)
   CMD_COUNT
 };
 
@@ -210,3 +216,14 @@ void buildClockScreen(lv_obj_t *screen);
 void clockOnEnter();
 void clockOnExit();
 void clockRender();
+
+// ---- Airport screen (modules/flight_airport): OSM vector map + aircraft on the field
+extern lv_obj_t *airportView;
+void buildAirportScreen(lv_obj_t *screen);
+void airportOnEnter();
+void airportOnExit();
+void airportRender();
+bool airportFetch();                                 // network task only
+void airportReleaseConnection();
+extern volatile uint8_t gTouchCount;                 // fingers on the panel (touch driver)
+extern volatile int16_t gTouch2X, gTouch2Y;          // 2nd finger, landscape coordinates                     // network task: drop the keep-alive TLS session

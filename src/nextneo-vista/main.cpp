@@ -14,6 +14,15 @@
 #include "services/aircraft_data_provider.h"
 #include "services/psram_alloc.h"
 #include "services/app_log.h"
+#include <time.h>
+// getLocalTime(&t, 0) fails at random: with a 0 ms timeout its loop is skipped whenever
+// millis() ticks between two reads. Read the clock directly instead.
+static bool localNow(struct tm *t) {
+  const time_t now = time(nullptr);
+  if (now < 1700000000) return false;                  // NTP not synced yet
+  localtime_r(&now, t);
+  return true;
+}
 #include "services/https_fetch.h"
 #include <esp_heap_caps.h>
 
@@ -522,6 +531,7 @@ static const char *cmdName(uint8_t cmd) {
     case CMD_FLIGHT_RADAR: return "flight-radar";
     case CMD_FLIGHT_DETAILS: return "flight-details";
     case CMD_SERVERS: return "servers";
+    case CMD_AIRPORT: return "airport";
   }
   return "?";
 }
@@ -554,15 +564,16 @@ static void runJob(const NetJob &job) {
       case CMD_FLIGHT_RADAR: ok = updateFlightRadarData(); break;
       case CMD_FLIGHT_DETAILS: ok = updateFlightRadarDetails(); break;
       case CMD_SERVERS: ok = serversFetch(); break;
+      case CMD_AIRPORT: ok = airportFetch(); break;
       default: ran = false; break;
     }
   }
   if (job.screen != SCREEN_NONE) {
     if (!ran) {
-      Log.printf("[net] %s descartado (tela inativa)\n", cmdName(job.cmd));
+      LogV.printf("[net] %s descartado (tela inativa)\n", cmdName(job.cmd));
     } else if (screenJobStillCurrent()) {
       gJobOutcome[job.screen] = ok ? JOB_OK : JOB_FAILED;
-      Log.printf("[net] %s %s em %lums (interno livre %u, maior bloco %u)\n", cmdName(job.cmd),
+      (ok ? LogV : Log).printf("[net] %s %s em %lums (interno livre %u, maior bloco %u)\n", cmdName(job.cmd),
                     ok ? "ok" : "falhou", (unsigned long)(millis() - started),
                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
@@ -586,7 +597,8 @@ static void workerTask(void *) {
 
     // Free the radar's keep-alive TLS session as soon as the radar is not the
     // active screen, so Weather/Finance have internal heap for their handshakes.
-    if (gActiveScreen != SCREEN_FLIGHT_RADAR) adsbLolReleaseConnection();
+    if (gActiveScreen != SCREEN_FLIGHT_RADAR && gActiveScreen != SCREEN_AIRPORT) adsbLolReleaseConnection();
+    if (gActiveScreen != SCREEN_AIRPORT) airportReleaseConnection();
     if (gActiveScreen != SCREEN_FINANCE) financeReleaseConnection();
 
     const bool up = WiFi.status() == WL_CONNECTED;
@@ -619,17 +631,35 @@ static void workerTask(void *) {
 }
 
 // ---------------------------------------------------------------- display + touch glue
+// Multi-touch (pinch on the Airport screen): number of fingers and the 2nd finger
+// in landscape coordinates. LVGL itself only gets the first finger.
+volatile uint8_t gTouchCount = 0;
+volatile int16_t gTouch2X = 0, gTouch2Y = 0;
+
 static bool readTouch(int &x, int &y) {
-  static const uint8_t cmd[8] = {0xB5, 0xAB, 0xA5, 0x5A, 0, 0, 0, 8};
-  uint8_t b[8];
+  // read 14 bytes: header + 2 points of 6 bytes (AXS15231B report)
+  // If the controller refuses the longer read, fall back to the original 8-byte read
+  // (single touch) so touch never stops working.
+  static uint8_t len = 14;
+  uint8_t cmd[8] = {0xB5, 0xAB, 0xA5, 0x5A, 0, 0, 0, len};
+  uint8_t b[14] = {};
   Wire.beginTransmission(TOUCH_ADDR);
   Wire.write(cmd, 8);
-  if (Wire.endTransmission() != 0) return false;
-  if (Wire.requestFrom(TOUCH_ADDR, 8) != 8) return false;
-  for (int i = 0; i < 8; i++) b[i] = Wire.read();
-  if (b[1] == 0 || b[1] > 4) return false;
+  if (Wire.endTransmission() != 0) { gTouchCount = 0; return false; }
+  if (Wire.requestFrom(TOUCH_ADDR, (int)len) != len) {
+    if (len == 14) { len = 8; Log.println("Touch: leitura de 2 dedos indisponível, usando 1 dedo"); }
+    gTouchCount = 0; return false;
+  }
+  for (int i = 0; i < len; i++) b[i] = Wire.read();
+  if (b[1] == 0 || b[1] > 4) { gTouchCount = 0; return false; }
   x = ((b[2] & 0x0F) << 8) | b[3];
   y = ((b[4] & 0x0F) << 8) | b[5];
+  gTouchCount = b[1];
+  if (b[1] >= 2 && len == 14) {
+    const int x2 = ((b[8] & 0x0F) << 8) | b[9], y2 = ((b[10] & 0x0F) << 8) | b[11];
+    gTouch2X = constrain(y2, 0, SCR_W - 1);                     // same rotation as touch_cb
+    gTouch2Y = constrain(PANEL_W - 1 - x2, 0, SCR_H - 1);
+  }
   return true;
 }
 
@@ -736,7 +766,7 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *a, uint8_t *px) {
       const uint32_t frame = perfFrameUs / perfFrames, copy = perfCopyUs / perfFrames, send = perfFlushUs / perfFrames;
       const uint32_t render = frame > copy + send ? frame - copy - send : 0;
       const uint32_t panelMs = perfPanelN ? perfPanelUs / perfPanelN / 1000 : 0;
-      Log.printf("[perf] %s: %lu fps | quadro %lu ms = desenho %lu + copia %lu + envio %lu ms | tela (core 0) %lu ms | QSPI %lu MHz | livre %u\n",
+      LogV.printf("[perf] %s: %lu fps | quadro %lu ms = desenho %lu + copia %lu + envio %lu ms | tela (core 0) %lu ms | QSPI %lu MHz | livre %u\n",
                  perfScreenName(), (unsigned long)(perfFrames * 1000 / (el ? el : 1)), (unsigned long)(frame / 1000),
                  (unsigned long)(render / 1000), (unsigned long)(copy / 1000), (unsigned long)(send / 1000),
                  (unsigned long)panelMs, (unsigned long)(qspiHz / 1000000), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
@@ -824,7 +854,7 @@ static void renderMenu() {
   }
   if (menuClock) {
     struct tm ti; char b[12];
-    if (getLocalTime(&ti, 0)) {
+    if (localNow(&ti)) {
       strftime(b, sizeof b, cfg.h24 ? "%H:%M" : "%I:%M", &ti); setLabelIfChanged(menuClock, b);
       static const char *wd[] = {"DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SAB"};
       if (menuCalWeek) setLabelIfChanged(menuCalWeek, wd[ti.tm_wday]);
@@ -843,7 +873,7 @@ static void renderMenu() {
 static void renderWeather() {
   struct tm ti;
   char b[24];
-  if (getLocalTime(&ti, 0)) {
+  if (localNow(&ti)) {
     strftime(b, sizeof b, cfg.h24 ? "%H:%M" : "%I:%M %p", &ti);
     setLabelIfChanged(lblClock, b);
     static const char *days[] = {"Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"};
@@ -894,6 +924,7 @@ static void requestFinance() { postScreenJob(CMD_FINANCE); }
 static void requestFlightRadar() { postScreenJob(CMD_FLIGHT_RADAR); }
 static void requestFlightDetails() { postScreenJob(CMD_FLIGHT_DETAILS); }
 static void requestServers() { postScreenJob(CMD_SERVERS); }
+static void requestAirport() { postScreenJob(CMD_AIRPORT); }
 static void requestClockWeather() { postScreenJob(CMD_WEATHER); }   // sky follows the weather
 
 // ---------------------------------------------------------------- screen manager
@@ -913,6 +944,8 @@ static const ScreenLifecycle kScreens[] = {
    SERVERS_UPDATE_INTERVAL_MS, SERVERS_RETRY_INTERVAL_MS},
   {SCREEN_CLOCK, "clock", &clockView, clockOnEnter, clockOnExit, requestClockWeather, clockRender,
    WEATHER_UPDATE_INTERVAL_MS, WEATHER_RETRY_INTERVAL_MS},
+  {SCREEN_AIRPORT, "airport", &airportView, airportOnEnter, airportOnExit, requestAirport, airportRender,
+   AIRPORT_UPDATE_INTERVAL_MS, AIRPORT_RETRY_INTERVAL_MS},
 };
 static_assert(sizeof(kScreens) / sizeof(kScreens[0]) == SCREEN_COUNT, "kScreens must list every ScreenID in order");
 
@@ -971,7 +1004,7 @@ void switchScreen(ScreenID id) {
 
   // ---- On-Enter: paint cached data now, request fresh data after the debounce.
   const ScreenLifecycle &next = screenInfo(id);
-  Log.printf("[ctx] %s -> %s\n", old.name, next.name);
+  LogV.printf("[ctx] %s -> %s\n", old.name, next.name);
   if (next.onEnter) next.onEnter();
   if (next.render) next.render();
   if (next.requestUpdate && contextTimer) {
@@ -1184,10 +1217,11 @@ main{max-width:900px;margin:0 auto}h1{font-size:22px;margin:0 0 4px}.muted{color
 .bar a,.bar label{padding:8px 12px;border-radius:10px;background:#ffffff14;color:#d9e4f2;text-decoration:none;font-weight:600}.bar a.on{background:#18a4ef;color:#071525}
 table{width:100%;border-collapse:collapse;font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace}td{padding:5px 8px;border-bottom:1px solid #ffffff10;vertical-align:top}
 td.t{color:#7f93ad;white-space:nowrap}td.m{word-break:break-word}tr.e td.m{color:#ff6b6b}tr.w td.m{color:#ffd477}
-.b{display:inline-block;min-width:44px;text-align:center;border-radius:6px;padding:1px 6px;font-size:11px;font-weight:700}.b.e{background:#ff6b6b33;color:#ff8f8f}.b.w{background:#ffd47733;color:#ffd477}.b.i{background:#ffffff14;color:#9fb6d0}
+.b{display:inline-block;min-width:44px;text-align:center;border-radius:6px;padding:1px 6px;font-size:11px;font-weight:700}.b.e{background:#ff6b6b33;color:#ff8f8f}.b.w{background:#ffd47733;color:#ffd477}.b.i{background:#ffffff14;color:#9fb6d0}.b.v{background:#ffffff0a;color:#6f839c}tr.v td.m{color:#8fa0b6}
 .empty{padding:24px;text-align:center;color:#8fa6c2}</style>
 <main><h1>Log da aplicação</h1><div class="muted">Últimos 30 minutos · mais recentes primeiro · %COUNT% linhas (%ERR% erros, %WARN% avisos)</div>
 <div class="bar"><a href="/">&larr; Ajustes</a><a href="/log" class="%ALL%">Tudo</a><a href="/log?f=warn" class="%FW%">Avisos e erros</a><a href="/log?f=err" class="%FE%">Só erros</a>
+<a href="/log-verbose?on=%VNEXT%" class="%VON%">Verbose: %VTXT%</a>
 <label><input type="checkbox" id="auto" onchange="tick()"> Atualizar a cada 5 s</label></div><table>)HTML";
   chunk.replace("%COUNT%", String((unsigned)n));
   chunk.replace("%ERR%", String((unsigned)errors));
@@ -1195,6 +1229,9 @@ td.t{color:#7f93ad;white-space:nowrap}td.m{word-break:break-word}tr.e td.m{color
   chunk.replace("%ALL%", filter.isEmpty() ? "on" : "");
   chunk.replace("%FW%", filter == "warn" ? "on" : "");
   chunk.replace("%FE%", filter == "err" ? "on" : "");
+  chunk.replace("%VNEXT%", gLogVerbose ? "0" : "1");
+  chunk.replace("%VON%", gLogVerbose ? "on" : "");
+  chunk.replace("%VTXT%", gLogVerbose ? "ligado" : "desligado");
   configServer.sendContent(chunk);
 
   size_t shown = 0;
@@ -1202,7 +1239,7 @@ td.t{color:#7f93ad;white-space:nowrap}td.m{word-break:break-word}tr.e td.m{color
   for (size_t k = n; k-- > 0;) {
     const LogLine &l = snapshot[k];
     if (filter == "err" && l.level != LogLevel::ERROR) continue;
-    if (filter == "warn" && l.level == LogLevel::INFO) continue;
+    if (filter == "warn" && (l.level == LogLevel::INFO || l.level == LogLevel::VERBOSE)) continue;
     char when[16];
     const uint32_t agoS = (nowMs - l.ms) / 1000;
     if (haveClock) {
@@ -1213,8 +1250,8 @@ td.t{color:#7f93ad;white-space:nowrap}td.m{word-break:break-word}tr.e td.m{color
     } else {
       snprintf(when, sizeof when, "-%lus", (unsigned long)agoS);
     }
-    const char *cls = l.level == LogLevel::ERROR ? "e" : l.level == LogLevel::WARN ? "w" : "i";
-    const char *tag = l.level == LogLevel::ERROR ? "ERRO" : l.level == LogLevel::WARN ? "AVISO" : "info";
+    const char *cls = l.level == LogLevel::ERROR ? "e" : l.level == LogLevel::WARN ? "w" : l.level == LogLevel::VERBOSE ? "v" : "i";
+    const char *tag = l.level == LogLevel::ERROR ? "ERRO" : l.level == LogLevel::WARN ? "AVISO" : l.level == LogLevel::VERBOSE ? "verb" : "info";
     chunk += "<tr class=\"";
     chunk += cls;
     chunk += "\"><td class=\"t\">";
@@ -1325,6 +1362,13 @@ static void startConfigServer() {
     ESP.restart();
   });
   configServer.on("/log", HTTP_GET, []() { sendLogPage(); });
+  configServer.on("/log-verbose", HTTP_GET, []() {         // ?on=1 / ?on=0, saved
+    gLogVerbose = configServer.arg("on") == "1";
+    prefs.putBool("logVerbose", gLogVerbose);
+    Log.printf("Log verbose %s\n", gLogVerbose ? "ativado" : "desativado");
+    configServer.sendHeader("Location", "/log");
+    configServer.send(302, "text/plain", "");
+  });
   configServer.onNotFound([]() { configServer.send(404, "text/plain; charset=utf-8", "Nao encontrado"); });
   configServer.begin();
   configServerStarted = true;
@@ -1359,6 +1403,7 @@ static void showCalendarEvent(lv_event_t *) { showView(calendarView); }
 static void showFlightRadarEvent(lv_event_t *) { showView(flightRadarView); }
 static void showServersEvent(lv_event_t *) { showView(serversView); }
 static void showClockEvent(lv_event_t *) { showView(clockView); }
+static void showAirportEvent(lv_event_t *) { showView(airportView); }
 
 // iOS-style app icon: 64 px squircle-ish tile, vertical gradient (lighter on top),
 // 1 px top highlight, soft drop shadow, press = shrink to 92 % + darken.
@@ -1442,6 +1487,33 @@ static void drawAppGlyph(lv_obj_t *box, const char *app, const char *symbol) {
     polyline(box, sw, 2, 3, 0xE9FFF6);
     blob(box, 33, 33, 6, 6, 0xFFFFFF);
     blob(box, 46, 42, 5, 5, 0xFFE066); blob(box, 20, 22, 4, 4, 0xFFE066);
+  } else if (!strcmp(app, "Aeroporto")) {           // night runway seen from above + departing jet
+    iconBg(box, 0x1B3A63, 0x081426);
+    // runway: diagonal strip with edge lights, dashed centreline and threshold bars
+    static const lv_point_precise_t rw[] = {{12, 64}, {62, 10}};
+    lv_obj_t *strip = polyline(box, rw, 2, 20, 0x2E4560);
+    lv_obj_set_style_line_rounded(strip, false, 0);
+    lv_obj_t *centre = polyline(box, rw, 2, 2, 0xD9E4F0);
+    lv_obj_set_style_line_dash_width(centre, 5, 0); lv_obj_set_style_line_dash_gap(centre, 5, 0);
+    lv_obj_set_style_line_opa(centre, LV_OPA_80, 0);
+    for (int k = 0; k < 4; ++k) {                       // edge lights along both sides
+      const int t = 14 + k * 11;
+      blob(box, t - 1, 66 - t - 9, 2, 2, 0xFFD56B);
+      blob(box, t + 8, 66 - t, 2, 2, 0xFFD56B);
+    }
+    // jet climbing out along the runway (same artwork as the radar), white
+    extern const lv_image_dsc_t radar_icon_jet;
+    lv_obj_t *jet = lv_image_create(box);
+    lv_image_set_src(jet, &radar_icon_jet);
+    lv_obj_set_size(jet, 28, 28);
+    lv_image_set_pivot(jet, 14, 14);
+    lv_image_set_antialias(jet, true);
+    lv_image_set_scale(jet, 380);                       // ~42 px
+    lv_image_set_rotation(jet, 430);                    // nose towards the upper right (43 deg)
+    lv_obj_set_style_image_recolor(jet, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_image_recolor_opa(jet, LV_OPA_COVER, 0);
+    lv_obj_set_pos(jet, 30, 14);
+    lv_obj_remove_flag(jet, LV_OBJ_FLAG_CLICKABLE);
   } else if (!strcmp(app, "Relógio")) {              // white face, 10:10 hands
     iconBg(box, 0x22252B, 0x0B0C0F);
     lv_obj_t *face = blob(box, 8, 8, 56, 56, 0xFFFFFF);
@@ -1561,6 +1633,7 @@ static void build_main_menu(lv_obj_t *menu) {
   menuTile(grid, "", "Radar", 0x126E58, showFlightRadarEvent);
   menuTile(grid, LV_SYMBOL_TINT, "Clima", 0x078BDD, showWeatherEvent);
   menuTile(grid, LV_SYMBOL_HOME, "Relógio", 0x22252B, showClockEvent);
+  menuTile(grid, "", "Aeroporto", 0x0B1A2E, showAirportEvent);
   menuWifiIcon = makeLabel(menu, LV_SYMBOL_WIFI, &lv_font_weather_14, 0xEAF2FF);
   lv_obj_align(menuWifiIcon, LV_ALIGN_TOP_RIGHT, -3, 3);
 }
@@ -1604,6 +1677,7 @@ static void build_ui() {
   buildWeatherScreen(scr);
   buildServersScreen(scr);
   buildClockScreen(scr);
+  buildAirportScreen(scr);
   flightRadarView = lv_obj_create(scr);
   buildFlightRadarScreen(flightRadarView);
   settingsView = lv_obj_create(scr);
@@ -1624,6 +1698,9 @@ static void build_ui() {
 // ---------------------------------------------------------------- setup / loop
 void setup() {
   Serial.begin(115200);
+  // USB serial must never block the app: with the cable plugged in but no monitor reading,
+  // every log line waited for the TX timeout (seen as ~2 s gaps between log lines).
+  Serial.setTxTimeoutMs(0);
   appLogBegin();   // keep the last minutes of log in PSRAM for http://IP/log
   delay(1000);
   Log.println("NextNeo Vista boot");
@@ -1648,6 +1725,7 @@ void setup() {
 
   gfx->setRotation(1); // Landscape UI in the canvas; keep AXS15231B native portrait mode.
   // QSPI clock is selectable on the web page (40/60/80 MHz); default 40 MHz.
+  gLogVerbose = prefs.getBool("logVerbose", false);   // off by default
   qspiHz = prefs.getUInt("qspiHz", 40000000);
   if (qspiHz != 40000000 && qspiHz != 60000000 && qspiHz != 80000000) qspiHz = 40000000;
   if (!gfx->begin(qspiHz)) {

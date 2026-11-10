@@ -1,5 +1,13 @@
 #include "app_screens.h"
 #include <time.h>
+// getLocalTime(&t, 0) fails at random: with a 0 ms timeout its loop is skipped whenever
+// millis() ticks between two reads. Read the clock directly instead.
+static bool localNow(struct tm *t) {
+  const time_t now = time(nullptr);
+  if (now < 1700000000) return false;                  // NTP not synced yet
+  localtime_r(&now, t);
+  return true;
+}
 
 static int renderedCode = -999;
 static int renderedHourCodes[8] = {-999,-999,-999,-999,-999,-999,-999,-999};
@@ -7,12 +15,13 @@ static int renderedDayCodes[7] = {-999,-999,-999,-999,-999,-999,-999};
 static uint32_t renderedWeatherVersion = UINT32_MAX;
 // Photo-like sky behind the tabs (same images as the Clock screen, clock.cpp).
 const lv_image_dsc_t *skyImageFor(float hour, int code);
+bool cachedWeatherCode(int &code);   // clock.cpp: last good forecast in flash
 static lv_obj_t *wxSky;
 static int skyKey = -1;
 
 static void refreshSky(int code, bool force) {
   struct tm ti;
-  if (!getLocalTime(&ti, 0)) return;
+  if (!localNow(&ti)) return;
   const int key = code * 100 + ti.tm_hour * 4 + ti.tm_min / 15;     // re-pick every 15 min or on new code
   if (!force && key == skyKey) return;
   skyKey = key;
@@ -321,7 +330,8 @@ void buildWeatherScreen(lv_obj_t *scr) {
   lv_obj_set_pos(weatherView, 0, 0);
   lv_obj_set_style_pad_all(weatherView, 0, 0);
   lv_obj_set_style_border_width(weatherView, 0, 0);
-  lv_obj_set_style_bg_opa(weatherView, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_bg_color(weatherView, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_bg_opa(weatherView, LV_OPA_COVER, 0);   // black until the sky is ready
   wxSky = lv_image_create(weatherView);
   lv_obj_set_pos(wxSky, 0, 0);
   lv_obj_set_size(wxSky, SCR_W, SCR_H);
@@ -411,7 +421,8 @@ void updateWeatherScreen() {
   memcpy(drain, sh.dayRain, sizeof drain);
   version = sh.weatherVersion;
   xSemaphoreGive(mtx);
-  if (have) refreshSky(code, false);           // sky only once the real condition is known
+  // sky only with a known condition: live, else the cached one; nothing -> black
+  { int c = code; if (have || cachedWeatherCode(c)) refreshSky(c, false); }
   if (version == renderedWeatherVersion && renderedWifiState == (int)up) return;
   renderedWeatherVersion = version;
   renderedWifiState = up;

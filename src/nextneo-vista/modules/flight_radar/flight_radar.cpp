@@ -1077,6 +1077,13 @@ void getFlightRadarSettings(char *code, size_t codeSize, char *name, size_t name
   xSemaphoreGive(mtx);
 }
 
+void getFlightRadarCenter(double &lat, double &lon) {
+  ensureState();
+  xSemaphoreTake(mtx, portMAX_DELAY);
+  lat = snapshot->centerLat; lon = snapshot->centerLon;
+  xSemaphoreGive(mtx);
+}
+
 void loadFlightRadarSettings() {
   ensureState();
   String saved = prefs.getString("radarAirport", "CGH");

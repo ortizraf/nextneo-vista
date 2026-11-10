@@ -4,11 +4,20 @@
 // Weather comes from the same Open-Meteo job as the Weather screen and is only
 // requested while this screen is active. Tap toggles a minimal black mode.
 // Everything here runs on the LVGL thread.
+#include <stddef.h>
 #include "app_screens.h"
 #include <math.h>
 #include <time.h>
 #include <JPEGDEC.h>
 #include <new>
+// getLocalTime(&t, 0) fails at random: with a 0 ms timeout its loop is skipped whenever
+// millis() ticks between two reads. Read the clock directly instead.
+static bool localNow(struct tm *t) {
+  const time_t now = time(nullptr);
+  if (now < 1700000000) return false;                  // NTP not synced yet
+  localtime_r(&now, t);
+  return true;
+}
 #include "sky_images.h"
 #include "services/psram_alloc.h"
 
@@ -149,6 +158,8 @@ static void loadSky(int id) {
   lv_obj_invalidate(sky);
 }
 
+struct WxCacheShared { int code; float temp, tmax, tmin; int rain; time_t at; };   // == WxCache below
+static constexpr time_t WX_CACHE_MAX_AGE_S = 2 * 3600;   // cache older than 2 h is ignored
 static int pickSky(float h, int code) {
   const bool nightH = h < 5.3f || h >= 19.8f;
   const bool dawn = (h >= 5.3f && h < 7.0f) || (h >= 17.6f && h < 18.8f);
@@ -164,6 +175,14 @@ static int pickSky(float h, int code) {
 }
 
 // Shared with the Weather screen: same PSRAM buffer, only one screen is visible.
+// Weather code saved by the Clock (last good forecast), for the Weather screen's sky.
+bool cachedWeatherCode(int &code) {
+  WxCacheShared w;
+  if (prefs.getBytes("clkWx", &w, sizeof w) != sizeof w) return false;
+  const time_t now = time(nullptr);
+  if (now < 1700000000 || now - w.at > WX_CACHE_MAX_AGE_S || w.at > now + 60) return false;
+  code = w.code; return true;
+}
 const lv_image_dsc_t *skyImageFor(float hour, int code) {
   loadSky(pickSky(hour, code));
   return skyLoaded >= 0 ? &skyDsc : nullptr;
@@ -173,14 +192,17 @@ const lv_image_dsc_t *skyImageFor(float hour, int code) {
 static void updateScene(const struct tm &ti) {
   const float hour = ti.tm_hour + ti.tm_min / 60.0f;
   night = hour < 5.6f || hour >= 19.4f;
-  show(sky, !minimal);
-  if (!minimal) loadSky(pickSky(hour, wxCode));
+  // Sky only when the right one is known (time + live or cached weather) and decoded;
+  // otherwise plain black. Never an old picture first.
+  bool skyOn = false;
+  if (!minimal && wxCode >= 0) { const int id = pickSky(hour, wxCode); loadSky(id); skyOn = skyLoaded == id; }
+  show(sky, skyOn);
   lv_obj_set_style_bg_color(card, lv_color_hex(minimal ? 0x111111 : night ? 0x0A0E1C : 0x0E1A2C), 0);
-  const bool clearNight = !minimal && night && wxCode <= 2;
+  const bool clearNight = skyOn && night && wxCode <= 2;
   for (int i = 0; i < STARS; ++i) show(star[i], clearNight);
-  for (int i = 0; i < DROPS; ++i) show(drop[i], !minimal && isWet(wxCode));
-  if (!isWet(wxCode) || minimal) for (int k = 0; k < SPLASH; ++k) { splashStart[k] = 0; show(splash[k], false); }
-  for (int i = 0; i < FOG; ++i) show(fog[i], !minimal && isFog(wxCode));
+  for (int i = 0; i < DROPS; ++i) show(drop[i], skyOn && isWet(wxCode));
+  if (!isWet(wxCode) || !skyOn) for (int k = 0; k < SPLASH; ++k) { splashStart[k] = 0; show(splash[k], false); }
+  for (int i = 0; i < FOG; ++i) show(fog[i], skyOn && isFog(wxCode));
 
   const bool wantDim = ti.tm_hour >= 23 || ti.tm_hour < 6;          // night dimming
   if (wantDim != dimmed) { dimmed = wantDim; analogWrite(GFX_BL, wantDim ? 40 : map(cfg.bright, 0, 100, 25, 255)); }
@@ -249,7 +271,7 @@ static void animCb(lv_timer_t *) {
       if (e >= 1) { shootStartMs = 0; show(shoot, false); nextShootMs = now + 12000 + esp_random() % 20000; }
     }
   }
-  if (isStorm(wxCode) && !minimal) {                                // lightning: double flicker
+  if (isStorm(wxCode) && !minimal && !lv_obj_has_flag(sky, LV_OBJ_FLAG_HIDDEN)) {                                // lightning: double flicker
     if (!nextFlashMs) nextFlashMs = now + 4000;
     if (!flashStartMs && (int32_t)(now - nextFlashMs) >= 0) { flashStartMs = now; show(flash, true); }
     if (flashStartMs) {
@@ -396,7 +418,7 @@ void buildClockScreen(lv_obj_t *scr) {
 // ---------------------------------------------------------------- lifecycle
 // Last good weather + sky, kept in flash so the screen opens complete right after
 // boot instead of showing empty placeholders while the first request runs.
-struct WxCache { int code; float temp, tmax, tmin; int rain; };
+struct WxCache { int code; float temp, tmax, tmin; int rain; time_t at; };   // at: when it was live
 static bool cardShown = false;
 static void showCard(bool on) {
   if (on == cardShown) return;
@@ -406,15 +428,17 @@ static void showCard(bool on) {
 
 void clockOnEnter() {
   minimal = prefs.getBool("clkMin", false);
-  // background first: the last sky used (or a neutral one) so nothing looks empty
-  show(sky, !minimal);
-  if (!minimal) loadSky(prefs.getUChar("clkSky", SKY_DAY_PARTLY));
+  // black until clockRender picks the right sky (time + live/cached weather)
+  show(sky, false);
+  for (int i = 0; i < STARS; ++i) show(star[i], false);
+  for (int i = 0; i < DROPS; ++i) show(drop[i], false);
+  for (int i = 0; i < FOG; ++i) show(fog[i], false);
   renderedMinute = -1;
   nextFlashMs = flashStartMs = nextShootMs = shootStartMs = 0;
   for (int &c : iconCodes) c = -99;
   if (expanded) { lv_anim_delete(NULL, cardAnimCb); expanded = false; show(hoursRow, false); cardAnimCb(NULL, 0); lv_label_set_text(chev, LV_SYMBOL_UP); }
   struct tm ti;
-  show(textBox, getLocalTime(&ti, 0));
+  show(textBox, localNow(&ti));
   lv_timer_resume(animTimer);
 }
 
@@ -425,7 +449,7 @@ void clockOnExit() {
 
 void clockRender() {
   struct tm ti;
-  if (!getLocalTime(&ti, 0)) { show(textBox, false); showCard(false); return; }   // wait quietly for NTP
+  if (!localNow(&ti)) { show(textBox, false); showCard(false); renderedMinute = -1; return; }   // wait quietly for NTP
   if (lv_obj_has_flag(textBox, LV_OBJ_FLAG_HIDDEN)) { show(textBox, true); lv_obj_fade_in(textBox, 350, 0); }
   char b[96];
   strftime(b, sizeof b, cfg.h24 ? "%H:%M" : "%I:%M", &ti);
@@ -443,16 +467,22 @@ void clockRender() {
   WxCache wc = {};
   bool cached = false;
   if (have) {                                  // remember for the next boot (only when it changed)
-    WxCache now = {code, temp, tmax, tmin, rain}, old = {};
-    if (prefs.getBytes("clkWx", &old, sizeof old) != sizeof old || memcmp(&old, &now, sizeof now)) prefs.putBytes("clkWx", &now, sizeof now);
+    WxCache now = {code, temp, tmax, tmin, rain, time(nullptr)}, old = {};
+    // rewrite when the forecast changed, or every 10 min to keep the timestamp fresh
+    const bool got = prefs.getBytes("clkWx", &old, sizeof old) == sizeof old;
+    if (!got || memcmp(&old, &now, offsetof(WxCache, at)) || now.at - old.at > 600) prefs.putBytes("clkWx", &now, sizeof now);
     wc = now;
-  } else cached = prefs.getBytes("clkWx", &wc, sizeof wc) == sizeof wc;
+  } else {                                     // cache only if it is at most 2 h old
+    const time_t t = time(nullptr);
+    cached = prefs.getBytes("clkWx", &wc, sizeof wc) == sizeof wc &&
+             t > 1700000000 && t - wc.at <= WX_CACHE_MAX_AGE_S && wc.at <= t + 60;
+  }
 
   static uint32_t seenWv = UINT32_MAX;
   const int key = ti.tm_hour * 60 + ti.tm_min;
   if (key == renderedMinute && wv == seenWv) return;
   renderedMinute = key; seenWv = wv;
-  wxCode = have || cached ? wc.code : 1;
+  wxCode = have || cached ? wc.code : -1;           // -1: no data at all -> black
 
   static const char *days[] = {"Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"};
   static const char *months[] = {"janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho",

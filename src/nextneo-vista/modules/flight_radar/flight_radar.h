@@ -20,3 +20,5 @@ bool setFlightRadarRadiusKm(uint8_t radiusKm);
 void loadFlightRadarSettings();
 // Current airport code/name and radius (any thread).
 void getFlightRadarSettings(char *code, size_t codeSize, char *name, size_t nameSize, uint8_t &radiusKm);
+// Reference point of the selected airport (any thread). Shared with the Airport screen.
+void getFlightRadarCenter(double &lat, double &lon);

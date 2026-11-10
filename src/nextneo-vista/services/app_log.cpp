@@ -6,15 +6,17 @@
 #include <string.h>
 
 AppLog Log;
+AppLog LogV(true);
+volatile bool gLogVerbose = false;
 
 namespace {
 LogLine *lines = nullptr;          // ring buffer in PSRAM
 size_t head = 0, count = 0;        // next slot / lines stored
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
-// One partial line per source (0 = Log, 1 = core ets_printf output).
-struct Partial { char buf[sizeof(LogLine::text)]; size_t len; };
-Partial partial[2] = {};
+// One partial line per source (0 = Log, 1 = core ets_printf output, 2 = LogV).
+struct Partial { char buf[sizeof(LogLine::text)]; size_t len; bool verbose; };
+Partial partial[3] = {{}, {}, {{0}, 0, true}};
 
 bool containsI(const char *hay, const char *needle) {
   const size_t n = strlen(needle);
@@ -46,6 +48,7 @@ void commit(Partial &p) {
     l.ms = millis();
     memcpy(l.text, p.buf, p.len + 1);
     l.level = classify(l.text);
+    if (p.verbose && l.level == LogLevel::INFO) l.level = LogLevel::VERBOSE;
     head = (head + 1) % APP_LOG_CAPACITY;
     if (count < APP_LOG_CAPACITY) ++count;
   }
@@ -93,10 +96,11 @@ void drainCore() {
 size_t AppLog::write(uint8_t c) { return write(&c, 1); }
 
 size_t AppLog::write(const uint8_t *buffer, size_t size) {
+  if (verbose_ && !gLogVerbose) return size;          // verbose off: drop routine detail
   Serial.write(buffer, size);
   portENTER_CRITICAL_SAFE(&mux);
   drainCore();
-  for (size_t i = 0; i < size; ++i) feed(0, (char)buffer[i]);
+  for (size_t i = 0; i < size; ++i) feed(verbose_ ? 2 : 0, (char)buffer[i]);
   portEXIT_CRITICAL_SAFE(&mux);
   return size;
 }
