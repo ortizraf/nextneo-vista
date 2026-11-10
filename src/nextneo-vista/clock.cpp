@@ -16,8 +16,8 @@ LV_FONT_DECLARE(lv_font_clock_120);
 
 lv_obj_t *clockView;
 
-static constexpr int STARS = 14, DROPS = 34, FOG = 3, HOURS = 5;
-static constexpr uint32_t FRAME_MS = 50;      // 20 fps
+static constexpr int STARS = 14, DROPS = 22, FOG = 3, HOURS = 5;
+static constexpr uint32_t FRAME_MS = 66;      // ~15 fps: every frame pushes the full panel
 
 static lv_obj_t *sky, *star[STARS], *shoot, *drop[DROPS], *fog[FOG], *flash;
 static lv_obj_t *textBox, *clkTime, *clkDate, *clkTimeSh, *clkDateSh, *chev, *hoursRow;
@@ -182,7 +182,10 @@ static void animCb(lv_timer_t *) {
   if (!lv_obj_has_flag(drop[0], LV_OBJ_FLAG_HIDDEN)) {
     for (int i = 0; i < DROPS; ++i) {
       dropY[i] += dropSpeed[i] * dt; dropX[i] -= dropSpeed[i] * 0.2f * dt;
-      if (dropY[i] > SCR_H) { dropY[i] = frand(-50, -10); dropX[i] = frand(0, SCR_W + 70); }
+      if (dropY[i] > SCR_H) {                        // respawn; keep rain out of the clock digits
+        dropY[i] = frand(-50, -10);
+        do dropX[i] = frand(0, SCR_W + 70); while (dropX[i] > 70 && dropX[i] < 470 && frand(0, 1) < 0.6f);
+      }
       lv_obj_set_pos(drop[i], (int)dropX[i], (int)dropY[i]);
     }
   }

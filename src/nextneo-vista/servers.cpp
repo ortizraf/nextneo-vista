@@ -119,6 +119,10 @@ bool serversAlert() {
 
 // ------------------------------------------------------------------ network (worker task)
 // "http://nextneo.local:8090" -> "http://192.168.x.y:8090" (lwIP does not always resolve .local)
+struct MdnsCache { char host[48]; IPAddress ip; uint32_t atMs; };
+static MdnsCache gMdns[SERVERS_MAX + 1];
+static void forgetMdns() { for (auto &m : gMdns) m.host[0] = 0; }
+
 static String resolveBase(const char *base) {
   static bool mdnsUp = false;
   String s = base;
@@ -126,9 +130,14 @@ static String resolveBase(const char *base) {
   int he = s.indexOf(':', hs); if (he < 0) he = s.indexOf('/', hs); if (he < 0) he = s.length();
   String host = s.substring(hs, he);
   if (!host.endsWith(".local")) return s;
+  for (auto &m : gMdns)                         // cached for 5 min (queryHost can take ~2 s)
+    if (!strcmp(m.host, host.c_str()) && millis() - m.atMs < 300000UL) return s.substring(0, hs) + m.ip.toString() + s.substring(he);
   if (!mdnsUp) mdnsUp = MDNS.begin("nextneo-vista");
   IPAddress ip = MDNS.queryHost(host.substring(0, host.length() - 6), 2000);
   if (ip == IPAddress(0, 0, 0, 0)) return s;   // let HTTPClient try anyway
+  MdnsCache *slot = &gMdns[0];
+  for (auto &m : gMdns) { if (!strcmp(m.host, host.c_str()) || !m.host[0]) { slot = &m; break; } }
+  snprintf(slot->host, sizeof slot->host, "%s", host.c_str()); slot->ip = ip; slot->atMs = millis();
   return s.substring(0, hs) + ip.toString() + s.substring(he);
 }
 
@@ -208,6 +217,7 @@ static bool fetchOne(uint8_t i, const ServerCfg &c, const char *user, const char
   if (code != 200) {
     snprintf(out.error, sizeof out.error, code == 404 ? "sistema não encontrado (ID/permissão)" :
              code < 0 ? "sem conexão com o hub" : "HTTP %d", code);
+    if (code < 0) forgetMdns();                     // IP may have changed: resolve again next time
     return false;
   }
   out.reachable = true;
@@ -606,7 +616,17 @@ void serversRender() {
   xSemaphoreTake(mtx, portMAX_DELAY);
   const uint32_t ver = gDataVersion;
   xSemaphoreGive(mtx);
-  if (ver == renderedVersion && nowMs - lastAgeRender < 5000) return;   // re-render "há Xs" every 5 s
+  if (ver == renderedVersion) {                 // no new data: only refresh the "há Xs" labels
+    if (nowMs - lastAgeRender < 5000 || detailIndex >= 0) return;
+    lastAgeRender = nowMs;
+    xSemaphoreTake(mtx, portMAX_DELAY);
+    uint32_t ep[SERVERS_MAX]; bool live[SERVERS_MAX];
+    for (int i = 0; i < SERVERS_MAX; ++i) { ep[i] = gData[i].updatedEpoch; live[i] = gData[i].reachable && gData[i].up; }
+    xSemaphoreGive(mtx);
+    char b[16];
+    for (int i = 0; i < SERVERS_MAX; ++i) if (live[i]) { fmtAge(ep[i], b, sizeof b); setLabelIfChanged(cards[i].state, b); }
+    return;
+  }
   renderedVersion = ver; lastAgeRender = nowMs;
   static ServerData d[SERVERS_MAX]; static ServerCfg c[SERVERS_MAX];
   xSemaphoreTake(mtx, portMAX_DELAY);

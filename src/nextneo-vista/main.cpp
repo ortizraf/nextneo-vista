@@ -630,9 +630,116 @@ static bool readTouch(int &x, int &y) {
   return true;
 }
 
+// ---------------------------------------------------------------- fast flush
+// The canvas is rotated in software. Arduino_Canvas::draw16bitRGBBitmap only has a
+// fast path for rotation 0, otherwise it writes pixel by pixel through virtual
+// calls. We copy LVGL's landscape area straight into the portrait framebuffer
+// instead, column by column, so PSRAM writes are contiguous.
+// The mapping is detected once at boot (fbMapping); unknown -> old slow path.
+static int fbMapping = -1;          // -1 unknown, 1: idx = x*W + (W-1-y), 3: idx = (H-1-x)*W + y
+static uint32_t perfFrames = 0, perfFlushUs = 0, perfCopyUs = 0, perfFrameUs = 0, perfLastLog = 0, perfRefrStart = 0;
+static uint32_t qspiHz = 40000000;
+static const char *perfScreenName();
+
+// whole refresh (render + copy + send), measured from LVGL display events
+static void perfRefrEvent(lv_event_t *e) {
+  const lv_event_code_t c = lv_event_get_code(e);
+  if (c == LV_EVENT_REFR_START) perfRefrStart = 0;              // never span two refresh cycles
+  else if (c == LV_EVENT_RENDER_START) perfRefrStart = micros();
+  else if (perfRefrStart) { perfFrameUs += micros() - perfRefrStart; perfRefrStart = 0; }
+}
+
+// ---------------------------------------------------------------- async panel send
+// Sending the 300 KB frame to the AXS15231B takes ~40 ms of CPU (byte swap + QSPI
+// chunks) no matter the bus clock. A task on core 0 does it from a second buffer,
+// so the LVGL thread only pays a PSRAM memcpy (~3-5 ms) and keeps rendering.
+static uint16_t *sendBuf = nullptr;
+static TaskHandle_t sendTaskHandle = nullptr;
+static SemaphoreHandle_t sendIdle = nullptr;
+static volatile uint32_t perfPanelUs = 0, perfPanelN = 0;
+
+static void panelSendTask(void *) {
+  for (;;) {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    const uint32_t t = micros();
+    panel->draw16bitRGBBitmap(0, 0, sendBuf, PANEL_W, PANEL_H);
+    perfPanelUs += micros() - t; perfPanelN++;
+    xSemaphoreGive(sendIdle);
+  }
+}
+
+static void startAsyncSend() {
+  sendBuf = (uint16_t *)heap_caps_malloc(PANEL_W * PANEL_H * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  sendIdle = xSemaphoreCreateBinary();
+  if (!sendBuf || !sendIdle) { Log.println("Display: envio assíncrono indisponível (memória)"); sendBuf = nullptr; return; }
+  xSemaphoreGive(sendIdle);
+  xTaskCreatePinnedToCore(panelSendTask, "panel", 4096, NULL, 2, &sendTaskHandle, 0);
+  Log.println("Display: envio assíncrono ativo (core 0)");
+}
+
+static void sendFrame() {
+  uint16_t *fb = gfx->getFramebuffer();
+  if (!sendBuf || !fb) { gfx->flush(); return; }
+  xSemaphoreTake(sendIdle, portMAX_DELAY);       // previous frame still going out? wait for it
+  memcpy(sendBuf, fb, PANEL_W * PANEL_H * 2);
+  xTaskNotifyGive(sendTaskHandle);
+}
+
+static void detectFramebufferMapping() {
+  uint16_t *fb = gfx->getFramebuffer();
+  if (!fb) return;
+  const int W = PANEL_W, H = PANEL_H;
+  const int tx[2] = {5, 401}, ty[2] = {7, 250};
+  const uint16_t tc[2] = {0x1234, 0x4321};
+  for (int i = 0; i < 2; ++i) gfx->drawPixel(tx[i], ty[i], tc[i]);
+  bool m1 = true, m3 = true;
+  for (int i = 0; i < 2; ++i) {
+    m1 &= fb[tx[i] * W + (W - 1 - ty[i])] == tc[i];
+    m3 &= fb[(H - 1 - tx[i]) * W + ty[i]] == tc[i];
+  }
+  fbMapping = m1 ? 1 : m3 ? 3 : -1;
+  for (int i = 0; i < 2; ++i) gfx->drawPixel(tx[i], ty[i], 0);
+  Log.printf("Display: framebuffer mapping %d (%s)\n", fbMapping, fbMapping > 0 ? "fast flush" : "fallback");
+}
+
 static void flush_cb(lv_display_t *disp, const lv_area_t *a, uint8_t *px) {
-  gfx->draw16bitRGBBitmap(a->x1, a->y1, (uint16_t *)px, a->x2 - a->x1 + 1, a->y2 - a->y1 + 1);
-  if (lv_display_flush_is_last(disp)) gfx->flush();
+  const uint32_t t0 = micros();
+  const int w = a->x2 - a->x1 + 1, h = a->y2 - a->y1 + 1;
+  uint16_t *fb = gfx->getFramebuffer();
+  const uint16_t *src = (const uint16_t *)px;
+  if (fbMapping > 0 && fb) {
+    const int W = PANEL_W, H = PANEL_H;
+    for (int c = 0; c < w; ++c) {
+      const int lx = a->x1 + c;
+      if (fbMapping == 1) {                       // column lx -> fb row lx, y reversed
+        uint16_t *dst = fb + lx * W + (W - 1 - a->y1);
+        for (int r = 0; r < h; ++r) *(dst - r) = src[r * w + c];
+      } else {                                    // column lx -> fb row (H-1-lx), y forward
+        uint16_t *dst = fb + (H - 1 - lx) * W + a->y1;
+        for (int r = 0; r < h; ++r) dst[r] = src[r * w + c];
+      }
+    }
+  } else {
+    gfx->draw16bitRGBBitmap(a->x1, a->y1, (uint16_t *)px, w, h);
+  }
+  const uint32_t t1 = micros();
+  perfCopyUs += t1 - t0;
+  if (lv_display_flush_is_last(disp)) {
+    sendFrame();
+    perfFlushUs += micros() - t1;
+    ++perfFrames;
+    if (millis() - perfLastLog >= 10000) {        // one perf line every 10 s (only when drawing)
+      const uint32_t el = millis() - perfLastLog;
+      const uint32_t frame = perfFrameUs / perfFrames, copy = perfCopyUs / perfFrames, send = perfFlushUs / perfFrames;
+      const uint32_t render = frame > copy + send ? frame - copy - send : 0;
+      const uint32_t panelMs = perfPanelN ? perfPanelUs / perfPanelN / 1000 : 0;
+      Log.printf("[perf] %s: %lu fps | quadro %lu ms = desenho %lu + copia %lu + envio %lu ms | tela (core 0) %lu ms | QSPI %lu MHz | livre %u\n",
+                 perfScreenName(), (unsigned long)(perfFrames * 1000 / (el ? el : 1)), (unsigned long)(frame / 1000),
+                 (unsigned long)(render / 1000), (unsigned long)(copy / 1000), (unsigned long)(send / 1000),
+                 (unsigned long)panelMs, (unsigned long)(qspiHz / 1000000), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+      perfFrames = perfFlushUs = perfCopyUs = perfFrameUs = 0; perfPanelUs = perfPanelN = 0; perfLastLog = millis();
+    }
+  }
   lv_display_flush_ready(disp);
 }
 
@@ -811,6 +918,7 @@ static lv_timer_t *contextTimer = nullptr;   // the single API timer, owned by t
 static const ScreenLifecycle &screenInfo(ScreenID id) {
   return kScreens[id < SCREEN_COUNT ? id : SCREEN_NONE];
 }
+static const char *perfScreenName() { return screenInfo(gActiveScreen).name; }
 
 // Fires once SCREEN_ENTER_DEBOUNCE_MS after entering a screen, then every
 // updateIntervalMs while the user stays there.
@@ -962,6 +1070,11 @@ button.sec{background:#ffffff1a;color:#edf4ff}small{display:block;margin-top:12p
 <div class="status %NOTICECLASS%">%NOTICE%Wi-Fi: %STATUS%<br>Endereço: http://%IP%</div>
 <a class="btnlink" href="/log">Ver log da aplicação</a></div>
 
+<form class="card" method="post" action="/save-display"><h2>Tela (desempenho)</h2>
+<div class="muted">Velocidade do barramento QSPI da tela. Valores maiores deixam as animações mais fluidas; se aparecerem listras ou chiado, volte para 40 MHz. A placa reinicia ao salvar.</div>
+<select name="qspi"><option value="40" %Q40%>40 MHz (padrão, seguro)</option><option value="60" %Q60%>60 MHz</option><option value="80" %Q80%>80 MHz (mais rápido)</option></select>
+<button type="submit">Salvar e reiniciar</button></form>
+
 <form class="card" method="post" action="/save-city" accept-charset="UTF-8"><h2>Clima e relógio</h2>
 <label class="label" for="city">Cidade (ex.: São Paulo, BR)</label><input id="city" name="city" value="%CITY%" required>
 <label class="label row"><input type="checkbox" name="h24" value="1" %H24%> Relógio 24 horas</label>
@@ -1018,6 +1131,9 @@ const c=document.createElement('button');c.type='button';c.className='chip';c.te
   page.replace("%R25%", radius == 25 ? "selected" : "");
   page.replace("%R50%", radius == 50 ? "selected" : "");
   page.replace("%ROWS%", rows);
+  page.replace("%Q40%", qspiHz == 40000000 ? "selected" : "");
+  page.replace("%Q60%", qspiHz == 60000000 ? "selected" : "");
+  page.replace("%Q80%", qspiHz == 80000000 ? "selected" : "");
   String bzRows;
   for (uint8_t i = 0; i < SERVERS_MAX; ++i) {
     char lbl[64], url[64], id[64];
@@ -1195,6 +1311,15 @@ static void startConfigServer() {
     if (activeScreenId() == SCREEN_SERVERS) postScreenJob(CMD_SERVERS);
     else notice += " Abra a tela Servers para consultar.";
     sendConfigPage(notice);
+  });
+  configServer.on("/save-display", HTTP_POST, []() {
+    const int mhz = configServer.arg("qspi").toInt();
+    if (mhz == 40 || mhz == 60 || mhz == 80) prefs.putUInt("qspiHz", (uint32_t)mhz * 1000000UL);
+    configServer.send(200, "text/html; charset=utf-8",
+      "<meta http-equiv=refresh content='8;url=/'><body style='font-family:sans-serif;background:#0c1728;color:#fff;padding:30px'>"
+      "Salvo. Reiniciando a placa com QSPI " + String(mhz) + " MHz...</body>");
+    delay(400);
+    ESP.restart();
   });
   configServer.on("/log", HTTP_GET, []() { sendLogPage(); });
   configServer.onNotFound([]() { configServer.send(404, "text/plain; charset=utf-8", "Nao encontrado"); });
@@ -1519,7 +1644,10 @@ void setup() {
   loadServersConfig();   // Beszel hubs + login (Settings / web page)
 
   gfx->setRotation(1); // Landscape UI in the canvas; keep AXS15231B native portrait mode.
-  if (!gfx->begin(40000000)) {
+  // QSPI clock is selectable on the web page (40/60/80 MHz); default 40 MHz.
+  qspiHz = prefs.getUInt("qspiHz", 40000000);
+  if (qspiHz != 40000000 && qspiHz != 60000000 && qspiHz != 80000000) qspiHz = 40000000;
+  if (!gfx->begin(qspiHz)) {
     Log.println("gfx->begin FAILED (display or framebuffer allocation)");
   }
   pinMode(GFX_BL, OUTPUT);
@@ -1527,6 +1655,8 @@ void setup() {
   Wire.begin(TOUCH_SDA, TOUCH_SCL);
   Wire.setClock(400000);
 
+  detectFramebufferMapping();
+  startAsyncSend();
   lv_init();
   lv_tick_set_cb([]() -> uint32_t { return millis(); });
   lv_display_t *disp = lv_display_create(SCR_W, SCR_H);
@@ -1534,6 +1664,9 @@ void setup() {
   void *buf = heap_caps_malloc(buf_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   lv_display_set_buffers(disp, buf, NULL, buf_bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
   lv_display_set_flush_cb(disp, flush_cb);
+  lv_display_add_event_cb(disp, perfRefrEvent, LV_EVENT_REFR_START, NULL);
+  lv_display_add_event_cb(disp, perfRefrEvent, LV_EVENT_RENDER_START, NULL);
+  lv_display_add_event_cb(disp, perfRefrEvent, LV_EVENT_RENDER_READY, NULL);
   lv_indev_t *indev = lv_indev_create();
   lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(indev, touch_cb);
@@ -1553,6 +1686,6 @@ void setup() {
 void loop() {
   if (WiFi.status() == WL_CONNECTED && !configServerStarted) startConfigServer();
   if (configServerStarted) configServer.handleClient();
-  lv_timer_handler();
-  delay(5);
+  const uint32_t idle = lv_timer_handler();      // ms until the next LVGL timer
+  delay(idle > 5 ? 5 : idle ? idle : 1);
 }
