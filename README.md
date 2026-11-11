@@ -318,6 +318,7 @@ Mapa do aeroporto com os aviões no solo e em pouso/decolagem (até ~200 m de al
 
 - **Dados:** adsb.fi é a fonte principal desta tela (o ADSB.lol respondia 429 quase sempre aqui), com no mínimo 3,5 s entre consultas; ADSB.lol é o reserva, usado só enquanto o adsb.fi estiver em pausa. Uma rede que responde 429 ou falha fica em pausa 10 s, dobrando até 60 s; cada resposta boa reduz a pausa pela metade. Uma só rede por atualização (nunca mistura). Só enquanto a tela está aberta; entre consultas os aviões em movimento seguem pela posição estimada.
 - **Movimento "ao vivo":** aviões acima de 30 kt com rumo conhecido são mostrados na posição estimada para agora (último dado + velocidade × tempo, no máximo 15 s à frente), como no Radar. Quando chega um dado novo, o ícone corrige a rota em 0,8 s, sem pular. Aviões lentos ou parados mostram só posições reportadas.
+- **Aviões no pátio (só CGH):** aviões parados na posição de estacionamento quase não aparecem no ADS-B. A tela lê o painel de voos do site da Aena Brasil (o JSON `departureFligth` embutido na página de partidas e na de chegadas `?type=CHEGADAS&airportA=SBSP`), que traz o voo, o estado, o **box** (posição de estacionamento = `ref` do `parking_position` no OpenStreetMap) e o portão. Mostra no box: partidas "embarque próximo / iniciado / última chamada / confirmado / atrasado" (de 20 min antes a 60 min depois do horário) e chegadas "aeronave no pátio" (pousadas há até 90 min, se não houve depois partida encerrada naquele box). Cada página é lida a cada 3 min (alternando), sempre depois das posições. O ícone fica acinzentado e some assim que o mesmo voo aparece no ADS-B. Tocar abre posição, portão, estado e a rota (adsbdb por indicativo) por 5 s.
 - **Toque num avião:** abre os detalhes; o toque usa a posição em que o ícone está desenhado.
 - **Detalhes:** rota, companhia e modelo (adsbdb) são buscados só para o avião tocado, uma vez por avião enquanto a tela está aberta. O painel aparece por 5 s e fecha sozinho; tocar de novo reabre na hora (dados guardados). Uma tarefa paralela foi testada, mas a RAM interna nunca teve espaço para uma 2ª conexão TLS.
 
@@ -477,6 +478,7 @@ Vídeo para o media player: `ffmpeg -i in.mp4 -vf "scale=480:320" -q:v 6 -r 20 o
   - README ganhou a seção 0, para quem vem do Java.
   - Tela Aeroporto: detalhes só ao tocar, painel fecha sozinho após 5 s.
   - Clima: "garoa" do Open-Meteo conferida com nuvens e chuva medida antes de aparecer no "Agora".
+  - Tela Aeroporto (CGH): aviões no pátio a partir do painel de voos da Aena.
   - Radar: adsb.fi como reserva quando o ADSB.lol falha.
   - Tela Aeroporto: adsb.fi como fonte principal (3,5 s) e ADSB.lol de reserva, com pausa progressiva após 429.
   - Tela Aeroporto: toque nos aviões corrigido, posição estimada "ao vivo" para aviões em movimento, ADSB.lol a cada ~5 s.

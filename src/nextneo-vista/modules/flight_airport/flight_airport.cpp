@@ -54,7 +54,7 @@ static char mapMessage[48] = "";
 static constexpr int MAX_AC = 24;
 struct AirportTraffic { Aircraft ac[MAX_AC]; uint8_t src[MAX_AC]; float geomFt[MAX_AC]; uint16_t memoS[MAX_AC]; uint8_t count; uint8_t sourcesOk; uint32_t okMs; uint32_t version; bool failed; char error[40]; };
 // traffic sources (bit mask in src[]): same readsb-style JSON, independent receiver networks
-enum : uint8_t { SRC_ADSBLOL = 1, SRC_AIRPLANES = 2, SRC_ADSBFI = 4, SRC_ADSBONE = 8 };
+enum : uint8_t { SRC_ADSBLOL = 1, SRC_AIRPLANES = 2, SRC_ADSBFI = 4, SRC_ADSBONE = 8, SRC_AENA = 16 };
 static uint8_t *fetchSrc;
 static float *fetchGeom;                   // GNSS altitude (alt_geom, ft) or NAN: independent of QNH
 static Aircraft *secBuf; static uint8_t *secSrc; static float *secGeom;   // cache of the secondary networks
@@ -589,7 +589,8 @@ static int detFind(const char *hex) {                     // caller holds mtx
 // One adsbdb request into `out` (hex/cs set by the caller). No lock held while fetching.
 static void fetchDetailsInto(AptDetails &out) {
   char url[128];
-  snprintf(url, sizeof url, "https://api.adsbdb.com/v0/aircraft/%s%s%s", out.hex, out.cs[0] ? "?callsign=" : "", out.cs);
+  if (out.hex[0] == '~') snprintf(url, sizeof url, "https://api.adsbdb.com/v0/callsign/%s", out.cs);   // parked (Aena): no ICAO hex
+  else snprintf(url, sizeof url, "https://api.adsbdb.com/v0/aircraft/%s%s%s", out.hex, out.cs[0] ? "?callsign=" : "", out.cs);
   static PsramBuffer body(32 * 1024);
   body.clear();
   WiFiClientSecure client; client.setInsecure(); client.setHandshakeTimeout(5);
@@ -634,6 +635,158 @@ static void fetchTappedDetails() {
   if (k >= 0) { detCache[k] = job; if (job.state == DET_FAILED) ++detTries[k]; }
   if (!strcmp(det.hex, job.hex)) det = job;               // shown now (failure shows "—")
   xSemaphoreGive(mtx);
+}
+
+// ---------------------------------------------------------------- Aena board (CGH only)
+// Aircraft parked at a stand are usually invisible to ADS-B (transponder off, buildings).
+// The Aena Brasil flight page embeds the whole day's board as JSON (var departureFligth):
+// flight, status, "box" (aircraft STAND = OSM parking_position ref) and "portal" (gate).
+// Departures and arrivals are two pages; each is fetched every 3 min (alternating, one per
+// cycle, AFTER the positions) only while this screen shows CGH. Parked aircraft are drawn
+// at their stand (dimmed) and vanish as soon as the same flight shows up in ADS-B.
+struct AenaStand { char hex[7], flight[9], other[5], gate[4], box[4], status[26], when[6]; bool dep; int16_t mins; };
+static constexpr int AENA_MAX = 30;
+static AenaStand aenaStands[AENA_MAX];                    // merged list, guarded by mtx (UI reads it)
+static int aenaN = 0;
+static AenaStand aenaArr[AENA_MAX], aenaDep[AENA_MAX];    // network task only
+static int aenaArrN = 0, aenaDepN = 0;
+static uint32_t aenaArrMs = 0, aenaDepMs = 0;
+// Departures already gone ("voo encerrado") per stand: an older arrival at that stand has left.
+struct AenaClosed { char box[4]; int16_t mins; };
+static AenaClosed aenaClosed[AENA_MAX * 2];
+static int aenaClosedN = 0;
+
+static bool isCgh(const char *code) { return !strcmp(code, "CGH") || !strcmp(code, "SBSP"); }
+
+// "11/11/2026 14:25" -> minutes from now (negative = past). false if no clock / bad text.
+static bool aenaMinutes(const char *s, int &minutes, char *hhmm) {
+  int d, mo, y, h, mi;
+  if (sscanf(s, "%d/%d/%d %d:%d", &d, &mo, &y, &h, &mi) != 5) return false;
+  const time_t now = time(nullptr);
+  if (now < 1700000000) return false;
+  struct tm t = {}; t.tm_year = y - 1900; t.tm_mon = mo - 1; t.tm_mday = d; t.tm_hour = h; t.tm_min = mi; t.tm_isdst = -1;
+  minutes = (int)((mktime(&t) - now) / 60);
+  snprintf(hhmm, 6, "%02d:%02d", h, mi);
+  return true;
+}
+
+// One board (departures or arrivals) -> list of aircraft that should be at a stand now.
+static bool fetchAenaBoard(bool arrivals, AenaStand *out, int &outN) {
+  static PsramBuffer body(768 * 1024);
+  body.clear();
+  const char *url = arrivals
+      ? "https://www.aenabrasil.com.br/pt/aeroportos/aeroporto-de-congonhas/informacoes-de-voos.html?type=CHEGADAS&airportA=SBSP"
+      : "https://www.aenabrasil.com.br/pt/aeroportos/aeroporto-de-congonhas/informacoes-de-voos.html";
+  lolClient.stop();                                       // one TLS context at a time
+  if (!tlsMemoryAvailable("aena")) return false;
+  WiFiClientSecure client; client.setInsecure(); client.setHandshakeTimeout(6);
+  HttpsFetchOptions opt;
+  opt.userAgent = "Mozilla/5.0 (NextNeoVista; ESP32-S3 airport display)";
+  const uint32_t t0 = millis();
+  const int status = httpsFetch(client, url, body, 9000, false, nullptr, "application/json", opt);
+  client.stop();
+  if (status != 200 || body.overflowed()) { Log.printf("Airport: Aena %s HTTP %d\n", arrivals ? "chegadas" : "partidas", status); return false; }
+  const char *html = body.c_str();
+  const char *start = strstr(html, "departureFligth = '");
+  if (!start) { Log.println("Airport: Aena sem dados de voos na página"); return false; }
+  start += strlen("departureFligth = '");
+  const char *end = strstr(start, "}';");
+  if (!end) return false;
+  ++end;                                                   // keep the closing brace
+  JsonDocument filter(SpiRamJsonAllocator::instance());
+  JsonObject f = filter["voos"]["voo"][0].to<JsonObject>();
+  for (const char *k : {"numero", "situacao", "observacao", "box", "portal", "origem", "destino", "dataHoraEfetiva"}) f[k] = true;
+  JsonDocument doc(SpiRamJsonAllocator::instance());
+  if (deserializeJson(doc, start, end - start, DeserializationOption::Filter(filter))) { Log.println("Airport: Aena JSON inválido"); return false; }
+  outN = 0;
+  int total = 0;
+  if (!arrivals) aenaClosedN = 0;
+  for (JsonObjectConst v : doc["voos"]["voo"].as<JsonArrayConst>()) {
+    ++total;
+    const char *sit = v["situacao"] | "";
+    const char *box = v["box"] | "";
+    if (!box[0] || !strcmp(box, "-")) continue;
+    int mins; char hhmm[6];
+    if (!aenaMinutes(v["dataHoraEfetiva"] | "", mins, hhmm)) continue;
+    char boxRef[4];                                          // "07" -> "7" (OSM ref); "P01" kept as is
+    if (isdigit((unsigned char)box[0])) snprintf(boxRef, sizeof boxRef, "%d", atoi(box)); else snprintf(boxRef, sizeof boxRef, "%s", box);
+    if (!arrivals && !strcmp(sit, "FEC") && mins >= -120 && mins <= 0 && aenaClosedN < AENA_MAX * 2) {
+      snprintf(aenaClosed[aenaClosedN].box, sizeof aenaClosed[0].box, "%s", boxRef);
+      aenaClosed[aenaClosedN++].mins = (int16_t)mins;
+    }
+    bool keep;
+    if (arrivals) keep = !strcmp(sit, "PSD") && mins >= -90 && mins <= 5;            // "aeronave no pátio", landed < 90 min ago
+    else keep = (!strcmp(sit, "EMP") || !strcmp(sit, "EMI") || !strcmp(sit, "ULT") ||  // boarding soon / boarding / last call
+                 !strcmp(sit, "CON") || !strcmp(sit, "ATR")) && mins >= -20 && mins <= 60;
+    if (!keep || outN >= AENA_MAX) continue;
+    AenaStand &a = out[outN++];
+    memset(&a, 0, sizeof a);
+    a.dep = !arrivals;
+    snprintf(a.flight, sizeof a.flight, "%s", v["numero"] | "");
+    snprintf(a.other, sizeof a.other, "%s", arrivals ? (v["origem"] | "") : (v["destino"] | ""));
+    snprintf(a.gate, sizeof a.gate, "%s", v["portal"] | "");
+    snprintf(a.box, sizeof a.box, "%s", boxRef);
+    a.mins = (int16_t)mins;
+    snprintf(a.status, sizeof a.status, "%s", v["observacao"] | "");
+    snprintf(a.when, sizeof a.when, "%s", hhmm);
+    snprintf(a.hex, sizeof a.hex, "~%s", a.box);          // synthetic id: never a real ICAO hex
+  }
+  Log.printf("Airport: Aena %s %d voos, %d em posição (%lums, %u bytes)\n", arrivals ? "chegadas" : "partidas",
+             total, outN, (unsigned long)(millis() - t0), (unsigned)body.length());
+  return true;
+}
+
+// Network task: refresh one board when due, then merge (one aircraft per stand; a boarding
+// departure wins over the arrival that brought the aircraft there).
+static void updateAena(const char *code) {
+  if (!isCgh(code)) { if (aenaN) { xSemaphoreTake(mtx, portMAX_DELAY); aenaN = 0; xSemaphoreGive(mtx); } return; }
+  const uint32_t now = millis();
+  const bool depDue = !aenaDepMs || now - aenaDepMs >= 180000UL, arrDue = !aenaArrMs || now - aenaArrMs >= 180000UL;
+  if (!depDue && !arrDue) return;
+  const bool doArr = arrDue && (!depDue || aenaDepMs > aenaArrMs);   // alternate, never both in one cycle
+  if (doArr) { aenaArrMs = now; if (!fetchAenaBoard(true, aenaArr, aenaArrN)) aenaArrN = 0; }
+  else       { aenaDepMs = now; if (!fetchAenaBoard(false, aenaDep, aenaDepN)) aenaDepN = 0; }
+  static AenaStand merged[AENA_MAX]; int m = 0;            // static: keep the network task stack small
+  for (int i = 0; i < aenaDepN && m < AENA_MAX; ++i) merged[m++] = aenaDep[i];
+  for (int i = 0; i < aenaArrN && m < AENA_MAX; ++i) {
+    const AenaStand &a = aenaArr[i];
+    bool skip = false;
+    for (int k = 0; k < aenaArrN && !skip; ++k)            // a newer arrival at the same stand replaced it
+      skip = k != i && !strcmp(aenaArr[k].box, a.box) && aenaArr[k].mins > a.mins;
+    for (int k = 0; k < aenaClosedN && !skip; ++k)          // a departure from that stand closed after it landed
+      skip = !strcmp(aenaClosed[k].box, a.box) && aenaClosed[k].mins > a.mins;
+    for (int k = 0; k < m && !skip; ++k) skip = !strcmp(merged[k].box, a.box);   // boarding departure wins
+    if (!skip) merged[m++] = a;
+  }
+  xSemaphoreTake(mtx, portMAX_DELAY);
+  memcpy(aenaStands, merged, m * sizeof(AenaStand)); aenaN = m;
+  xSemaphoreGive(mtx);
+}
+
+// Stand position from the OSM map: parking_position line (nose end first) or gate node.
+static bool standPose(const char *box, double &lat, double &lon, float &heading, bool &hasHeading) {
+  if (!mapReady) return false;
+  int best = -1;
+  for (int i = 0; i < featCount; ++i)
+    if (feats[i].type == F_PARKING && !strcmp(feats[i].ref, box) && (best < 0 || feats[i].count > feats[best].count)) best = i;
+  if (best < 0) return false;
+  const Feature &ft = feats[best];
+  auto unrot = [](float x, float y, float &e, float &n) { e = x * rotC - y * rotS; n = x * rotS + y * rotC; };
+  float e0, n0; unrot(pts[ft.first * 2], pts[ft.first * 2 + 1], e0, n0);
+  float e = e0, n = n0; hasHeading = false; heading = 0;
+  if (ft.count >= 2) {
+    const uint32_t last = ft.first + ft.count - 1;
+    float e1, n1; unrot(pts[last * 2], pts[last * 2 + 1], e1, n1);
+    const float de = e0 - e1, dn = n0 - n1, len = sqrtf(de * de + dn * dn);   // tail -> nose
+    if (len > 1) {
+      heading = fmodf(atan2f(de, dn) * 180 / (float)M_PI + 360, 360); hasHeading = true;
+      const float k = len > 40 ? 20 / len : 0.5f;          // aircraft centre ~20 m behind the nose mark
+      e = e0 - de * k; n = n0 - dn * k;
+    }
+  }
+  lat = mapLat + n / 110540.0;
+  lon = mapLon + e / (111320.0 * cos(mapLat * M_PI / 180.0));
+  return true;
 }
 
 // Network task: close the keep-alive session when the Airport screen is not active.
@@ -772,6 +925,30 @@ bool airportFetch() {
         ++n;
       }
       ++j;
+    }
+  }
+
+  // Aena: aircraft at a stand that ADS-B does not see (CGH only). Fetched AFTER positions.
+  if (ok && screenJobStillCurrent()) {
+    updateAena(code);
+    xSemaphoreTake(mtx, portMAX_DELAY);
+    static AenaStand st[AENA_MAX]; const int sn = aenaN; memcpy(st, aenaStands, sn * sizeof(AenaStand));
+    xSemaphoreGive(mtx);
+    for (int k = 0; k < sn && n < MAX_AC; ++k) {
+      bool live = false;                                   // already flying/taxiing in ADS-B: real position wins
+      for (int i = 0; i < n; ++i) {
+        char cs[9]; snprintf(cs, sizeof cs, "%s", fetchBuf[i].callsign);
+        for (char *c = cs + strlen(cs); c > cs && c[-1] == ' '; --c) c[-1] = 0;
+        if (!strcmp(cs, st[k].flight)) { live = true; break; }
+      }
+      double la, lo; float hd; bool hh;
+      if (live || !standPose(st[k].box, la, lo, hd, hh)) continue;
+      Aircraft a;
+      snprintf(a.icao24, sizeof a.icao24, "%s", st[k].hex);
+      snprintf(a.callsign, sizeof a.callsign, "%s", st[k].flight);
+      a.latitude = la; a.longitude = lo; a.onGround = true;
+      a.hasHeading = hh; a.headingDegrees = hd;
+      fetchBuf[n] = a; fetchSrc[n] = SRC_AENA; fetchGeom[n] = NAN; memo[n] = 0; ++n;
     }
   }
 
@@ -1033,8 +1210,9 @@ static void placeMarker(int i, const Aircraft &a, bool selected, bool stale) {
   lv_obj_t *img = planeImg[i];
   const lv_image_dsc_t *icon = iconFor(a);
   if (lv_image_get_src(img) != icon) lv_image_set_src(img, icon);
-  lv_obj_set_style_image_recolor(img, lv_color_hex(selected ? 0xFFD54A : altitudeColor(a)), 0);
-  lv_obj_set_style_image_opa(img, stale ? LV_OPA_40 : LV_OPA_COVER, 0);
+  const bool parked = a.icao24[0] == '~';                  // Aena stand, no ADS-B signal
+  lv_obj_set_style_image_recolor(img, lv_color_hex(selected ? 0xFFD54A : parked ? 0x9FB0C2 : altitudeColor(a)), 0);
+  lv_obj_set_style_image_opa(img, stale ? LV_OPA_40 : parked ? LV_OPA_70 : LV_OPA_COVER, 0);
   lv_image_set_scale(img, iconScale(a) + (selected ? 40 : 0));
   // the map is turned by mapRotDeg, so the heading is too
   lv_image_set_rotation(img, (int32_t)lroundf(((a.hasHeading ? a.headingDegrees : 0) + mapRotDeg) * 10.0f));
@@ -1191,6 +1369,22 @@ static void renderInfo(const AirportTraffic &t) {
     snprintf(mb, sizeof mb, "%s%s%s", a.type, a.registration[0] ? "  \xC2\xB7  " : "", a.registration);
   }
   setLabelIfChanged(infoRoute, rb); setLabelIfChanged(infoModel, mb);
+  if (a.icao24[0] == '~') {                                 // parked at a stand (Aena board, no ADS-B)
+    AenaStand st = {}; bool found = false;
+    xSemaphoreTake(mtx, portMAX_DELAY);
+    for (int k = 0; k < aenaN; ++k) if (!strcmp(aenaStands[k].hex, a.icao24)) { st = aenaStands[k]; found = true; break; }
+    xSemaphoreGive(mtx);
+    if (found) {
+      setLabelIfChanged(infoState, st.status);
+      snprintf(b, sizeof b, "POSI\xC3\x87\xC3\x83O %s    PORT\xC3\x83O %s    %s %s %s", st.box,
+               st.gate[0] && strcmp(st.gate, "-") ? st.gate : "\xE2\x80\x94", st.dep ? "SA\xC3\x8D" "DA" : "CHEGOU", st.when,
+               st.other);
+      setLabelIfChanged(infoLine1, b);
+      setLabelIfChanged(infoLine2, "Aena (painel de voos)  \xC2\xB7  sem sinal ADS-B no p\xC3\xA1tio");
+      lv_obj_remove_flag(info, LV_OBJ_FLAG_HIDDEN);
+      return;
+    }
+  }
   const uint8_t sm = t.src[sel];
   char srcs[40];
   snprintf(srcs, sizeof srcs, "%s%s%s%s", sm & SRC_ADSBLOL ? "ADSB.lol " : "", sm & SRC_AIRPLANES ? "airplanes.live " : "",
