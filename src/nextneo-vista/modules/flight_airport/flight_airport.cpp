@@ -62,7 +62,7 @@ static WiFiClientSecure lolClient;         // keep-alive session to ADSB.lol whi
 
 // Only aircraft on the ground or up to this height above the field are drawn
 // (touchdown / lift-off / runway); higher traffic belongs to the Flight Radar.
-static constexpr float SHOW_MAX_AGL_M = 100;   // touchdown / lift-off / short final
+static constexpr float SHOW_MAX_AGL_M = 200;   // touchdown / lift-off / short final; negative (baro error) shown too
 static constexpr float SHOW_KEEP_AGL_M = 300;  // once shown, kept until above this
 struct FieldElev { const char *code; float m; };
 static const FieldElev kElev[] = {
@@ -1185,7 +1185,7 @@ void buildAirportScreen(lv_obj_t *scr) {
   footLbl = makeLabel(ftr, "", &lv_font_weather_14, C_TEXT);      // kept for messages only
   lv_obj_add_flag(footLbl, LV_OBJ_FLAG_HIDDEN);
   // three clear stats: big number + small caption, separated by thin lines
-  static const char *caps[3] = {"em solo", "at\xC3\xA9 100 m", "na regi\xC3\xA3o"};
+  static const char *caps[3] = {"em solo", "at\xC3\xA9 200 m", "na regi\xC3\xA3o"};
   static const uint32_t col[3] = {0xF2B66D, 0x4ADE80, C_TEXT};      // same colours as the aircraft icons
   int x = 12;
   for (int k = 0; k < 3; ++k) {
@@ -1304,7 +1304,7 @@ void airportRender() {
   char nowHex[MAX_AC][8]; uint8_t nowN = 0;
   if (ready) {
     const float elev = fieldElevM(code);
-    // Hysteresis: an aircraft enters at <= 100 m AGL, but once on screen it stays until it
+    // Hysteresis: an aircraft enters at <= 200 m AGL (negative included), but once on screen it stays until it
     // is clearly gone (> 300 m AGL). Altitude jitter between networks (GNSS vs barometric,
     // +/- tens of m) made aircraft on final blink out before touchdown.
     for (int i = 0; i < t.count && shown < MAX_AC; ++i) {

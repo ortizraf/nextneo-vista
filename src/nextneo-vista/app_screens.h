@@ -93,6 +93,7 @@ enum ScreenID : uint8_t {
   SCREEN_SERVERS,
   SCREEN_CLOCK,
   SCREEN_AIRPORT,
+  SCREEN_PHOTOS,
   SCREEN_COUNT
 };
 
@@ -225,5 +226,17 @@ void airportOnExit();
 void airportRender();
 bool airportFetch();                                 // network task only
 void airportReleaseConnection();
+
+// ---- Photos screen (photos.cpp): slideshow of photos uploaded on the web page (/photos)
+static constexpr int PHOTO_SLOTS = 8;
+static constexpr uint32_t PHOTO_SLIDE_MS = 30000UL;   // one photo every 30 s
+extern lv_obj_t *photosView;
+void buildPhotosScreen(lv_obj_t *screen);
+void photosOnEnter();
+void photosOnExit();
+bool photosFsReady();
+bool photoExists(int slot);
+void photoPath(int slot, char *out, size_t n);
+void photosChanged();                                // after an upload/delete on the web page
 extern volatile uint8_t gTouchCount;                 // fingers on the panel (touch driver)
 extern volatile int16_t gTouch2X, gTouch2Y;          // 2nd finger, landscape coordinates                     // network task: drop the keep-alive TLS session
