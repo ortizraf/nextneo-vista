@@ -54,7 +54,7 @@ constexpr uint32_t MAP_RETRY_MS = 60UL * 1000UL;
 constexpr uint32_t C_BG = 0x041012, C_SCOPE = 0x071D1E, C_RING = 0x2F8F80;
 constexpr uint32_t C_ACCENT = 0x3EE6C8, C_TEXT = 0xE6FFF9, C_MUTED = 0x7FA8A0;
 constexpr uint32_t C_PANEL = 0x0B1C1E, C_PANEL_BORDER = 0x1F4542;
-constexpr uint32_t C_HOME = 0xFF4D4D;
+constexpr uint32_t C_HOME = 0xD32F2F;
 constexpr uint32_t C_SELECT = 0xFFD54A, C_GROUND = 0xF2B66D, C_ALERT = 0xFF5A5A;
 
 constexpr uint16_t hexTo565(uint32_t c) {
@@ -1053,9 +1053,29 @@ bool updateFlightRadarData() {
   centerLon = snapshot->centerLon;
   radiusKm = snapshot->radiusKm;
   xSemaphoreGive(mtx);
-  const bool ok = adsbLolProvider().fetch(centerLat, centerLon, radiusKm / 1.852f,
-      freshAircraft, FLIGHT_RADAR_MAX_AIRCRAFT, count, error, sizeof error,
-      screenJobStillCurrent);
+  // ADSB.lol first; if it fails (429, connection refused, timeout...) the SAME poll uses
+  // adsb.fi (same readsb data). A source that failed rests 12 s, doubling up to 2 min,
+  // and is skipped meanwhile; each success clears its rest. One source per poll.
+  struct SrcRest { uint32_t until, ms; };
+  static SrcRest lolRest = {0, 0}, fiRest = {0, 0};
+  auto resting = [](const SrcRest &r) { return r.ms && (int32_t)(millis() - r.until) < 0; };
+  auto fail = [](SrcRest &r, const char *name) {
+    r.ms = r.ms ? (r.ms * 2 > 120000UL ? 120000UL : r.ms * 2) : 12000UL;
+    r.until = millis() + r.ms;
+    Log.printf("Radar: %s em pausa por %lus\n", name, (unsigned long)(r.ms / 1000));
+  };
+  bool ok = false;
+  if (!resting(lolRest)) {
+    ok = adsbLolProvider().fetch(centerLat, centerLon, radiusKm / 1.852f,
+        freshAircraft, FLIGHT_RADAR_MAX_AIRCRAFT, count, error, sizeof error, screenJobStillCurrent);
+    if (ok) lolRest = {0, 0}; else if (screenJobStillCurrent()) fail(lolRest, "ADSB.lol");
+  }
+  if (!ok && !resting(fiRest) && screenJobStillCurrent()) {
+    ok = adsbFiProvider().fetch(centerLat, centerLon, radiusKm / 1.852f,
+        freshAircraft, FLIGHT_RADAR_MAX_AIRCRAFT, count, error, sizeof error, screenJobStillCurrent);
+    if (ok) fiRest = {0, 0}; else if (screenJobStillCurrent()) fail(fiRest, "adsb.fi");
+  }
+  if (!ok && !error[0]) snprintf(error, sizeof error, "Fontes em pausa");
   if (!screenJobStillCurrent()) return false;
   xSemaphoreTake(mtx, portMAX_DELAY);
   // Settings may have changed while downloading: drop results for the old area.
@@ -1066,7 +1086,7 @@ bool updateFlightRadarData() {
     snapshot->count = count;
     snapshot->lastSuccessMs = millis();
     snapshot->status = count ? FlightRadarStatus::ONLINE : FlightRadarStatus::EMPTY;
-    snprintf(snapshot->message, sizeof snapshot->message, "%s", count ? "Dados ADSB.lol" : "Nenhuma aeronave na área");
+    snprintf(snapshot->message, sizeof snapshot->message, "%s", count ? "Dados ADS-B" : "Nenhuma aeronave na área");
   } else if (!ok) {
     snapshot->status = snapshot->lastSuccessMs ? FlightRadarStatus::STALE : FlightRadarStatus::OFFLINE;
     snprintf(snapshot->message, sizeof snapshot->message, "%s", error[0] ? error : "Falha de consulta");

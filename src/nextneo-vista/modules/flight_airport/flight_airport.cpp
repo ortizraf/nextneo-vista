@@ -370,11 +370,12 @@ static bool fetchExtra(const char *url, uint8_t srcBit, double lat, double lon, 
   if (!tlsMemoryAvailable("airport-src")) return false;
   WiFiClientSecure fresh;
   WiFiClientSecure &client = keep ? *keep : fresh;
-  if (!keep) { fresh.setInsecure(); fresh.setHandshakeTimeout(10); }   // public read-only data
+  // Short timeouts: a slow/hung network must not freeze the live view (was 10 s + 8 s).
+  if (!keep) { fresh.setInsecure(); fresh.setHandshakeTimeout(5); }    // public read-only data
   else if (!client.connected()) client.stop();          // server closed it: free the old context first
   const bool reused = keep && client.connected();            // diagnostic: did keep-alive work?
   const uint32_t t0 = millis();
-  const int status = httpsFetch(client, url, body, 8000, keep != nullptr);
+  const int status = httpsFetch(client, url, body, 4500, keep != nullptr);
   lastFetchStatus = status;
   if (!keep || status != 200) client.stop();
   const char *srcName = srcBit == SRC_AIRPLANES ? "airplanes.live" : srcBit == SRC_ADSBFI ? "adsb.fi" : srcBit == SRC_ADSBONE ? "adsb.one" : "ADSB.lol";
@@ -569,39 +570,70 @@ static AptDetails det;                      // guarded by mtx
 
 static void copyStr(JsonVariantConst v, char *out, size_t n) { snprintf(out, n, "%s", v.is<const char *>() ? v.as<const char *>() : ""); }
 
-static void fetchDetails() {
-  AptDetails d;
-  xSemaphoreTake(mtx, portMAX_DELAY); d = det; xSemaphoreGive(mtx);
-  if (d.state != DET_PENDING) return;
-  lolClient.stop();                                       // one TLS context at a time
+// ---------------------------------------------------------------- details on tap
+// Route / airline / model (adsbdb) are fetched ONLY for the tapped aircraft, in the network
+// task, once per aircraft per visit (kept in memory while the screen is open). The panel
+// shows them for 5 s and closes by itself, so the screen goes back to positions only.
+// (A parallel task was tried: the internal RAM never had room for a 2nd TLS context.)
+static constexpr int DET_CACHE = MAX_AC;
+static AptDetails detCache[DET_CACHE];                    // guarded by mtx
+static uint32_t detRetryAt[DET_CACHE];
+static uint8_t detTries[DET_CACHE];
+static int detCacheN = 0;
+
+static int detFind(const char *hex) {                     // caller holds mtx
+  for (int i = 0; i < detCacheN; ++i) if (!strcmp(detCache[i].hex, hex)) return i;
+  return -1;
+}
+
+// One adsbdb request into `out` (hex/cs set by the caller). No lock held while fetching.
+static void fetchDetailsInto(AptDetails &out) {
   char url[128];
-  snprintf(url, sizeof url, "https://api.adsbdb.com/v0/aircraft/%s%s%s", d.hex, d.cs[0] ? "?callsign=" : "", d.cs);
+  snprintf(url, sizeof url, "https://api.adsbdb.com/v0/aircraft/%s%s%s", out.hex, out.cs[0] ? "?callsign=" : "", out.cs);
   static PsramBuffer body(32 * 1024);
   body.clear();
-  WiFiClientSecure client; client.setInsecure(); client.setHandshakeTimeout(10);
-  const int status = tlsMemoryAvailable("adsbdb") ? httpsFetch(client, url, body, 8000, false) : -1;
+  WiFiClientSecure client; client.setInsecure(); client.setHandshakeTimeout(5);
+  const uint32_t t0 = millis();
+  const int status = httpsFetch(client, url, body, 4500, false);
   client.stop();
   JsonDocument doc(SpiRamJsonAllocator::instance());
   const bool parsed = (status == 200 || status == 404) && !deserializeJson(doc, body.c_str(), body.length());
   JsonObjectConst ac = doc["response"]["aircraft"], fr = doc["response"]["flightroute"];
-  xSemaphoreTake(mtx, portMAX_DELAY);
-  if (strcmp(det.hex, d.hex)) { xSemaphoreGive(mtx); return; }   // selection changed meanwhile
-  if (!parsed) det.state = DET_FAILED;
-  else if (ac.isNull() && fr.isNull()) det.state = DET_NOTFOUND;
+  if (!parsed) out.state = DET_FAILED;
+  else if (ac.isNull() && fr.isNull()) out.state = DET_NOTFOUND;
   else {
     char man[24] = "", type[24] = "";
     copyStr(ac["manufacturer"], man, sizeof man); copyStr(ac["type"], type, sizeof type);
-    snprintf(det.model, sizeof det.model, "%s%s%s", man, man[0] ? " " : "", type);
-    copyStr(ac["registered_owner"], det.owner, sizeof det.owner);
-    copyStr(fr["airline"]["name"], det.airline, sizeof det.airline);
-    copyStr(fr["origin"]["iata_code"], det.org, sizeof det.org);
-    copyStr(fr["destination"]["iata_code"], det.dst, sizeof det.dst);
-    copyStr(fr["origin"]["municipality"], det.orgCity, sizeof det.orgCity);
-    copyStr(fr["destination"]["municipality"], det.dstCity, sizeof det.dstCity);
-    det.state = DET_READY;
+    snprintf(out.model, sizeof out.model, "%s%s%s", man, man[0] ? " " : "", type);
+    copyStr(ac["registered_owner"], out.owner, sizeof out.owner);
+    copyStr(fr["airline"]["name"], out.airline, sizeof out.airline);
+    copyStr(fr["origin"]["iata_code"], out.org, sizeof out.org);
+    copyStr(fr["destination"]["iata_code"], out.dst, sizeof out.dst);
+    copyStr(fr["origin"]["municipality"], out.orgCity, sizeof out.orgCity);
+    copyStr(fr["destination"]["municipality"], out.dstCity, sizeof out.dstCity);
+    out.state = DET_READY;
   }
+  LogV.printf("Airport: detalhes %s -> HTTP %d em %lums (%s)\n", out.hex, status, (unsigned long)(millis() - t0),
+              out.state == DET_READY ? "ok" : out.state == DET_NOTFOUND ? "sem dados" : "falhou");
+}
+
+// Network task: fetch the details of the tapped aircraft (if still pending). ~1-2 s, only
+// on a tap; the icons keep gliding by prediction meanwhile.
+static void fetchTappedDetails() {
+  AptDetails job = {};
+  xSemaphoreTake(mtx, portMAX_DELAY);
+  const bool pending = det.hex[0] && det.state == DET_PENDING;
+  if (pending) { snprintf(job.hex, sizeof job.hex, "%s", det.hex); snprintf(job.cs, sizeof job.cs, "%s", det.cs); }
   xSemaphoreGive(mtx);
-  LogV.printf("Airport: detalhes %s -> HTTP %d (%s)\n", d.hex, status, det.state == DET_READY ? "ok" : "sem dados");
+  if (!pending) return;
+  lolClient.stop();                                       // one TLS context at a time
+  fetchDetailsInto(job);
+  xSemaphoreTake(mtx, portMAX_DELAY);
+  int k = detFind(job.hex);
+  if (k < 0 && detCacheN < DET_CACHE) { k = detCacheN++; detTries[k] = 0; detRetryAt[k] = 0; }
+  if (k >= 0) { detCache[k] = job; if (job.state == DET_FAILED) ++detTries[k]; }
+  if (!strcmp(det.hex, job.hex)) det = job;               // shown now (failure shows "—")
+  xSemaphoreGive(mtx);
 }
 
 // Network task: close the keep-alive session when the Airport screen is not active.
@@ -613,6 +645,7 @@ void airportReleaseConnection() {
   LogV.println("Airport: conexão ADSB.lol liberada");
 }
 
+static int lastLolStatus = 0;     // last ADSB.lol HTTP status (diagnostics)
 bool airportFetch() {
   if (WiFi.status() != WL_CONNECTED) return false;
   const uint32_t cycleStart = millis();
@@ -654,8 +687,7 @@ bool airportFetch() {
     if (!screenJobStillCurrent()) return false;
   }
 
-  // Aggregate 3 public networks: each has receivers in different places, so together
-  // they see more aircraft on the apron/taxiways. Merge by ICAO hex, keep the freshest.
+  // Aircraft around the airfield from ADSB.lol (one network: coherent positions).
   const float radiusNm = 2.0f;                         // airfield + final approach / initial climb
   uint8_t n = 0, okMask = 0; char err[40] = "";
   char url[128];
@@ -663,52 +695,56 @@ bool airportFetch() {
   // nothing cached between polls. Every request re-checks that the Airport screen is still
   // the active one, so leaving it stops the queries at once. One TLS context at a time.
   static bool lolConfigured = false;
-  if (!lolConfigured) { lolClient.setInsecure(); lolClient.setHandshakeTimeout(10); lolConfigured = true; }
+  if (!lolConfigured) { lolClient.setInsecure(); lolClient.setHandshakeTimeout(5); lolConfigured = true; }
   snprintf(url, sizeof url, "https://api.adsb.lol/v2/point/%.5f/%.5f/%u", lat, lon, (unsigned)ceilf(radiusNm));
   // ADSB.lol closes the connection after every answer (log: always "conexao nova"), so each
   // poll pays a ~2 s TLS handshake, and it answers 429 when polled faster than ~2-3 s.
   // Respect that: after a 429 wait 6 s between ADSB.lol polls for the next 60 s.
-  static uint32_t lolSlowUntil = 0, lolLastMs = 0;
-  const bool slow = (int32_t)(millis() - lolSlowUntil) < 0;
-  if (!slow || millis() - lolLastMs >= 6000) {
-    lolOpen = true; lolLastMs = millis();
-    if (fetchExtra(url, SRC_ADSBLOL, lat, lon, radiusNm, fetchBuf, fetchSrc, fetchGeom, n, &lolClient)) okMask |= SRC_ADSBLOL;
-    else {
-      snprintf(err, sizeof err, "ADSB.lol sem resposta");
-      if (lastFetchStatus == 429) { lolSlowUntil = millis() + 60000; Log.println("Airport: ADSB.lol pediu calma (429): 6 s por 60 s"); }
-    }
+  if (screenJobStillCurrent()) fetchTappedDetails();     // only after a tap, once per aircraft
+  // Two public networks with the same readsb format. The log showed ADSB.lol answering
+  // 429 (rate limit) to this screen almost every time, while adsb.fi answered every
+  // query in ~1 s. So adsb.fi is the main source here and ADSB.lol the fallback.
+  // Only ONE network per cycle (positions from different networks are never mixed).
+  // A network that answers 429 / fails rests 10 s, doubling up to 60 s; each success
+  // halves it. Between queries the moving aircraft follow the prediction.
+  // A tap queues an extra cycle for the details: it never forces an early query.
+  struct NetState { uint32_t lastMs, backoffMs; };
+  static NetState fi = {0, 0}, lol = {0, 0};
+  static constexpr uint32_t FI_GAP = 3500, LOL_GAP = 4500;   // adsb.fi allows ~1 query/s per IP
+  char lolUrl[128];
+  snprintf(lolUrl, sizeof lolUrl, "%s", url);
+  char fiUrl[128];
+  snprintf(fiUrl, sizeof fiUrl, "https://opendata.adsb.fi/api/v2/lat/%.5f/lon/%.5f/dist/%u", lat, lon, (unsigned)ceilf(radiusNm));
+  auto due = [](const NetState &st, uint32_t gap) {
+    return !st.lastMs || millis() - st.lastMs >= (st.backoffMs ? st.backoffMs : gap);
+  };
+  auto rest = [](NetState &st, const char *name, int status) {
+    st.backoffMs = st.backoffMs ? (st.backoffMs * 2 > 60000UL ? 60000UL : st.backoffMs * 2) : 10000UL;
+    Log.printf("Airport: %s %s, em pausa por %lus\n", name, status == 429 ? "pediu calma (429)" : "falhou",
+               (unsigned long)(st.backoffMs / 1000));
+  };
+  auto okAgain = [](NetState &st) { st.backoffMs = st.backoffMs / 2 < 4000UL ? 0 : st.backoffMs / 2; };
+  bool tried = false, got429 = false;
+  const bool fiResting = fi.backoffMs && !due(fi, FI_GAP);
+  if (!fiResting && due(fi, FI_GAP)) {                      // main: adsb.fi
+    tried = true; fi.lastMs = millis();
+    lolClient.stop();                                       // one TLS context at a time
+    if (fetchExtra(fiUrl, SRC_ADSBFI, lat, lon, radiusNm, fetchBuf, fetchSrc, fetchGeom, n)) { okMask |= SRC_ADSBFI; okAgain(fi); }
+    else { got429 = lastFetchStatus == 429; rest(fi, "adsb.fi", lastFetchStatus); snprintf(err, sizeof err, "adsb.fi sem resposta"); }
   }
+  // fallback: ADSB.lol, only while adsb.fi is resting (or just failed in this cycle)
+  if (!okMask && (fi.backoffMs || got429) && due(lol, LOL_GAP) && screenJobStillCurrent()) {
+    tried = true; lol.lastMs = millis(); lolOpen = true; n = 0;
+    if (fetchExtra(lolUrl, SRC_ADSBLOL, lat, lon, radiusNm, fetchBuf, fetchSrc, fetchGeom, n, &lolClient)) { okMask |= SRC_ADSBLOL; okAgain(lol); }
+    else { if (lastFetchStatus == 429) got429 = true; rest(lol, "ADSB.lol", lastFetchStatus); snprintf(err, sizeof err, "ADSB.lol sem resposta"); }
+    lastLolStatus = lastFetchStatus;
+  }
+  if (!tried) return true;                                  // too soon: keep the current positions
+  if (!okMask && got429) return true;                       // rate limited everywhere: keep positions
 
-  static uint32_t secMs = 0;
-  static uint8_t secN = 0, secOk = 0;
-  if (screenJobStillCurrent()) {                          // every poll, no cache: all networks each time
-    // keep the ADSB.lol session if there is room for a second TLS context (saves a ~2 s handshake)
-    if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < 60000) lolClient.stop();
-    uint8_t m = 0, bits = 0;
-    static uint32_t airplanesPausedUntil = 0;           // airplanes.live answers 403 to this device
-    if (screenJobStillCurrent() && (int32_t)(millis() - airplanesPausedUntil) >= 0) {
-      snprintf(url, sizeof url, "https://api.airplanes.live/v2/point/%.5f/%.5f/%u", lat, lon, (unsigned)ceilf(radiusNm));
-      if (fetchExtra(url, SRC_AIRPLANES, lat, lon, radiusNm, secBuf, secSrc, secGeom, m)) bits |= SRC_AIRPLANES;
-      else airplanesPausedUntil = millis() + 30UL * 60 * 1000;
-    }
-    snprintf(url, sizeof url, "https://opendata.adsb.fi/api/v2/lat/%.5f/lon/%.5f/dist/%u", lat, lon, (unsigned)ceilf(radiusNm));
-    if (screenJobStillCurrent() && fetchExtra(url, SRC_ADSBFI, lat, lon, radiusNm, secBuf, secSrc, secGeom, m)) bits |= SRC_ADSBFI;
-    static uint32_t onePausedUntil = 0;                 // adsb.one also answers 403: back off 30 min
-    if (screenJobStillCurrent() && (int32_t)(millis() - onePausedUntil) >= 0) {
-      snprintf(url, sizeof url, "https://api.adsb.one/v2/point/%.5f/%.5f/%u", lat, lon, (unsigned)ceilf(radiusNm));
-      if (fetchExtra(url, SRC_ADSBONE, lat, lon, radiusNm, secBuf, secSrc, secGeom, m)) bits |= SRC_ADSBONE;
-      else onePausedUntil = millis() + 30UL * 60 * 1000;
-    }
-    secN = m; secOk = bits; secMs = millis();
-  }
-  if (secOk) {                                          // merge what the other networks answered now
-    for (int i = 0; i < secN; ++i) {
-      Aircraft a = secBuf[i];
-      if (a.hasPositionAge) a.positionAgeSeconds += (millis() - secMs) / 1000.0f;   // age it honestly
-      mergeOne(fetchBuf, fetchSrc, fetchGeom, n, a, secGeom[i], secSrc[i]);
-    }
-    okMask |= secOk;
-  }
+  // Single live source (same as the Flight Radar): ADSB.lol only, polled almost
+  // continuously. Mixing networks (adsb.fi, airplanes.live, adsb.one) gave the same
+  // aircraft positions with different ages from different receivers -> icons jumped.
   if (!screenJobStillCurrent()) return false;
   const bool ok = okMask != 0;
 
@@ -755,7 +791,10 @@ bool airportFetch() {
   } else { traffic->failed = true; snprintf(traffic->error, sizeof traffic->error, "%s", err); }
   traffic->version++;
   xSemaphoreGive(mtx);
-  if (screenJobStillCurrent()) fetchDetails();   // adsbdb only for the aircraft tapped on this screen
+  if (lastCycleStart && cycleStart - lastCycleStart > 8000)
+    Log.printf("Airport: atualização lenta: intervalo %lums (ciclo %lums, fontes %c%c, ADSB.lol %d)\n",
+               (unsigned long)(cycleStart - lastCycleStart), (unsigned long)(millis() - cycleStart),
+               okMask & SRC_ADSBLOL ? 'L' : '-', okMask & SRC_ADSBFI ? 'F' : '-', lastLolStatus);
   LogV.printf("Airport: ciclo %lums, intervalo %lums, interno livre %u (maior bloco %u)\n", (unsigned long)(millis() - cycleStart),
              (unsigned long)(lastCycleStart ? cycleStart - lastCycleStart : 0), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
@@ -957,10 +996,24 @@ static bool pinching = false;            // pinch-zoom in progress (canvasEvent)
 // aircraft never goes backwards: a report behind the icon (repeated or older data from
 // a slower network) is ignored. State is in map metres keyed by hex, so pan/zoom keeps it.
 static const float GLIDE_S = 10.0f;     // default slide = poll interval (continuous motion)
-struct Glide { bool on; char hex[8]; float fx, fy, tx, ty, hx, hy; uint32_t t0, durMs; };
+// Moving aircraft (>= 30 kt with a heading) are PREDICTED like on the Flight Radar: the
+// icon shows where the aircraft is now (last report + speed x time, at most 15 s ahead),
+// so landings and take-offs look live. A new report is joined smoothly in 0.8 s.
+// Slow / ground-taxiing aircraft keep the "only reported positions" slide.
+struct Glide { bool on; char hex[8]; float fx, fy, tx, ty, hx, hy; uint32_t t0, durMs;
+               bool pred; float vx, vy, ox, oy; uint32_t tBase, tc; float rx, ry; };   // rx,ry: raw report
+static constexpr float PRED_MIN_KT = 30.0f, PRED_MAX_S = 20.0f;
+static constexpr uint32_t PRED_JOIN_MS = 800;
 static Glide glide[MAX_AC];
 static lv_timer_t *glideTimer;
 static void glidePos(const Glide &g, float &mx, float &my) {
+  if (g.pred) {
+    const float dt = min(PRED_MAX_S, lv_tick_elaps(g.tBase) / 1000.0f);
+    mx = g.tx + g.vx * dt; my = g.ty + g.vy * dt;
+    const float k = min(1.0f, lv_tick_elaps(g.tc) / (float)PRED_JOIN_MS);
+    mx += g.ox * (1 - k); my += g.oy * (1 - k);
+    return;
+  }
   const float k = min(1.0f, lv_tick_elaps(g.t0) / (float)(g.durMs ? g.durMs : 1));
   mx = g.fx + (g.tx - g.fx) * k; my = g.fy + (g.ty - g.fy) * k;
 }
@@ -968,7 +1021,8 @@ static void glideCb(lv_timer_t *) {
   if (pinching || dragging) return;
   for (int i = 0; i < MAX_AC; ++i) {
     if (!glide[i].on || lv_obj_has_flag(planeImg[i], LV_OBJ_FLAG_HIDDEN)) continue;
-    if (lv_tick_elaps(glide[i].t0) > glide[i].durMs + 150) continue;   // arrived
+    if (glide[i].pred ? lv_tick_elaps(glide[i].tBase) > PRED_MAX_S * 1000 + 150
+                      : lv_tick_elaps(glide[i].t0) > glide[i].durMs + 150) continue;   // arrived / prediction over
     float mx, my; glidePos(glide[i], mx, my);
     const int x = (int)sx(mx) - ICON_PX / 2, y = MAP_Y + (int)sy(my) - ICON_PX / 2;
     if (x != lv_obj_get_x(planeImg[i]) || y != lv_obj_get_y(planeImg[i])) lv_obj_set_pos(planeImg[i], x, y);
@@ -997,10 +1051,39 @@ static void placeMarker(int i, const Aircraft &a, bool selected, bool stale) {
     const float hr = (a.headingDegrees + mapRotDeg) * (float)M_PI / 180.0f;
     g.hx = sinf(hr); g.hy = cosf(hr);                    // unit heading in map metres (y up)
   } else { g.hx = g.hy = 0; }
-  if (!havePrev) {
+  // Prediction only with a recent position (<= 15 s old: at low altitude the networks often
+  // deliver positions 5-15 s old, e.g. right after take-off). Without this, an aircraft whose
+  // position stopped updating (but still sends speed) was pushed forward, then pulled back
+  // by the next identical report: it looked stuck, going back and forth.
+  const bool fresh = !a.hasPositionAge || a.positionAgeSeconds <= 15.0f;
+  const bool predict = !stale && fresh && a.hasSpeed && a.hasHeading && a.speedKnots >= PRED_MIN_KT;
+  float cx = 0, cy = 0;
+  if (havePrev) glidePos(prev, cx, cy);                  // where the icon is drawn right now
+  const bool sameReport = havePrev && (mx - prev.rx) * (mx - prev.rx) + (my - prev.ry) * (my - prev.ry) < 9.0f;
+  if (predict && sameReport && prev.pred) {
+    g = prev;                                            // same data again: keep the running track, never rewind
+  } else if (predict) {
+    const float v = a.speedKnots * 0.514444f;            // m/s
+    const float age = a.hasPositionAge ? constrain(a.positionAgeSeconds, 0.0f, 15.0f) : 0.0f;
+    g.pred = true; g.rx = mx; g.ry = my;
+    g.tx = mx; g.ty = my; g.vx = g.hx * v; g.vy = g.hy * v;
+    g.tBase = lv_tick_get() - (uint32_t)(age * 1000);
+    g.tc = lv_tick_get();
+    g.fx = g.tx; g.fy = g.ty; g.t0 = g.tc; g.durMs = 1;
+    float px, py; g.ox = g.oy = 0; glidePos(g, px, py);  // predicted "now" on the new track
+    // New track's "now" is behind the icon (aircraft slowed down / older data): hold the
+    // icon still until the track catches up, instead of sliding backwards.
+    if (havePrev && ((cx - px) * g.hx + (cy - py) * g.hy) > 3.0f) {
+      g.pred = false;
+      g.fx = g.tx = cx; g.fy = g.ty = cy; g.durMs = 1; g.t0 = lv_tick_get() - 1000;
+    } else if (havePrev) { g.ox = cx - px; g.oy = cy - py; }   // start from the drawn icon: no jump
+    glidePos(g, mx, my);
+  } else if (!havePrev) {
+    g.pred = false; g.rx = mx; g.ry = my;
     g.fx = g.tx = mx; g.fy = g.ty = my; g.durMs = 1; g.t0 = lv_tick_get() - 1000;
   } else {
-    float cx, cy; glidePos(prev, cx, cy);
+    g.pred = false; g.rx = mx; g.ry = my;
+    if (prev.pred) { prev.tx = cx; prev.ty = cy; prev.fx = cx; prev.fy = cy; prev.t0 = lv_tick_get(); prev.durMs = 1; }
     const float dx = mx - prev.tx, dy = my - prev.ty;
     const bool same = dx * dx + dy * dy < 4.0f;          // nothing new (< 2 m)
     const bool behind = (dx * prev.hx + dy * prev.hy) < 0 && dx * dx + dy * dy < 1500.0f * 1500.0f;
@@ -1083,6 +1166,19 @@ static void renderInfo(const AirportTraffic &t) {
   xSemaphoreTake(mtx, portMAX_DELAY); d = det; xSemaphoreGive(mtx);
   char rb[120], mb[120];
   const bool mine = !strcmp(d.hex, a.icao24);
+  // Details panel: open for 5 s once the details are in, then it closes by itself and the
+  // screen goes back to positions only (tap again to see it again: cached, instant).
+  { static char shownHex[7] = ""; static uint32_t shownAt = 0;
+    if (mine && d.state != DET_PENDING) {
+      if (strcmp(shownHex, d.hex)) { snprintf(shownHex, sizeof shownHex, "%s", d.hex); shownAt = lv_tick_get(); }
+      else if (lv_tick_elaps(shownAt) > 5000) {
+        selectedHex[0] = 0; shownHex[0] = 0;
+        xSemaphoreTake(mtx, portMAX_DELAY); det.hex[0] = 0; xSemaphoreGive(mtx);
+        lv_obj_add_flag(info, LV_OBJ_FLAG_HIDDEN);
+        renderedTrafficVersion = UINT32_MAX;                       // icon back to its normal colour
+        return;
+      }
+    } }
   if (!mine || d.state == DET_PENDING) { snprintf(rb, sizeof rb, "buscando rota e modelo..."); mb[0] = 0; }
   else if (d.state == DET_READY) {
     if (d.org[0] || d.dst[0]) snprintf(rb, sizeof rb, "%s %s  " LV_SYMBOL_RIGHT "  %s %s%s%s", d.org[0] ? d.org : "?", d.orgCity,
@@ -1218,13 +1314,17 @@ static void canvasEvent(lv_event_t *e) {
     if (best >= 0) snprintf(selectedHex, sizeof selectedHex, "%s", traffic->ac[best].icao24); else selectedHex[0] = 0;
     const bool newSel = best >= 0 && strcmp(det.hex, selectedHex);
     if (newSel) {
-      memset(&det, 0, sizeof det);
-      snprintf(det.hex, sizeof det.hex, "%s", selectedHex);
-      snprintf(det.cs, sizeof det.cs, "%s", traffic->ac[best].callsign);
-      det.state = DET_PENDING;
+      const int k = detFind(selectedHex);                         // already fetched in the background?
+      if (k >= 0 && (detCache[k].state == DET_READY || detCache[k].state == DET_NOTFOUND)) det = detCache[k];
+      else {
+        memset(&det, 0, sizeof det);
+        snprintf(det.hex, sizeof det.hex, "%s", selectedHex);
+        snprintf(det.cs, sizeof det.cs, "%s", traffic->ac[best].callsign);
+        det.state = DET_PENDING;                                  // fetched at the start of the next cycle
+      }
     }
     xSemaphoreGive(mtx);
-    if (newSel) postScreenJob(CMD_AIRPORT);                       // fetch details right away
+    if (newSel && det.state == DET_PENDING) postScreenJob(CMD_AIRPORT);   // start it now (positions keep their 2.5 s guard)
     renderedTrafficVersion = UINT32_MAX;
   }
 }
@@ -1364,17 +1464,24 @@ void buildAirportScreen(lv_obj_t *scr) {
   infoState = makeLabel(info, "", &lv_font_weather_14, C_TEXT); lv_obj_align(infoState, LV_ALIGN_TOP_RIGHT, -12, 10);
   infoRoute = makeLabel(info, "", &lv_font_weather_14, C_TEXT); lv_obj_set_pos(infoRoute, 12, 32);
   lv_obj_set_width(infoRoute, SCR_W - 40); lv_label_set_long_mode(infoRoute, LV_LABEL_LONG_DOT);
+  lv_obj_set_height(infoRoute, lv_font_get_line_height(&lv_font_weather_14));   // one line, cut with "..."
   infoModel = makeLabel(info, "", &lv_font_weather_14, C_TEXT2); lv_obj_set_pos(infoModel, 12, 50);
   lv_obj_set_width(infoModel, SCR_W - 40); lv_label_set_long_mode(infoModel, LV_LABEL_LONG_DOT);
+  lv_obj_set_height(infoModel, lv_font_get_line_height(&lv_font_weather_14));   // one line, cut with "..."
   infoLine1 = makeLabel(info, "", &lv_font_weather_14, C_TEXT); lv_obj_set_pos(infoLine1, 12, 68);
   infoLine2 = makeLabel(info, "", &lv_font_weather_14, C_TEXT2); lv_obj_set_pos(infoLine2, 12, 86);
   lv_obj_set_width(infoLine2, SCR_W - 40); lv_label_set_long_mode(infoLine2, LV_LABEL_LONG_DOT);
+  lv_obj_set_height(infoLine2, lv_font_get_line_height(&lv_font_weather_14));   // one line, cut with "..."
   lv_obj_add_flag(info, LV_OBJ_FLAG_HIDDEN);
 }
 
 // ---------------------------------------------------------------- lifecycle (UI thread)
 void airportOnEnter() {
-  if (!glideTimer) glideTimer = lv_timer_create(glideCb, 100, NULL);   // 10 fps, only small icons move
+  xSemaphoreTake(mtx, portMAX_DELAY);
+  detCacheN = 0; memset(&det, 0, sizeof det);                     // details are per visit
+  xSemaphoreGive(mtx);
+
+  if (!glideTimer) glideTimer = lv_timer_create(glideCb, 60, NULL);    // ~16 fps (same as the radar sweep), only small icons move
   lv_timer_resume(glideTimer);
   mapDrawn = false;
   renderedTrafficVersion = UINT32_MAX;

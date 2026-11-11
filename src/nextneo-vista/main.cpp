@@ -118,7 +118,8 @@ bool screenJobStillCurrent() {
 // ---------------------------------------------------------------- helpers
 const char *weatherText(int c) {
   if (c == 0) return "Ensolarado";
-  if (c <= 2) return "Parcialmente nublado";
+  if (c == 1) return "Poucas nuvens";
+  if (c == 2) return "Parcialmente nublado";
   if (c == 3) return "Nublado";
   if (c == 45 || c == 48) return "Neblina";
   if (c >= 51 && c <= 57) return "Garoa";
@@ -132,6 +133,14 @@ const char *weatherText(int c) {
 
 bool isRainCode(int c) {
   return (c >= 51 && c <= 67) || (c >= 80 && c <= 82) || c >= 95;
+}
+
+// Rain intensity for the artwork (WMO code): 0 none, 1 garoa, 2 chuva, 3 chuva forte/tempestade.
+int rainLevel(int c) {
+  if (c >= 51 && c <= 57) return 1;                                   // garoa
+  if (c == 61 || c == 63 || c == 66 || c == 80 || c == 81) return 2;  // chuva fraca/moderada, pancadas
+  if (c == 65 || c == 67 || c == 82 || c >= 95) return 3;             // chuva forte, pancadas fortes, tempestade
+  return 0;
 }
 
 // One keep-alive TLS session to Yahoo for the whole Finance visit: the spark
@@ -391,11 +400,26 @@ static bool httpGetJson(const String &url, JsonDocument &doc, String &error) {
 // ---------------------------------------------------------------- worker task
 static void applyTime() { configTime(cfg.utcOffset, 0, "pool.ntp.org", "time.google.com"); }
 
+// Open-Meteo's CURRENT weather_code comes from the forecast model and often says "garoa"
+// while the sun is out (it follows the rain chance of the coming hours). Seen: code 51 with
+// UV 5.8, humidity 50 %, cloud cover 35 %, 0.1 mm. For drizzle / rain (51-67) trust it only
+// when the sky is mostly covered (>= 60 %) AND it is really raining (>= 0.2 mm in 15 min);
+// otherwise show the sky from the cloud cover. Showers / storms (80+) are kept as sent.
+// Hourly / daily codes are forecasts and are not touched.
+static int checkCurrentCode(int code, float precipMm, int cloudPct) {
+  if (code < 51 || code > 67 || cloudPct < 0) return code;
+  if (cloudPct >= 60 && precipMm >= 0.2f) return code;
+  if (cloudPct < 20) return 0;          // céu limpo
+  if (cloudPct < 50) return 1;          // poucas nuvens
+  if (cloudPct < 85) return 2;          // parcialmente nublado
+  return 3;                             // nublado
+}
+
 static bool doWeather() {
   if (WiFi.status() != WL_CONNECTED) return false;
   String url = "https://api.open-meteo.com/v1/forecast?latitude=" + String(cfg.lat, 4) +
                "&longitude=" + String(cfg.lon, 4) +
-               "&current=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m,apparent_temperature,uv_index"
+               "&current=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m,apparent_temperature,uv_index,precipitation,cloud_cover"
                "&hourly=temperature_2m,weather_code,precipitation_probability"
                "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,"
                "precipitation_sum,precipitation_hours,cloud_cover_mean"
@@ -432,7 +456,15 @@ static bool doWeather() {
   }
   xSemaphoreTake(mtx, portMAX_DELAY);
   sh.temp = doc["current"]["temperature_2m"] | 0.0f;
-  sh.code = doc["current"]["weather_code"] | 0;
+  {
+    const int apiCode = doc["current"]["weather_code"] | 0;
+    const float precip = doc["current"]["precipitation"] | 0.0f;
+    const int cloud = doc["current"]["cloud_cover"] | -1;
+    sh.code = checkCurrentCode(apiCode, precip, cloud);
+    if (sh.code != apiCode)
+      Log.printf("Clima: API disse %d (%s), mas nuvens %d%% e %.1f mm -> mostrando %d\n",
+                 apiCode, weatherText(apiCode), cloud, precip, sh.code);
+  }
   sh.humidity = doc["current"]["relative_humidity_2m"] | 0;
   sh.wind = doc["current"]["wind_speed_10m"] | 0.0f;
   sh.feels = doc["current"]["apparent_temperature"] | sh.temp;
@@ -1259,7 +1291,7 @@ const c=document.createElement('button');c.type='button';c.className='chip';c.te
   page.replace("%NOTICE%", notice.isEmpty() ? String() : htmlEscape(notice) + "<br>");
   page.replace("%STATUS%", htmlEscape(status));
   page.replace("%IP%", WiFi.localIP().toString());
-  page.replace("%CITY%", htmlEscape(prefs.getString("cityRaw", city)));
+  page.replace("%CITY%", htmlEscape(prefs.isKey("cityRaw") ? prefs.getString("cityRaw", city) : city));
   page.replace("%H24%", cfg.h24 ? "checked" : "");
   page.replace("%AIRPORTNAME%", htmlEscape(airportName));
   page.replace("%AIRPORT%", htmlEscape(airportCode));

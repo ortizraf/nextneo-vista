@@ -123,7 +123,7 @@ static constexpr uint32_t SERVERS_UPDATE_INTERVAL_MS      = 10UL * 1000UL;
 static constexpr uint32_t SERVERS_RETRY_INTERVAL_MS       = 10UL * 1000UL;
 // The screen timer restarts when a job ends, so the real cycle is job time + this.
 // ~1.5-3 s job (keep-alive) + 2.5 s = about one update every 5 s.
-static constexpr uint32_t AIRPORT_UPDATE_INTERVAL_MS      = 7000UL;    // ~3 s of requests + 7 s = ~10 s, no cache
+static constexpr uint32_t AIRPORT_UPDATE_INTERVAL_MS      = 1000UL;    // ADSB.lol only, almost continuous: ~2 s request + 1 s = ~3 s
 static constexpr uint32_t AIRPORT_RETRY_INTERVAL_MS       = 10000UL;
 
 enum Cmd : uint8_t {
@@ -173,6 +173,7 @@ lv_obj_t *addBackButton(lv_obj_t *parent);
 void showView(lv_obj_t *view);
 const char *weatherText(int code);
 bool isRainCode(int code);
+int rainLevel(int code);   // 0 none, 1 garoa, 2 chuva, 3 chuva forte / tempestade
 
 void buildFinanceScreen(lv_obj_t *screen);
 void buildCalendarScreen(lv_obj_t *screen);

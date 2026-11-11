@@ -44,6 +44,13 @@ static const lv_point_precise_t kStreak[3][2] = {{{2, 0}, {0, 9}}, {{4, 0}, {0, 
 static const lv_opa_t kStreakOpa[3] = {70, 120, 175};
 static const uint8_t kStreakW[3] = {1, 1, 2};
 static const float kStreakSpeed[3][2] = {{230, 290}, {320, 400}, {430, 520}};
+// Intensity (rainLevel): how many streaks, how fast, how long, how bright. Garoa = few,
+// short, slow and faint; chuva forte = all 30, full length, splashes on the ground.
+static const lv_point_precise_t kStreakDrizzle[3][2] = {{{1, 0}, {0, 5}}, {{2, 0}, {0, 8}}, {{2, 0}, {0, 10}}};
+static const int kRainDrops[4] = {0, 10, 20, 30};
+static const float kRainSpeedK[4] = {0, 0.45f, 0.8f, 1.0f};
+static const float kRainOpaK[4] = {0, 0.6f, 0.85f, 1.0f};
+static int rainLvl = 0;
 static lv_obj_t *splash[SPLASH];
 static uint32_t splashStart[SPLASH];
 static int splashX[SPLASH], splashY[SPLASH];
@@ -92,7 +99,7 @@ static bool isWet(int c) { return isRainCode(c) || isStorm(c); }
 static void drawMiniIcon(lv_obj_t *box, int code, bool isNight, float s = 1.0f) {
   lv_obj_clean(box);
   auto px = [&](float v) { return (int)lroundf(v * s); };
-  const bool cloudy = code >= 2, sunny = code <= 2;
+  const bool cloudy = code >= 1, sunny = code <= 2;   // 1 poucas nuvens / 2 parcialmente nublado: sun + cloud
   if (sunny) {
     if (isNight) {
       lv_obj_t *m = shape(box, px(16), px(16), 0xEEF1F8, LV_OPA_COVER); lv_obj_set_pos(m, px(code ? 4 : 9), px(1));
@@ -109,8 +116,11 @@ static void drawMiniIcon(lv_obj_t *box, int code, bool isNight, float s = 1.0f) 
     lv_obj_t *b = shape(box, px(17), px(17), col, LV_OPA_COVER); lv_obj_set_pos(b, px(13), px(oy + 1));
     lv_obj_t *c = shape(box, px(28), px(10), col, LV_OPA_COVER, px(5)); lv_obj_set_pos(c, px(4), px(oy + 10));
   }
-  if (isWet(code)) {
-    for (int i = 0; i < 3; ++i) { lv_obj_t *d = shape(box, px(2), px(6), 0x6CB6FF, LV_OPA_COVER, 1); lv_obj_set_pos(d, px(9 + i * 7), px(22)); }
+  switch (rainLevel(code)) {        // garoa: small dots / chuva: 3 drops / forte: 4 long drops
+    case 1: for (int i = 0; i < 4; ++i) { lv_obj_t *d = shape(box, px(2), px(3), 0xA8D8FF, LV_OPA_90); lv_obj_set_pos(d, px(8 + i * 6), px(22 + (i & 1) * 3)); } break;
+    case 2: for (int i = 0; i < 3; ++i) { lv_obj_t *d = shape(box, px(2), px(6), 0x6CB6FF, LV_OPA_COVER); lv_obj_set_pos(d, px(9 + i * 7), px(22)); } break;
+    case 3: for (int i = 0; i < 4; ++i) { lv_obj_t *d = shape(box, px(2), px(8), 0x4A9CF5, LV_OPA_COVER); lv_obj_set_pos(d, px(7 + i * 6), px(21 + (i & 1) * 2)); } break;
+    default: break;
   }
   if (isStorm(code)) { lv_obj_t *z = shape(box, px(4), px(8), 0xFFD43B, LV_OPA_COVER, 1); lv_obj_set_pos(z, px(17), px(21)); }
   if (isFog(code)) {
@@ -165,7 +175,7 @@ static int pickSky(float h, int code) {
   const bool dawn = (h >= 5.3f && h < 7.0f) || (h >= 17.6f && h < 18.8f);
   const bool dusk = h >= 18.8f && h < 19.8f;
   if (isStorm(code)) return SKY_STORM;
-  if (isWet(code)) return nightH || dusk ? SKY_NIGHT_OVERCAST : SKY_RAIN;
+  if (isWet(code)) return nightH || dusk ? SKY_NIGHT_OVERCAST : rainLevel(code) == 1 ? SKY_OVERCAST_DAY : SKY_RAIN;
   if (isFog(code)) return nightH ? SKY_NIGHT_OVERCAST : SKY_FOG;
   if (code >= 3) return nightH ? SKY_NIGHT_OVERCAST : SKY_OVERCAST_DAY;
   if (dawn) return SKY_DAWN;
@@ -200,8 +210,18 @@ static void updateScene(const struct tm &ti) {
   lv_obj_set_style_bg_color(card, lv_color_hex(minimal ? 0x111111 : night ? 0x0A0E1C : 0x0E1A2C), 0);
   const bool clearNight = skyOn && night && wxCode <= 2;
   for (int i = 0; i < STARS; ++i) show(star[i], clearNight);
-  for (int i = 0; i < DROPS; ++i) show(drop[i], skyOn && isWet(wxCode));
-  if (!isWet(wxCode) || !skyOn) for (int k = 0; k < SPLASH; ++k) { splashStart[k] = 0; show(splash[k], false); }
+  const int lvl = skyOn ? rainLevel(wxCode) : 0;
+  if (lvl != rainLvl) {                                   // restyle the streaks for the new intensity
+    rainLvl = lvl;
+    for (int i = 0; i < DROPS; ++i) {
+      const int L = dropLayer[i];
+      lv_line_set_points(drop[i], lvl == 1 ? kStreakDrizzle[L] : kStreak[L], 2);
+      lv_obj_set_style_line_width(drop[i], lvl == 1 ? 1 : kStreakW[L], 0);
+      lv_obj_set_style_line_opa(drop[i], (lv_opa_t)(kStreakOpa[L] * kRainOpaK[lvl]), 0);
+    }
+  }
+  for (int i = 0; i < DROPS; ++i) show(drop[i], i < kRainDrops[lvl]);
+  if (lvl < 3) for (int k = 0; k < SPLASH; ++k) { splashStart[k] = 0; show(splash[k], false); }
   for (int i = 0; i < FOG; ++i) show(fog[i], skyOn && isFog(wxCode));
 
   const bool wantDim = ti.tm_hour >= 23 || ti.tm_hour < 6;          // night dimming
@@ -219,12 +239,14 @@ static void animCb(lv_timer_t *) {
   if (dt > 0.2f) dt = 0.05f;
   if (minimal) return;
 
-  if (!lv_obj_has_flag(drop[0], LV_OBJ_FLAG_HIDDEN)) {
-    for (int i = 0; i < DROPS; ++i) {
-      dropY[i] += dropSpeed[i] * dt; dropX[i] -= dropSpeed[i] * RAIN_SLANT * dt;
+  if (rainLvl && !lv_obj_has_flag(drop[0], LV_OBJ_FLAG_HIDDEN)) {
+    const int nDrops = kRainDrops[rainLvl];
+    const float spd = kRainSpeedK[rainLvl];
+    for (int i = 0; i < nDrops; ++i) {
+      dropY[i] += dropSpeed[i] * spd * dt; dropX[i] -= dropSpeed[i] * spd * RAIN_SLANT * dt;
       const int ground = dropLayer[i] == 2 ? 300 : dropLayer[i] == 1 ? 270 : 245;   // nearer drops fall lower
       if (dropY[i] > ground) {
-        if (dropLayer[i] == 2) {                       // near drop landed: splash
+        if (dropLayer[i] == 2 && rainLvl == 3) {       // near drop landed: splash (heavy rain only)
           for (int k = 0; k < SPLASH; ++k) if (!splashStart[k]) {
             splashStart[k] = now; splashX[k] = (int)dropX[i]; splashY[k] = ground + 18; break;
           }

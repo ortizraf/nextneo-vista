@@ -18,6 +18,7 @@ constexpr size_t MAX_RESPONSE_BYTES = 384 * 1024;
 WiFiClientSecure secureClient;
 bool secureClientConfigured = false;
 bool connectionOpen = false;
+const char *openHost = nullptr;   // host the keep-alive session belongs to (one TLS context at a time)
 PsramBuffer body(MAX_RESPONSE_BYTES);
 
 JsonDocument &aircraftFilter() {
@@ -33,8 +34,11 @@ JsonDocument &aircraftFilter() {
   return filter;
 }
 
-class AdsbLolProvider final : public AircraftDataProvider {
+// Same code for ADSB.lol and adsb.fi: both serve readsb-style JSON ("ac" / "aircraft").
+class ReadsbProvider final : public AircraftDataProvider {
  public:
+  ReadsbProvider(const char *name, const char *host, const char *urlFormat)
+      : name_(name), host_(host), urlFormat_(urlFormat) {}
   bool fetch(double centerLat, double centerLon, float radiusNm,
              Aircraft *aircraft, uint8_t capacity, uint8_t &count,
              char *error, size_t errorCapacity,
@@ -46,8 +50,7 @@ class AdsbLolProvider final : public AircraftDataProvider {
     }
     char url[128];
     const unsigned int queryRadiusNm = (unsigned int)ceilf(radiusNm);
-    snprintf(url, sizeof url, "https://api.adsb.lol/v2/point/%.5f/%.5f/%u",
-             centerLat, centerLon, queryRadiusNm);
+    snprintf(url, sizeof url, urlFormat_, centerLat, centerLon, queryRadiusNm);
     if (!secureClientConfigured) {
       secureClient.setInsecure();  // public read-only data, no secrets sent
       secureClient.setHandshakeTimeout(12);
@@ -55,7 +58,8 @@ class AdsbLolProvider final : public AircraftDataProvider {
     }
     // Server closed the keep-alive socket: free the stale mbedTLS context
     // before reconnecting so its internal-RAM buffers are released first.
-    if (!secureClient.connected()) { secureClient.stop(); connectionOpen = false; }
+    if (!secureClient.connected() || openHost != host_) { secureClient.stop(); connectionOpen = false; }
+    openHost = host_;
     const uint32_t started = millis();
     connectionOpen = true;
     const int status = httpsFetch(secureClient, url, body, 9000, true);
@@ -63,7 +67,7 @@ class AdsbLolProvider final : public AircraftDataProvider {
       if (status == HTTPC_ERROR_TOO_LESS_RAM) snprintf(error, errorCapacity, "Memória baixa p/ TLS");
       else if (status < 0) snprintf(error, errorCapacity, "%s", HTTPClient::errorToString(status).c_str());
       else snprintf(error, errorCapacity, "HTTP %d", status);
-      Log.printf("ADSB.lol: %s\n", error);
+      Log.printf("%s: %s\n", name_, error);
       secureClient.stop();
       connectionOpen = false;
       return false;
@@ -101,12 +105,15 @@ class AdsbLolProvider final : public AircraftDataProvider {
       if (a.distanceNm > radiusNm) continue;
       count = insertNearest(aircraft, count, capacity, a);
     }
-    Log.printf("ADSB.lol: %u bytes, %u aeronaves (%u na área) em %lums + parse %lums\n",
-                  (unsigned)body.length(), total, count,
+    Log.printf("%s: %u bytes, %u aeronaves (%u na área) em %lums + parse %lums\n",
+                  name_, (unsigned)body.length(), total, count,
                   (unsigned long)(downloaded - started), (unsigned long)(millis() - downloaded));
     error[0] = '\0';
     return true;
   }
+
+ private:
+  const char *name_, *host_, *urlFormat_;
 };
 }  // namespace
 
@@ -114,10 +121,15 @@ void adsbLolReleaseConnection() {
   if (!connectionOpen) return;
   secureClient.stop();
   connectionOpen = false;
-  Log.println("ADSB.lol: conexão TLS liberada");
+  Log.printf("%s: conexão TLS liberada\n", openHost ? openHost : "radar");
 }
 
 AircraftDataProvider &adsbLolProvider() {
-  static AdsbLolProvider provider;
+  static ReadsbProvider provider("ADSB.lol", "api.adsb.lol", "https://api.adsb.lol/v2/point/%.5f/%.5f/%u");
+  return provider;
+}
+
+AircraftDataProvider &adsbFiProvider() {
+  static ReadsbProvider provider("adsb.fi", "opendata.adsb.fi", "https://opendata.adsb.fi/api/v2/lat/%.5f/lon/%.5f/dist/%u");
   return provider;
 }

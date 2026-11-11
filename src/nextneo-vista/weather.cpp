@@ -1,4 +1,5 @@
 #include "app_screens.h"
+#include <math.h>
 #include <time.h>
 // getLocalTime(&t, 0) fails at random: with a 0 ms timeout its loop is skipped whenever
 // millis() ticks between two reads. Read the clock directly instead.
@@ -19,6 +20,43 @@ bool cachedWeatherCode(int &code);   // clock.cpp: last good forecast in flash
 static lv_obj_t *wxSky;
 static int skyKey = -1;
 
+// The sky photo can put the sun (or a bright cloud) right behind the clock: white digits
+// on a white area. Measure the picture under the clock and switch the digits to a dark
+// colour when that area is bright. Runs only when the picture changes (every 15 min).
+static constexpr uint32_t CLOCK_LIGHT = 0xEFF4FA, CLOCK_DARK = 0x14243A;
+static void adaptClockColor(const lv_image_dsc_t *img) {
+  if (!img || !img->data || !lblClock) return;
+  lv_obj_update_layout(lblClock);
+  lv_area_t a; lv_obj_get_coords(lblClock, &a);
+  // The clock lives in the "Agora" tab. If another tab is shown (or the tabs are sliding),
+  // its screen coordinates are shifted sideways and the measurement fell outside the
+  // picture (white digits kept until the next sky change, 15 min later). Measure where
+  // the clock sits when "Agora" is the active tab instead.
+  if (homeTab && lv_obj_get_parent(homeTab)) {
+    lv_area_t tab, content;
+    lv_obj_get_coords(homeTab, &tab);
+    lv_obj_get_coords(lv_obj_get_parent(homeTab), &content);
+    const int dx = tab.x1 - content.x1, dy = tab.y1 - content.y1;
+    a.x1 -= dx; a.x2 -= dx; a.y1 -= dy; a.y2 -= dy;
+  }
+  const int w = img->header.w, h = img->header.h;
+  const int stride = img->header.stride ? img->header.stride / 2 : w;
+  const uint16_t *px = (const uint16_t *)img->data;
+  const int x0 = a.x1 < 0 ? 0 : a.x1, x1 = a.x2 >= w ? w - 1 : a.x2;
+  const int y0 = a.y1 < 0 ? 0 : a.y1, y1 = a.y2 >= h ? h - 1 : a.y2;
+  uint32_t sum = 0, bright = 0, n = 0;
+  for (int y = y0; y <= y1; y += 2)
+    for (int x = x0; x <= x1; x += 2) {
+      const uint16_t p = px[y * stride + x];
+      const int r = (p >> 11) << 3, g = ((p >> 5) & 0x3F) << 2, b = (p & 0x1F) << 3;
+      const int l = (r * 77 + g * 150 + b * 29) >> 8;   // luminance 0..255
+      sum += l; bright += l > 190; ++n;
+    }
+  if (!n) return;
+  const bool light = sum / n > 150 || bright * 100 / n > 30;   // sun or fog behind the clock (overcast stays white)
+  lv_obj_set_style_text_color(lblClock, lv_color_hex(light ? CLOCK_DARK : CLOCK_LIGHT), 0);
+}
+
 static void refreshSky(int code, bool force) {
   struct tm ti;
   if (!localNow(&ti)) return;
@@ -30,6 +68,7 @@ static void refreshSky(int code, bool force) {
   lv_image_set_src(wxSky, img);
   lv_obj_invalidate(wxSky);
   lv_obj_remove_flag(wxSky, LV_OBJ_FLAG_HIDDEN);       // shown only with the right picture
+  adaptClockColor(img);
 }
 static int renderedWifiState = -1;
 
@@ -38,7 +77,42 @@ void weatherOnEnter() {
   renderedWeatherVersion = UINT32_MAX;
   skyKey = -1;            // Clock may have reused the buffer: reload
   lv_obj_add_flag(wxSky, LV_OBJ_FLAG_HIDDEN);   // never show a stale picture
+  if (lblClock) lv_obj_set_style_text_color(lblClock, lv_color_hex(CLOCK_LIGHT), 0);
   renderedWifiState = -1;
+}
+
+// Rain under the cloud, by intensity. Upright rounded capsules with a soft vertical
+// gradient: LVGL anti-aliases them (the old rotated rectangles were jagged) and they
+// cost no transform layer. Coordinates are on the 150 px design canvas.
+static void addRainDrops(lv_obj_t *parent, int code, float s) {
+  const int level = rainLevel(code);
+  if (!level) return;
+  struct Drop { int16_t x, y, w, h; };
+  static const Drop kGaroa[] = {{40, 112, 4, 8}, {62, 120, 4, 8}, {84, 112, 4, 8}, {106, 120, 4, 8},
+                                {51, 131, 4, 7}, {95, 131, 4, 7}};
+  static const Drop kChuva[] = {{44, 108, 6, 20}, {74, 114, 6, 22}, {104, 108, 6, 20}};
+  static const Drop kForte[] = {{34, 106, 6, 26}, {56, 113, 6, 28}, {78, 106, 6, 26}, {100, 113, 6, 28},
+                                {122, 106, 6, 24}};
+  const Drop *d = level == 1 ? kGaroa : level == 2 ? kChuva : kForte;
+  const int n = level == 1 ? 6 : level == 2 ? 3 : 5;
+  const uint32_t top = level == 1 ? 0xC4E4FF : level == 2 ? 0x9AD6FF : 0x7CC4FF;
+  const uint32_t bottom = level == 1 ? 0x8CC6F2 : level == 2 ? 0x55AAF0 : 0x2F86E2;
+  auto S = [s](int v) { const int r = (int)lroundf(v * s); return r < 1 ? 1 : r; };
+  for (int i = 0; i < n; ++i) {
+    lv_obj_t *o = lv_obj_create(parent);
+    const int w = S(d[i].w) < 2 ? 2 : S(d[i].w), h = S(d[i].h) < 3 ? 3 : S(d[i].h);
+    lv_obj_set_size(o, w, h);
+    lv_obj_set_pos(o, S(d[i].x), S(d[i].y));
+    lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(o, lv_color_hex(top), 0);
+    lv_obj_set_style_bg_grad_color(o, lv_color_hex(bottom), 0);
+    lv_obj_set_style_bg_grad_dir(o, LV_GRAD_DIR_VER, 0);
+    lv_obj_set_style_bg_opa(o, level == 1 ? LV_OPA_80 : LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(o, 0, 0);
+    lv_obj_set_style_pad_all(o, 0, 0);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
+  }
 }
 
 static lv_obj_t *makeWeatherIcon(lv_obj_t *parent, int x, int y, int size, int code) {
@@ -80,17 +154,7 @@ static lv_obj_t *makeWeatherIcon(lv_obj_t *parent, int x, int y, int size, int c
     lv_obj_set_style_bg_color(puff, lv_color_hex(0xD8E7F5), 0);
     lv_obj_set_style_border_width(puff, 0, 0);
   }
-  if (isRainCode(code)) {
-    for (int r = 0; r < 3; r++) {
-      lv_obj_t *drop = lv_obj_create(icon);
-      lv_obj_set_pos(drop, scaled(42 + r * 35), scaled(110));
-      lv_obj_set_size(drop, scaled(6), scaled(22));
-      lv_obj_set_style_radius(drop, scaled(4), 0);
-      lv_obj_set_style_bg_color(drop, lv_color_hex(0x6FC8FF), 0);
-      lv_obj_set_style_border_width(drop, 0, 0);
-      lv_obj_set_style_transform_rotation(drop, 120, 0);
-    }
-  }
+  addRainDrops(icon, code, s);
   return icon;
 }
 
@@ -147,8 +211,8 @@ static void build_home(lv_obj_t *t) {
   lv_obj_align(lblWifiDot, LV_ALIGN_TOP_RIGHT,
                -15 + lv_obj_get_style_pad_right(t, LV_PART_MAIN),
                7 - lv_obj_get_style_pad_top(t, LV_PART_MAIN));
-  lblClock = makeLabel(t, "--:--", &lv_font_montserrat_36, 0xEFF4FA);
-  lv_obj_align(lblClock, LV_ALIGN_TOP_RIGHT, -34, 4);
+  lblClock = makeLabel(t, "--:--", &lv_font_montserrat_42, 0xEFF4FA);   // ~15 % bigger than 36
+  lv_obj_align(lblClock, LV_ALIGN_TOP_RIGHT, -46, 10);   // a bit away from the Wi-Fi icon (top-right corner)
 
   // Big temperature + condition: same font/size and emphasis as before.
   lblTemp = makeLabel(t, "--°", &lv_font_montserrat_48, 0xFFFFFF);
@@ -502,16 +566,7 @@ void updateWeatherScreen() {
         lv_obj_set_style_border_width(sun, 0, 0);
         lv_obj_move_to_index(sun, 0);
       }
-      if (isRainCode(code)) {
-        for (int r = 0; r < 3; r++) {
-          lv_obj_t *drop = lv_obj_create(weatherArt);
-          lv_obj_set_pos(drop, 42 + r * 35, 110); lv_obj_set_size(drop, 6, 22);
-          lv_obj_set_style_radius(drop, 4, 0);
-          lv_obj_set_style_bg_color(drop, lv_color_hex(0x6FC8FF), 0);
-          lv_obj_set_style_border_width(drop, 0, 0);
-          lv_obj_set_style_transform_rotation(drop, 120, 0);
-        }
-      }
+      addRainDrops(weatherArt, code, 1.0f);
     }
   } else {
     lv_label_set_text(lblTemp, "--");

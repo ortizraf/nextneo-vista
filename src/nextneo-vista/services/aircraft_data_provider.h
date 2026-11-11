@@ -15,5 +15,7 @@ class AircraftDataProvider {
 };
 
 AircraftDataProvider &adsbLolProvider();
+// adsb.fi open data: same readsb JSON as ADSB.lol, used as the fallback source.
+AircraftDataProvider &adsbFiProvider();
 // Closes the keep-alive TLS session (network task only). Cheap when already closed.
 void adsbLolReleaseConnection();
