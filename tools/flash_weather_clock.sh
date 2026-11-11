@@ -7,15 +7,14 @@
 #   MONITOR=0 ./tools/flash_weather_clock.sh       # sem abrir o monitor serial
 #
 # Grava SOMENTE o aplicativo no offset 0x10000 (app0). Bootloader, tabela de
-# partições, NVS (Wi-Fi/configurações) e FAT ficam intactos.
-# NUNCA use "pio run -e weather-clock -t upload" nesta placa: ele regrava boot e
-# partições (veja README, seção "Por que não usar -t upload").
+# partições e NVS (Wi-Fi/configurações) ficam intactos.
+# A placa usa a tabela default_8MB.csv (app0 = 3264 KB), fixada no platformio.ini.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ENV_NAME=weather-clock
 APP_OFFSET=0x10000
-APP_SLOT_BYTES=$((0x200000))   # app0 desta placa = 2 MB
+APP_SLOT_BYTES=$((0x330000))   # app0 = 3264 KB (default_8MB.csv)
 IMAGE=".pio/build/$ENV_NAME/firmware.bin"
 
 # ---- PlatformIO
@@ -44,7 +43,7 @@ echo "== Compilando $ENV_NAME"
 
 SIZE=$(stat -f%z "$IMAGE" 2>/dev/null || stat -c%s "$IMAGE")
 echo "== Tamanho do app: $SIZE bytes (limite $APP_SLOT_BYTES)"
-(( SIZE <= APP_SLOT_BYTES )) || { echo "Erro: o app não cabe na partição app0 de 2 MB. Nada foi gravado." >&2; exit 1; }
+(( SIZE <= APP_SLOT_BYTES )) || { echo "Erro: o app não cabe na partição app0 de 3264 KB. Nada foi gravado." >&2; exit 1; }
 shasum -a 256 "$IMAGE" 2>/dev/null || true
 
 # ---- gravação (somente app0)

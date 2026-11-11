@@ -461,6 +461,12 @@ static bool doWeather() {
     sh.hourRain[j] = hourlyRain[i] | 0;
     sh.hourCount++;
   }
+  // O card "Agora" deve mostrar o mesmo valor do bloco principal (current),
+  // e não a previsão da hora cheia (hh:00), que pode diferir 1-2 °C.
+  if (sh.hourCount > 0) {
+    sh.hourTemp[0] = sh.temp;
+    sh.hourCode[0] = sh.code;
+  }
   for (int i = 0; i < 7; i++) {
     sh.tmax[i] = doc["daily"]["temperature_2m_max"][i] | 0.0f;
     sh.tmin[i] = doc["daily"]["temperature_2m_min"][i] | 0.0f;
@@ -497,11 +503,45 @@ static bool doWeather() {
   return true;
 }
 
+// Aplica "Nome @ lat,lon" sem usar a rede. Grava também o texto digitado
+// ("cityRaw") para o formulário mostrar exatamente o que o usuário salvou.
+static bool applyManualLocation(const String &input) {
+  int at = input.indexOf('@');
+  if (at < 0) return false;
+  float lat, lon;
+  String coords = input.substring(at + 1);
+  coords.replace(" ", "");
+  if (sscanf(coords.c_str(), "%f,%f", &lat, &lon) != 2 ||
+      lat < -90 || lat > 90 || lon < -180 || lon > 180) return false;
+  String name = input.substring(0, at);
+  name.trim();
+  if (name.isEmpty()) name = "Local";
+  cfg.lat = lat;
+  cfg.lon = lon;
+  prefs.putFloat("lat", cfg.lat);
+  prefs.putFloat("lon", cfg.lon);
+  prefs.putString("city", name);
+  prefs.putString("cityRaw", input);
+  xSemaphoreTake(mtx, portMAX_DELAY);
+  sh.cityName = name;
+  sh.weatherVersion++;
+  xSemaphoreGive(mtx);
+  Log.printf("Local manual: %s (%.4f, %.4f)\n", name.c_str(), lat, lon);
+  setStatus("Local salvo: " + name);
+  return true;
+}
+
 static bool doGeocode() {
   xSemaphoreTake(mtx, portMAX_DELAY);
   String city = sh.pendingCity;
   xSemaphoreGive(mtx);
   if (city.isEmpty() || WiFi.status() != WL_CONNECTED) { setStatus("Conecte ao Wi-Fi primeiro"); return false; }
+  // Coordenadas manuais: "Nome @ lat,lon" (ex.: "São Paulo @ -xx.xxx,-xx.xxx").
+  if (city.indexOf('@') >= 0) {
+    if (applyManualLocation(city)) return true;
+    setStatus("Coordenadas inválidas (use Nome @ lat,lon)");
+    return false;
+  }
   String countryCode;
   int comma = city.lastIndexOf(',');
   if (comma >= 0) {
@@ -531,10 +571,13 @@ static bool doGeocode() {
   prefs.putFloat("lat", cfg.lat);
   prefs.putFloat("lon", cfg.lon);
   prefs.putString("city", name);
+  prefs.remove("cityRaw");
   xSemaphoreTake(mtx, portMAX_DELAY);
   sh.cityName = name;
   sh.weatherVersion++;
   xSemaphoreGive(mtx);
+  setStatus("Local salvo: " + name);
+  Log.printf("Cidade encontrada: %s (%.4f, %.4f)\n", name.c_str(), cfg.lat, cfg.lon);
   return true;
 }
 
@@ -607,10 +650,11 @@ static void runJob(const NetJob &job) {
       case CMD_GEOCODE:
         // Started from Settings or the web page. Refresh the forecast right
         // away only if the Weather screen is the one being shown.
-        if (doGeocode() && gActiveScreen == SCREEN_WEATHER) {
-          gCurrentJob = {CMD_WEATHER, SCREEN_WEATHER, gScreenEpoch};
+        if (doGeocode() && (gActiveScreen == SCREEN_WEATHER || gActiveScreen == SCREEN_CLOCK)) {
+          const ScreenID scr = gActiveScreen;
+          gCurrentJob = {CMD_WEATHER, scr, gScreenEpoch};
           ok = doWeather();
-          gJobOutcome[SCREEN_WEATHER] = ok ? JOB_OK : JOB_FAILED;
+          gJobOutcome[scr] = ok ? JOB_OK : JOB_FAILED;
         }
         break;
       case CMD_WEATHER: ok = doWeather(); break;
@@ -1168,7 +1212,7 @@ button.sec{background:#ffffff1a;color:#edf4ff}small{display:block;margin-top:12p
 <button type="submit">Salvar e reiniciar</button></form>
 
 <form class="card" method="post" action="/save-city" accept-charset="UTF-8"><h2>Clima e relógio</h2>
-<label class="label" for="city">Cidade (ex.: São Paulo, BR)</label><input id="city" name="city" value="%CITY%" required>
+<label class="label" for="city">Cidade</label><input id="city" name="city" value="%CITY%" required><div class="muted" style="margin-top:6px;font-size:13px">Ex.: <code>São Paulo, BR</code> ou <code>Nome @ lat,lon</code> (Google Maps &rarr; botão direito no local)</div>
 <label class="label row"><input type="checkbox" name="h24" value="1" %H24%> Relógio 24 horas</label>
 <button type="submit">Salvar clima</button></form>
 
@@ -1215,7 +1259,7 @@ const c=document.createElement('button');c.type='button';c.className='chip';c.te
   page.replace("%NOTICE%", notice.isEmpty() ? String() : htmlEscape(notice) + "<br>");
   page.replace("%STATUS%", htmlEscape(status));
   page.replace("%IP%", WiFi.localIP().toString());
-  page.replace("%CITY%", htmlEscape(city));
+  page.replace("%CITY%", htmlEscape(prefs.getString("cityRaw", city)));
   page.replace("%H24%", cfg.h24 ? "checked" : "");
   page.replace("%AIRPORTNAME%", htmlEscape(airportName));
   page.replace("%AIRPORT%", htmlEscape(airportCode));
@@ -1340,6 +1384,18 @@ static void startConfigServer() {
     city.trim();
     cfg.h24 = configServer.hasArg("h24");
     prefs.putBool("h24", cfg.h24);
+    if (city.indexOf('@') >= 0) {
+      if (!applyManualLocation(city)) {
+        sendConfigPage("Coordenadas inválidas. Use: Nome @ lat,lon (ex.: São Paulo @ -xx.xxx,-xx.xxx)");
+        return;
+      }
+      xSemaphoreTake(mtx, portMAX_DELAY);
+      sh.pendingCity = city;   // o job abaixo só reaplica (sem rede) e atualiza o clima
+      xSemaphoreGive(mtx);
+      post(CMD_GEOCODE);
+      sendConfigPage("Local salvo.");
+      return;
+    }
     if (!city.isEmpty()) {
       xSemaphoreTake(mtx, portMAX_DELAY);
       sh.pendingCity = city;

@@ -19,11 +19,16 @@
 #include "../../services/aircraft_details_provider.h"
 #include "../../services/radar_map_provider.h"
 #include "../../services/psram_alloc.h"
+#include "../../services/app_log.h"
 #include "flight_projection.h"
 #include <math.h>
 #include <new>
 #include <stdio.h>
 #include <string.h>
+
+// Airport geometry drawn into the map image (modules/flight_airport/flight_airport.cpp).
+bool airportEnsureRadarGeometry(const char *code, double lat, double lon, bool allowDownload);
+void airportDrawRadarOverlay(float radiusKm, uint16_t *buf, int size);
 
 extern "C" {
 extern const lv_image_dsc_t radar_icon_jet;
@@ -49,6 +54,7 @@ constexpr uint32_t MAP_RETRY_MS = 60UL * 1000UL;
 constexpr uint32_t C_BG = 0x041012, C_SCOPE = 0x071D1E, C_RING = 0x2F8F80;
 constexpr uint32_t C_ACCENT = 0x3EE6C8, C_TEXT = 0xE6FFF9, C_MUTED = 0x7FA8A0;
 constexpr uint32_t C_PANEL = 0x0B1C1E, C_PANEL_BORDER = 0x1F4542;
+constexpr uint32_t C_HOME = 0xFF4D4D;
 constexpr uint32_t C_SELECT = 0xFFD54A, C_GROUND = 0xF2B66D, C_ALERT = 0xFF5A5A;
 
 constexpr uint16_t hexTo565(uint32_t c) {
@@ -65,11 +71,13 @@ volatile int8_t mapFront = -1;                 // buffer the UI should show
 volatile uint32_t mapVersion = 0;
 volatile int8_t mapShownByUi = -1;             // buffer the UI is showing now
 volatile bool mapAreaValid = false;            // front buffer matches the current area
-bool mapEnabled = true;
+volatile bool mapFrontStreets = false;         // front buffer has the street map (shows "Esri")
+bool mapEnabled = true;                        // MAPA button: street map on/off (airport always drawn)
 // map key the network task has loaded (network task only)
 double mapLat = 0, mapLon = 0;
 float mapRadius = 0;
-uint32_t mapRetryAfterMs = 0;
+bool mapStreets = false, mapAirport = false;   // what the loaded image contains
+uint32_t mapRetryAfterMs = 0, airportRetryAfterMs = 0;
 volatile bool radarActive = false;
 void (*requestRefresh)() = nullptr;
 void (*requestDetails)() = nullptr;
@@ -84,6 +92,10 @@ uint32_t renderedAgeSeconds = UINT32_MAX;
 char selectedHex[7] = {};
 lv_image_dsc_t mapDsc[2];
 
+lv_obj_t *homeHalo, *homeDot;                  // device location (cfg.lat/lon), pulsing
+bool homeVisible = false;
+int homeX = 0, homeY = 0;
+uint32_t homePhaseMs = 0;
 lv_obj_t *mapImg, *scopeFill, *sweepArc[3], *sweepLine, *trailLine, *selRing;
 lv_obj_t *planeImg[FLIGHT_RADAR_MAX_AIRCRAFT];
 lv_obj_t *tagLabel[TAG_COUNT];
@@ -534,7 +546,7 @@ void renderMap() {
   xSemaphoreGive(mtx);
   if (version == renderedMapVersion) return;
   renderedMapVersion = version;
-  if (!mapEnabled || !mapAreaValid || front < 0 || !mapBuffer[front]) {
+  if (!mapAreaValid || front < 0 || !mapBuffer[front]) {
     lv_obj_add_flag(mapImg, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(attribution, LV_OBJ_FLAG_HIDDEN);
     mapShownByUi = -1;
@@ -544,7 +556,8 @@ void renderMap() {
   lv_image_set_src(mapImg, &mapDsc[front]);
   lv_obj_invalidate(mapImg);
   lv_obj_remove_flag(mapImg, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_remove_flag(attribution, LV_OBJ_FLAG_HIDDEN);
+  if (mapFrontStreets) lv_obj_remove_flag(attribution, LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_add_flag(attribution, LV_OBJ_FLAG_HIDDEN);
   mapShownByUi = front;
 }
 
@@ -562,10 +575,13 @@ void renderRange(const FlightRadarSnapshot &data) {
   setLabelIfChanged(airportLabel, airport);
 }
 
+void placeHome(const FlightRadarSnapshot &data);
+
 void renderSnapshot(const FlightRadarSnapshot &data) {
   setLabelIfChanged(statusText, statusName(data.status));
   lv_obj_set_style_bg_color(statusDot, lv_color_hex(statusColor(data.status)), 0);
   renderRange(data);
+  placeHome(data);
   styleMarkers(data);
   placeAircraft(data);
   renderPanel(data);
@@ -620,7 +636,7 @@ void mapClickEvent(lv_event_t *) {
   ++mapVersion;
   xSemaphoreGive(mtx);
   renderMap();
-  if (mapEnabled && requestRefresh) requestRefresh();
+  if (requestRefresh) requestRefresh();   // network task rebuilds the image (with/without streets)
 }
 
 void sweepTimerCb(lv_timer_t *) {
@@ -632,6 +648,49 @@ void sweepTimerCb(lv_timer_t *) {
   sweepPoints[1].x = SCOPE_CX + (int)lroundf(cosf(a) * (SCOPE_R - 1));
   sweepPoints[1].y = SCOPE_CY + (int)lroundf(sinf(a) * (SCOPE_R - 1));
   lv_line_set_points(sweepLine, sweepPoints, 2);
+  // Location pulse rides on this same timer: no extra frames, only ~24x24 px redrawn.
+  if (homeVisible) {
+    // Expanding ring (ease-out) that fades out, then a short pause.
+    constexpr uint32_t PERIOD = 2000, GROW = 1400;
+    homePhaseMs = (homePhaseMs + SWEEP_PERIOD_MS) % PERIOD;
+    if (homePhaseMs < GROW) {
+      const float t = homePhaseMs / (float)GROW;
+      const float e = 1 - (1 - t) * (1 - t);                // ease-out
+      const int d = 8 + (int)lroundf(26 * e);               // 8 -> 34 px
+      const lv_opa_t o = (lv_opa_t)lroundf(230 * (1 - t));
+      lv_obj_set_size(homeHalo, d, d);
+      lv_obj_set_pos(homeHalo, homeX - d / 2, homeY - d / 2);
+      lv_obj_set_style_border_opa(homeHalo, o, 0);
+      lv_obj_set_style_bg_opa(homeHalo, o / 4, 0);
+    } else if (homePhaseMs - GROW < SWEEP_PERIOD_MS) {
+      lv_obj_set_style_border_opa(homeHalo, LV_OPA_TRANSP, 0);
+      lv_obj_set_style_bg_opa(homeHalo, LV_OPA_TRANSP, 0);
+    }
+  }
+}
+
+// Device location from the weather settings ("Nome @ lat,lon" or the geocoded city).
+void placeHome(const FlightRadarSnapshot &data) {
+  if (!homeDot) { Log.println("Radar: ponto de localização não foi criado"); return; }
+  if (cfg.lat == 0 && cfg.lon == 0) return;
+  int x, y;
+  project(cfg.lat, cfg.lon, data, x, y);
+  const int dx = x - SCOPE_CX, dy = y - SCOPE_CY, r = SCOPE_R - 12;
+  const bool inside = dx * dx + dy * dy <= r * r;
+  static int lastLogR = -1;
+  if (inside != homeVisible || lastLogR != (int)data.radiusKm) {
+    lastLogR = (int)data.radiusKm;
+    Log.printf("Radar: localização %.4f,%.4f -> x=%d y=%d (%s)\n", cfg.lat, cfg.lon, x, y, inside ? "visível" : "fora do raio");
+  }
+  if (inside != homeVisible) {
+    homeVisible = inside;
+    if (inside) { lv_obj_remove_flag(homeDot, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(homeHalo, LV_OBJ_FLAG_HIDDEN); }
+    else { lv_obj_add_flag(homeDot, LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(homeHalo, LV_OBJ_FLAG_HIDDEN); }
+  }
+  if (inside && (x != homeX || y != homeY)) {
+    homeX = x; homeY = y;
+    lv_obj_set_pos(homeDot, x - 4, y - 4);
+  }
 }
 
 // ---------------------------------------------------------------- build
@@ -749,6 +808,15 @@ void buildScope(lv_obj_t *screen) {
   lv_obj_set_style_transform_rotation(center, 450, 0);
   lv_obj_set_style_transform_pivot_x(center, 4, 0);
   lv_obj_set_style_transform_pivot_y(center, 4, 0);
+
+  // Device location: soft red halo + red dot with a thin white rim (no label).
+  homeHalo = makeBox(screen, 8, 8, C_HOME, LV_OPA_TRANSP, LV_RADIUS_CIRCLE);
+  lv_obj_set_style_border_color(homeHalo, lv_color_hex(C_HOME), 0);
+  lv_obj_set_style_border_width(homeHalo, 2, 0);
+  lv_obj_set_style_border_opa(homeHalo, LV_OPA_TRANSP, 0);
+  lv_obj_add_flag(homeHalo, LV_OBJ_FLAG_HIDDEN);
+  homeDot = makeBox(screen, 8, 8, C_HOME, LV_OPA_COVER, LV_RADIUS_CIRCLE);
+  lv_obj_add_flag(homeDot, LV_OBJ_FLAG_HIDDEN);
 
   // Selected aircraft trail + highlight ring.
   trailLine = lv_line_create(screen);
@@ -906,27 +974,65 @@ void flightRadarOnExit() {
   if (sweepTimer) lv_timer_pause(sweepTimer);
 }
 
-// Network task only.
-static void maybeFetchMap(double lat, double lon, float radiusKm) {
-  if (!mapEnabled || !radarActive || !screenJobStillCurrent()) return;
-  if (mapAreaValid && mapFront >= 0 && mapLat == lat && mapLon == lon && mapRadius == radiusKm) return;
-  if (mapRetryAfterMs && (int32_t)(millis() - mapRetryAfterMs) < 0) return;
-  // Decode into the buffer the UI is NOT showing.
+// Plain scope (MAPA off): same vertical gradient as `scopeFill`, C_BG outside the disc.
+static void fillPlainScope(uint16_t *buf) {
+  const uint16_t bg = hexTo565(C_BG);
+  const int c = MAP_SIZE / 2, r2 = c * c;
+  const uint32_t a = C_SCOPE, b = 0x0C2B2A;
+  for (int y = 0; y < MAP_SIZE; ++y) {
+    const int t = y * 255 / (MAP_SIZE - 1);
+    auto mix = [&](int sh) { return (((a >> sh) & 0xFF) * (255 - t) + ((b >> sh) & 0xFF) * t) / 255; };
+    const uint16_t col = hexTo565((uint32_t)(mix(16) << 16 | mix(8) << 8 | mix(0)));
+    const int dy = y - c;
+    uint16_t *row = buf + y * MAP_SIZE;
+    for (int x = 0; x < MAP_SIZE; ++x) { const int dx = x - c; row[x] = dx * dx + dy * dy > r2 ? bg : col; }
+  }
+}
+
+static bool retryPassed(uint32_t at) { return !at || (int32_t)(millis() - at) >= 0; }
+
+// Network task only. Builds the scope image ONCE per airport/radius/MAPA change:
+// street map (optional) + the airport drawn on top. The UI just shows the image.
+static void maybeFetchMap(double lat, double lon, float radiusKm, const char *code) {
+  if (!radarActive || !screenJobStillCurrent()) return;
+  const bool sameArea = mapAreaValid && mapFront >= 0 && mapLat == lat && mapLon == lon && mapRadius == radiusKm;
+  if (sameArea) {
+    const bool dropStreets = !mapEnabled && mapStreets;
+    const bool addStreets = mapEnabled && !mapStreets && retryPassed(mapRetryAfterMs);
+    const bool addAirport = !mapAirport && retryPassed(airportRetryAfterMs);
+    if (!dropStreets && !addStreets && !addAirport) return;
+  }
+  // Compose into the buffer the UI is NOT showing.
   const int8_t target = mapShownByUi == 0 ? 1 : 0;
   if (!mapBuffer[target]) {
     mapBuffer[target] = (uint16_t *)heap_caps_malloc(MAP_SIZE * MAP_SIZE * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!mapBuffer[target]) { mapRetryAfterMs = millis() + MAP_RETRY_MS; return; }
     mapDsc[target].data = (const uint8_t *)mapBuffer[target];
   }
-  char error[48] = {};
-  if (!fetchRadarMap(lat, lon, radiusKm, mapBuffer[target], MAP_SIZE, hexTo565(C_BG), error, sizeof error)) {
-    mapRetryAfterMs = millis() + MAP_RETRY_MS;
-    return;
+  // 1) airport geometry: built-in / flash cache, or Overpass once (then cached)
+  adsbLolReleaseConnection();            // one TLS context at a time
+  const bool airportOk = airportEnsureRadarGeometry(code, lat, lon, true);
+  airportRetryAfterMs = airportOk ? 0 : millis() + MAP_RETRY_MS;
+  if (!screenJobStillCurrent()) return;
+  // 2) street map
+  bool streets = false;
+  if (mapEnabled && retryPassed(mapRetryAfterMs)) {
+    char error[48] = {};
+    streets = fetchRadarMap(lat, lon, radiusKm, mapBuffer[target], MAP_SIZE, hexTo565(C_BG), error, sizeof error);
+    mapRetryAfterMs = streets ? 0 : millis() + MAP_RETRY_MS;
+    if (!screenJobStillCurrent()) return;
   }
-  mapRetryAfterMs = 0;
+  if (!streets) {
+    if (mapEnabled && !airportOk) return;          // nothing new to show yet
+    fillPlainScope(mapBuffer[target]);
+  }
+  // 3) airport on top
+  if (airportOk) airportDrawRadarOverlay(radiusKm, mapBuffer[target], MAP_SIZE);
   mapLat = lat; mapLon = lon; mapRadius = radiusKm;
+  mapStreets = streets; mapAirport = airportOk;
   xSemaphoreTake(mtx, portMAX_DELAY);
   mapFront = target;
+  mapFrontStreets = streets;
   // Only valid if the user didn't switch airport/radius while downloading.
   mapAreaValid = snapshot->centerLat == lat && snapshot->centerLon == lon && snapshot->radiusKm == radiusKm;
   ++mapVersion;
@@ -940,7 +1046,9 @@ bool updateFlightRadarData() {
   char error[48] = {};
   double centerLat, centerLon;
   float radiusKm;
+  char code[8];
   xSemaphoreTake(mtx, portMAX_DELAY);
+  snprintf(code, sizeof code, "%s", snapshot->airportCode);
   centerLat = snapshot->centerLat;
   centerLon = snapshot->centerLon;
   radiusKm = snapshot->radiusKm;
@@ -966,7 +1074,7 @@ bool updateFlightRadarData() {
   ++snapshot->version;
   xSemaphoreGive(mtx);
   // Basemap after the aircraft, so traffic shows up first.
-  if (ok) maybeFetchMap(centerLat, centerLon, radiusKm);
+  if (ok) maybeFetchMap(centerLat, centerLon, radiusKm, code);
   return ok;
 }
 

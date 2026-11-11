@@ -10,6 +10,7 @@ O app principal fica em `src/nextneo-vista/` (ambiente PlatformIO `weather-clock
 
 ## Sumário
 
+0. [Comece aqui: guia para quem vem do Java](#0-comece-aqui-guia-para-quem-vem-do-java)
 1. [Compilar e gravar (início rápido)](#1-compilar-e-gravar-início-rápido)
 2. [Comandos úteis](#2-comandos-úteis)
 3. [Por que não usar `-t upload`](#3-por-que-não-usar--t-upload-nesta-placa)
@@ -20,6 +21,103 @@ O app principal fica em `src/nextneo-vista/` (ambiente PlatformIO `weather-clock
 8. [Hardware](#8-hardware)
 9. [Exemplos e hub de jogos](#9-exemplos-e-hub-de-jogos)
 10. [Histórico desta placa](#10-histórico-desta-placa)
+
+---
+
+## 0. Comece aqui: guia para quem vem do Java
+
+Esta seção é para quem programa em Java (ou outra linguagem de servidor) e nunca mexeu com C++ nem com placas. Se você já conhece o mundo embarcado, pule para a seção 1.
+
+### 0.1 O que é este projeto, em uma frase
+
+É **um único programa** (o *firmware*) que roda sozinho na placa, sem sistema operacional como Linux ou Windows por baixo. Ligou a placa, o programa começa; ele desenha a tela, lê o toque, conecta no Wi-Fi e chama APIs na internet.
+
+Pense num `.jar` executável que **é** o computador inteiro: não existe "instalar outro app" nem "abrir o terminal" na placa. Para mudar qualquer coisa, você edita o código no Mac, compila e grava o programa novo por cima.
+
+### 0.2 Dicionário Java → este projeto
+
+| Aqui | Equivalente no Java | Observação |
+|---|---|---|
+| **ESP32-S3** | a "máquina" onde roda | Processador da placa: 2 núcleos, Wi-Fi, ~512 KB de RAM interna + 8 MB de PSRAM. |
+| **Firmware** | o `.jar` da aplicação | O arquivo final é `firmware.bin`. |
+| **PlatformIO** (`pio`) | Maven/Gradle | Baixa dependências, compila e grava. |
+| **`platformio.ini`** | `pom.xml` / `build.gradle` | Define bibliotecas (`lib_deps`), flags de compilação e os "ambientes" (`[env:weather-clock]` ≈ um *profile*). |
+| **`lib_deps`** | `<dependencies>` | Ex.: `lvgl`, `ArduinoJson`. Baixadas na 1ª compilação. |
+| **Compilar** (`pio run`) | `mvn package` | Gera `.pio/build/weather-clock/firmware.bin`. |
+| **Gravar / flash** | *deploy* | Copia o `firmware.bin` para a memória da placa pelo cabo USB. |
+| **Monitor serial** | console / `System.out` | Os `Log.printf(...)` do código aparecem aqui. Também dá para ver em `http://IP-DA-PLACA/log`. |
+| **`.h` e `.cpp`** | `interface` e `class` | O `.h` declara o que existe; o `.cpp` implementa. `#include "x.h"` ≈ `import`. |
+| **`setup()` e `loop()`** | `main()` + `while (true)` | O Arduino chama `setup()` uma vez ao ligar e depois `loop()` para sempre. |
+| **LVGL** | Swing / JavaFX | Biblioteca de interface: botões, labels, abas. Funções `lv_...`. |
+| **Task do FreeRTOS** | `Thread` | Rede roda numa task separada (núcleo 0) para não travar a tela. |
+| **`xSemaphoreTake/Give(mtx)`** | bloco `synchronized` | Protege o estado compartilhado `sh` entre a task de rede e a de tela. |
+| **`Preferences`** (NVS) | `java.util.prefs` / arquivo de config | Guarda Wi-Fi, cidade, ativos etc. e sobrevive a reinício. |
+| **PSRAM x RAM interna** | heap grande x heap pequeno | Não há *garbage collector*. Memória é escassa; veja a seção 6. |
+| **`String` (Arduino)** | `String` | Parecida, mas mutável e cara em memória. |
+
+Três diferenças que pegam quem vem do Java:
+
+1. **Não há garbage collector.** O que é alocado com `new`/`malloc` precisa ser liberado. Por isso o código reaproveita objetos e evita criar `String` à toa.
+2. **Memória é muito pouca.** Um handshake HTTPS sozinho consome ~50 KB de RAM interna. Um erro de memória aqui não lança exceção bonita: a chamada simplesmente falha (veja a seção 6).
+3. **Só a thread da tela pode mexer na tela.** É como a regra do Swing (EDT): a task de rede só grava dados em `sh` e a tela redesenha depois.
+
+### 0.3 Instalar as ferramentas (uma vez só)
+
+1. Instale o **VS Code** e, dentro dele, a extensão **PlatformIO IDE** (menu Extensions, busque "PlatformIO"). Ela instala o `pio` e o Python que ele usa.
+   - Alternativa só com terminal: instale o [PlatformIO Core](https://platformio.org/install/cli).
+2. Conecte a placa ao Mac com um cabo USB-C **de dados** (alguns cabos só carregam).
+3. Confira se o Mac enxerga a placa:
+
+   ```sh
+   ls /dev/cu.usbmodem*
+   ```
+
+   Se aparecer algo como `/dev/cu.usbmodem1201`, está tudo certo. Não precisa instalar driver.
+
+### 0.4 O ciclo de trabalho do dia a dia
+
+```text
+editar código (.cpp/.h)  →  compilar  →  gravar na placa  →  olhar o log
+```
+
+Na prática é um comando só, dentro da pasta do projeto (`guition-jc3248w535c`):
+
+```sh
+cd ~/Documents/ChatGPT/"placa esp32"/guition-jc3248w535c
+./tools/flash_weather_clock.sh
+```
+
+> Também funciona `pio run -e weather-clock -t upload` (ou o botão Upload → do VS Code). Os dois gravam a mesma tabela de partições; veja a seção 3.
+
+### 0.5 Onde fica o código de verdade
+
+O projeto que é compilado fica em **`guition-jc3248w535c/src/nextneo-vista/`**. Existe também uma pasta `src/` na raiz de `placa esp32` com uma **cópia antiga**; ela não entra no build. Edite sempre dentro de `guition-jc3248w535c/`.
+
+### 0.6 Primeira configuração do aparelho
+
+1. Ligue a placa e abra **Ajustes** (ícone de engrenagem).
+2. Em **Wi-Fi**, toque em buscar, escolha a rede, digite a senha e conecte.
+3. Anote o endereço IP que aparece em Ajustes (ex.: `192.168.66.183`).
+4. No celular ou computador, na mesma rede, abra `http://192.168.66.183`. É a **página web de configuração** (seção 5).
+5. Em **Clima e relógio**, configure o local (veja a seguir).
+
+### 0.7 Configurar o local do clima
+
+O campo **Cidade** aceita dois formatos, tanto na página web quanto em Ajustes na placa:
+
+| Formato | Exemplo | O que acontece |
+|---|---|---|
+| Nome da cidade | `São Paulo, BR` | A placa procura a cidade e usa o ponto "central" que o serviço adota. O `, BR` limita a busca ao Brasil. |
+| Nome + coordenadas | `São Paulo @ -xx.xxx,-xx.xxx` | Usa exatamente esse ponto. O texto antes do `@` é só o nome mostrado na tela. |
+
+**Como pegar as coordenadas:** no Google Maps, clique com o botão direito no local e clique nos números que aparecem (ex.: `-xx.xxx, -xx.xxx`). Eles são copiados. Cole depois do `@`.
+
+Dicas:
+
+- Use coordenadas se quiser a temperatura do seu bairro. "São Paulo, BR" cai na Zona Norte (≈ -23.51, -46.61).
+- Primeiro vem a latitude (negativa no hemisfério sul), depois a longitude (negativa no Brasil).
+- O nome/local só é usado pelo Clima e pelo Relógio. O fuso horário vem junto com a resposta do clima. O Radar usa o aeroporto configurado à parte.
+- A temperatura vem do **Open-Meteo**, que é um modelo de previsão, não um termômetro. Pode ficar 1–3 °C diferente do Google/Climatempo, que usam estações de medição.
 
 ---
 
@@ -44,7 +142,7 @@ O script faz quatro coisas:
 
 1. Limpa o build anterior.
 2. Compila `weather-clock`.
-3. Confere se o app cabe na partição de 2 MB e grava **somente o app** em `0x10000`. Bootloader, partições, Wi-Fi salvo e arquivos ficam intactos.
+3. Confere se o app cabe na partição de 3264 KB e grava **somente o app** em `0x10000`. Bootloader, partições e Wi-Fi salvo ficam intactos.
 4. Abre o monitor serial.
 
 Variações:
@@ -93,7 +191,7 @@ A gravação deu certo se aparecer `Hash of data verified`. Para sair do monitor
 | Compilar + gravar app (script antigo, sem monitor) | `./tools/update_weather.sh [porta]` |
 | Monitor serial | `pio device monitor -b 115200` |
 | Listar portas | `ls /dev/cu.usbmodem*` ou `pio device list` |
-| Tamanho do app | `ls -l .pio/build/weather-clock/firmware.bin` (limite: 2 097 152 bytes) |
+| Tamanho do app | `ls -l .pio/build/weather-clock/firmware.bin` (limite: 3 342 336 bytes) |
 | Hash do app gravado | `shasum -a 256 .pio/build/weather-clock/firmware.bin` |
 | Apagar cache de build | `rm -rf .pio/build` (é recriado no próximo build) |
 
@@ -101,13 +199,34 @@ A gravação deu certo se aparecer `Hash of data verified`. Para sair do monitor
 
 ## 3. Por que não usar `-t upload` nesta placa
 
-**Não rode** `pio run -e weather-clock -t upload` nesta unidade.
+> **Atualizado em 2026-11-11:** este aviso valia para a tabela de fábrica, que não existe mais nesta placa.
 
-A tabela de partições de fábrica desta placa é diferente da usada pelo PlatformIO. Ela tem NVS em `0x9000`, OTA em `0xE000`, app0 e app1 de 2 MB em `0x10000` e `0x210000`, e uma FAT em `0x410000`. O `-t upload` regrava também o bootloader e a tabela de partições, o que pode apagar o Wi-Fi salvo e os arquivos.
+A tabela original de fábrica tinha app0/app1 de 2 MB e uma FAT. Ela foi substituída pela tabela padrão do PlatformIO, `default_8MB.csv`, quando o app foi gravado com `-t upload`. Lendo a placa:
 
-Por isso os scripts gravam **apenas** o `firmware.bin` em `0x10000`.
+```text
+nvs,      data, nvs,      0x9000,   20K
+otadata,  data, ota,      0xe000,   8K
+app0,     app,  ota_0,    0x10000,  3264K
+app1,     app,  ota_1,    0x340000, 3264K
+spiffs,   data, spiffs,   0x670000, 1536K
+coredump, data, coredump, 0x7f0000, 64K
+```
 
-> Os **exemplos/jogos** (seção 9) usam outra tabela (`hub_partitions.csv`) e o fluxo próprio `tools/flash_hub.sh`. Não misture os dois fluxos na mesma placa sem saber o que vai ser sobrescrito.
+Essa tabela agora está fixada no `platformio.ini` (`board_build.partitions = default_8MB.csv`). Por isso:
+
+- `pio run -e weather-clock -t upload` é seguro: regrava a mesma tabela, e o NVS (Wi-Fi e ajustes) continua no mesmo lugar.
+- O script `tools/flash_weather_clock.sh` também funciona: grava só o app e confere se ele cabe nos 3264 KB.
+- **Não troque** `board_build.partitions` sem saber o que faz: uma tabela diferente pode apagar o Wi-Fi e os ajustes salvos.
+
+Para conferir a tabela gravada na placa (só leitura):
+
+```sh
+~/.platformio/penv/bin/python ~/.platformio/packages/tool-esptoolpy/esptool.py \
+  --chip esp32s3 read_flash 0x8000 0xC00 /tmp/pt.bin && \
+~/.platformio/penv/bin/python ~/.platformio/packages/framework-arduinoespressif32/tools/gen_esp32part.py /tmp/pt.bin
+```
+
+> Os **exemplos/jogos** (seção 9) usam outra tabela (`hub_partitions.csv`) e o fluxo `tools/flash_hub.sh`. Gravar um deles troca a tabela e apaga o NextNeo Vista.
 
 ---
 
@@ -119,7 +238,7 @@ Por isso os scripts gravam **apenas** o `firmware.bin` em `0x10000`.
 | Gravação não inicia ou fica em `Connecting...` | Segure **BOOT**, toque em **RESET**, solte **BOOT** e rode de novo. |
 | `Resource busy` na porta | Feche o monitor serial (Ctrl+C) ou outro programa usando a porta. |
 | Erro de compilação após atualizar o código | Rode `pio run -e weather-clock -t clean` e compile de novo. |
-| `app não cabe na partição` | O app passou de 2 MB. Nada foi gravado; reduza fontes ou recursos. |
+| `app não cabe na partição` | O app passou de 3264 KB. Nada foi gravado; reduza imagens/fontes (o maior arquivo é `sky_images.c`). |
 | Tela preta após gravar | Aperte RESET. Se continuar, olhe o monitor serial (`gfx->begin FAILED` indica problema de display ou framebuffer). |
 | `SSL - Memory allocation failed (-32512)` | Falta de RAM **interna** para o TLS (veja a seção 6). No monitor, confira `maior bloco` nas linhas `[net]` e `[mem]`. Abaixo de ~22 KB o handshake falha. |
 | Finanças sem atualizar | Veja no log: `HTTP 429` (limite do Yahoo; o app respeita `Retry-After`), `HTTP 401`/`403` (API recusou) ou `erro de transporte` + `[mem]` (memória/TLS). |
@@ -142,10 +261,13 @@ O número que importa para o TLS é o **maior bloco** de RAM interna.
 ## 5. Telas do app
 
 ### Menu
-Ícones para Clima, Finanças, Calendário, Radar e Ajustes. O ícone de Wi-Fi fica verde quando conectado.
+Ícones para as telas do app (Clima, Relógio, Finanças, Calendário, Radar, Aeroporto, Servidores, Fotos) e Ajustes. O ícone de Wi-Fi fica verde quando conectado.
 
 ### Clima
 Dados do Open-Meteo (sem chave), com abas **Agora / Horas / Dias**. Atualiza a cada 10 min enquanto a tela está aberta. Em erro, tenta de novo em 1 min. Respostas inválidas não apagam a última previsão válida.
+
+- A temperatura grande, o card **Agora** da lista de horas e o Relógio usam o mesmo valor (`current.temperature_2m`). Os demais cards de horas são previsões de 3 em 3 horas.
+- O local vem do campo **Cidade** (nome ou `Nome @ lat,lon`). Veja a seção 0.7.
 
 ### Finanças
 Mostra até **8 ativos** configuráveis: moedas, cripto, ações e índices, todos pelo símbolo do Yahoo Finance. O padrão é USD/BRL, EUR/BRL e BTC/USD.
@@ -179,19 +301,35 @@ Tráfego ao vivo do [ADSB.lol](https://api.adsb.lol) num escopo circular, com o 
   - `AO VIVO` e `↻`: atualizam na hora.
   - `×`: fecha o detalhe. Tocar no fundo do radar também fecha.
 - **Mapa:** imagem *World Street Map* do Esri (endpoint `export`, sem chave), com cores invertidas e tingidas para o tema do radar (crédito "Esri" na tela; uso pessoal). Baixado só quando muda o aeroporto ou o raio. Ajuste de cor em `buildTintLut()` em `services/radar_map_provider.cpp`.
+- **Aeroporto no radar:** pistas, taxiways e pátios do aeroporto configurado são desenhados por cima do mapa, com o norte para cima e na mesma projeção dos aviões. O desenho é feito uma vez, dentro da imagem do mapa (sem custo por frame), quando muda o aeroporto ou o raio. Em 5 km aparecem os pátios, os terminais e as taxiways; em 10 km, os pátios e as taxiways; em 25 e 50 km, só as pistas. A geometria vem do mesmo lugar que na tela Aeroporto: embutida (CGH), cache na flash (`/apt_XXX.bin`) ou, se não houver, OpenStreetMap/Overpass, baixado uma vez e salvo. O botão `MAPA` esconde só as ruas; o aeroporto continua. Código: `maybeFetchMap()` em `flight_radar.cpp` e `airportDrawRadarOverlay()` em `flight_airport.cpp`.
 - **Configuração:** aeroporto (IATA/ICAO, ex.: `CGH`, `GRU`, `SBGR`) e raio em **Ajustes**. A varredura pode ser desligada com `SWEEP_ENABLED` em `modules/flight_radar/flight_radar.cpp`.
 
+### Relógio ("Céu vivo")
+Relógio grande sobre um céu animado que muda com a hora do dia e o clima (chuva, raios, neblina, estrelas). Usa os mesmos dados do Clima, pedidos só enquanto esta tela está aberta. Tocar alterna para um modo preto minimalista.
+
+### Servidores
+Estado dos servidores de casa (CPU, memória, disco etc.) lido do Beszel. Atualiza a cada 10 s enquanto a tela está aberta. Login e sistemas são configurados na página web.
+
+### Aeroporto
+Painel de voos do aeroporto configurado, com APIs públicas, atualizado a cada ~10 s, sem cache.
+
+### Fotos
+Porta-retratos com até 8 fotos enviadas pela página web; cada uma fica 30 s. Não usa internet.
+
 ### Ajustes (no aparelho)
-Wi-Fi (buscar, escolher rede, senha, conectar), cidade do clima, formato 12/24 h, brilho, aeroporto e raio do radar. Os campos do radar acompanham mudanças feitas pela pílula de km ou pela página web.
+Wi-Fi (buscar, escolher rede, senha, conectar), cidade do clima (aceita `Nome @ lat,lon`; toque em Enter no teclado para aplicar), formato 12/24 h, brilho, aeroporto e raio do radar. Os campos do radar acompanham mudanças feitas pela pílula de km ou pela página web.
 
 ### Página web de configuração
-Com o celular ou computador na mesma rede, abra `http://IP-DO-APARELHO`. O IP aparece em Ajustes e no último cartão do Finance. A página tem três seções:
+Com o celular ou computador na mesma rede, abra `http://IP-DO-APARELHO`. O IP aparece em Ajustes e no último cartão do Finance. As seções da página:
 
 | Seção | O que configura |
 |---|---|
-| **Clima e relógio** | Cidade e relógio 24 h |
+| **Tela (desempenho)** | Velocidade da tela (40/60/80 MHz). Se aparecerem listras, volte para 40. |
+| **Clima e relógio** | Cidade (`São Paulo, BR` ou `Nome @ lat,lon`) e relógio 24 h |
 | **Radar aéreo** | Aeroporto (com lista de sugestões) e raio de 5, 10, 25 ou 50 km |
 | **Finance** | Lista de até 8 ativos (símbolo + legenda), com a cotação atual de cada um |
+| **Fotos** | Até 8 fotos para a tela Fotos (recorte feito no navegador) |
+| **Servidores (Beszel)** | Login somente leitura do Beszel e o link de cada sistema monitorado |
 
 Credenciais de Wi-Fi só são digitadas no próprio aparelho.
 
@@ -240,6 +378,9 @@ guition-jc3248w535c/
     ├── app_screens.h              # estado compartilhado, IDs de tela, comandos de rede
     ├── config.cpp                 # tela de Ajustes
     ├── weather.cpp / finance.cpp / calendario.cpp
+    ├── clock.cpp + sky_images.c   # Relógio "Céu vivo" e imagens de céu
+    ├── servers.cpp                # Servidores (Beszel)
+    ├── photos.cpp                 # Fotos
     ├── lv_mem_psram.cpp           # alocador do LVGL em PSRAM
     ├── lv_font_weather_14.c / _20.c   # Montserrat com acentos (Latin até U+017F)
     ├── services/
@@ -320,6 +461,14 @@ Vídeo para o media player: `ffmpeg -i in.mp4 -vf "scale=480:320" -q:v 6 -r 20 o
   - Correção do erro `SSL - Memory allocation failed`: LVGL, JSON e respostas HTTP movidos para a PSRAM.
   - Finanças com sessão TLS única por visita.
   - Novo script `tools/flash_weather_clock.sh`.
+  - Esta versão ainda precisa ser compilada e conferida na placa.
+
+- **2026-11-11:**
+  - Card **Agora** da lista de horas passou a mostrar a mesma temperatura do bloco principal (antes mostrava a previsão da hora cheia e podia ficar 1–2 °C diferente).
+  - Campo **Cidade** aceita coordenadas no formato `Nome @ lat,lon`, com dica na página web e em Ajustes.
+  - README ganhou a seção 0, para quem vem do Java.
+  - Radar aéreo desenha o aeroporto (pistas, taxiways, pátios) sobre o mapa de ruas; o botão MAPA esconde só as ruas.
+  - Descoberto que a placa já usa a tabela `default_8MB.csv` (app de 3264 KB), não mais a de fábrica. Tabela fixada no `platformio.ini`, limite do script corrigido e seção 3 reescrita.
   - Esta versão ainda precisa ser compilada e conferida na placa.
 
 Um backup completo de verdade exige ler os `0x1000000` bytes sem erros de CRC.

@@ -190,6 +190,7 @@ static void build_settings(lv_obj_t *t) {
   lv_obj_set_style_border_width(taCity, 1, LV_PART_MAIN);
   lv_obj_set_style_radius(taCity, 12, LV_PART_MAIN);
   lv_obj_add_event_cb(taCity, ta_event, LV_EVENT_FOCUSED, NULL);
+  makeLabel(t, "Ex.: São Paulo, BR  ou  Nome @ lat,lon", &lv_font_weather_14, 0x8FB0D0);
 
   lv_obj_t *r2 = lv_obj_create(t);
   lv_obj_set_size(r2, 430, 44);

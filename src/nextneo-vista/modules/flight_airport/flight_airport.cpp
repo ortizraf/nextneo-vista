@@ -424,6 +424,142 @@ static bool loadBuiltinMap(const char *code, double lat, double lon) {
   return parseMapJson(kMapCGH, kMapCGHLen, code, lat, lon, millis(), false);
 }
 
+// ---------------------------------------------------------------- Flight Radar overlay
+// The radar draws this airport (runways, taxiways, aprons) north-up INTO its map
+// image, once per airport/radius change, from the network task. Nothing is added
+// to LVGL, so it costs nothing per frame. Geometry comes from the same sources as
+// this screen: built-in (CGH) -> flash cache -> Overpass (once, then cached).
+// Network task only; the Airport screen is not active while the radar is.
+bool airportEnsureRadarGeometry(const char *code, double lat, double lon, bool allowDownload) {
+  if (mapReady && !strcmp(mapCode, code) && fabs(mapLat - lat) < 1e-6 && fabs(mapLon - lon) < 1e-6) return true;
+  if ((int32_t)(millis() - mapRetryAtMs) < 0) return false;
+  if (!feats) {
+    feats = (Feature *)psramCalloc(MAX_FEATURES, sizeof(Feature));
+    pts = (int16_t *)psramMalloc(MAX_POINTS * 2 * sizeof(int16_t));
+    if (!feats || !pts) return false;
+  }
+  if (loadBuiltinMap(code, lat, lon) || loadMapFile(code, lat, lon)) return true;
+  if (allowDownload && fetchMap(code, lat, lon)) {
+    Log.printf("Radar: mapa do aeroporto %s baixado (%d elementos)\n", code, featCount);
+    return true;
+  }
+  mapRetryAtMs = millis() + 60000;
+  return false;
+}
+
+namespace {
+struct OverlayRaster { uint16_t *buf; int size; float c, r2; };
+inline void ovPlot(const OverlayRaster &R, int x, int y, uint16_t col) {
+  if (x < 0 || y < 0 || x >= R.size || y >= R.size) return;
+  const float dx = x + 0.5f - R.c, dy = y + 0.5f - R.c;
+  if (dx * dx + dy * dy > R.r2) return;                 // stay inside the round scope
+  R.buf[y * R.size + x] = col;
+}
+// Anti-aliased thick segment: per-pixel coverage from the distance to the segment,
+// blended over what is already in the buffer (map or plain scope).
+inline uint16_t ovBlend(uint16_t dst, uint16_t src, float a) {
+  const int ia = (int)(a * 256 + 0.5f);
+  const int r = (((src >> 11) * ia) + ((dst >> 11) * (256 - ia))) >> 8;
+  const int g = ((((src >> 5) & 0x3F) * ia) + (((dst >> 5) & 0x3F) * (256 - ia))) >> 8;
+  const int b = (((src & 0x1F) * ia) + ((dst & 0x1F) * (256 - ia))) >> 8;
+  return (uint16_t)((r << 11) | (g << 5) | b);
+}
+inline void ovLineAA(const OverlayRaster &R, float x0, float y0, float x1, float y1, float widthPx, uint16_t col, float alpha = 1.0f) {
+  const float hw = widthPx / 2;
+  const int xa = max(0, (int)floorf(min(x0, x1) - hw - 1)), xb = min(R.size - 1, (int)ceilf(max(x0, x1) + hw + 1));
+  const int ya = max(0, (int)floorf(min(y0, y1) - hw - 1)), yb = min(R.size - 1, (int)ceilf(max(y0, y1) + hw + 1));
+  const float dx = x1 - x0, dy = y1 - y0, len2 = dx * dx + dy * dy;
+  for (int y = ya; y <= yb; ++y)
+    for (int x = xa; x <= xb; ++x) {
+      const float px = x + 0.5f, py = y + 0.5f;
+      const float cx = px - R.c, cy = py - R.c;
+      if (cx * cx + cy * cy > R.r2) continue;
+      float t = len2 > 0 ? ((px - x0) * dx + (py - y0) * dy) / len2 : 0;
+      t = t < 0 ? 0 : (t > 1 ? 1 : t);
+      const float ex = px - (x0 + t * dx), ey = py - (y0 + t * dy);
+      const float cov = hw + 0.5f - sqrtf(ex * ex + ey * ey);     // 1 px soft edge
+      if (cov <= 0) continue;
+      uint16_t &d = R.buf[y * R.size + x];
+      d = ovBlend(d, col, (cov > 1 ? 1 : cov) * alpha);
+    }
+}
+constexpr uint16_t ov565(uint32_t c) {
+  return (uint16_t)((((c >> 16) & 0xF8) << 8) | (((c >> 8) & 0xFC) << 3) | ((c & 0xFF) >> 3));
+}
+}  // namespace
+
+// radiusKm = radar range; buf = size x size RGB565, centre = airport reference point.
+void airportDrawRadarOverlay(float radiusKm, uint16_t *buf, int size) {
+  if (!mapReady || !buf || radiusKm <= 0) return;
+  const uint32_t t0 = millis();
+  const OverlayRaster R = {buf, size, size / 2.0f, (size / 2.0f - 1) * (size / 2.0f - 1)};
+  const float pxPerM = (size / 2.0f) / (radiusKm * 1000.0f);
+  // This screen projects with 111320/110540 m per degree; the radar uses a 6371 km
+  // sphere (111195 m). Scale each axis so runways sit exactly under the aircraft.
+  const float kE = 111194.9f / 111320.0f, kN = 111194.9f / 110540.0f;
+  auto toPx = [&](uint32_t k, float &x, float &y) {
+    const float rx = pts[k * 2], ry = pts[k * 2 + 1];
+    const float e = rx * rotC - ry * rotS, n = rx * rotS + ry * rotC;   // undo the "runway horizontal" turn
+    x = R.c + e * kE * pxPerM;
+    y = R.c - n * kN * pxPerM;
+  };
+  const bool detail = radiusKm <= 5.5f, medium = radiusKm <= 10.5f;
+  const uint16_t cApron = ov565(0x163F42), cTerm = ov565(0x1F5457), cTaxi = ov565(0x4FA095), cRunway = ov565(0xD8F5EE);
+
+  // 1) aprons / terminals: scanline fill (even-odd), only when they are big enough to read
+  if (medium) {
+    static float xs[64];
+    for (int i = 0; i < featCount; ++i) {
+      const Feature &ft = feats[i];
+      if (!ft.closed || ft.count < 3 || !(ft.type == F_APRON || (detail && ft.type == F_TERMINAL))) continue;
+      const uint16_t col = ft.type == F_APRON ? cApron : cTerm;
+      float minY = 1e9f, maxY = -1e9f;
+      for (uint32_t k = ft.first; k < ft.first + ft.count; ++k) { float x, y; toPx(k, x, y); minY = min(minY, y); maxY = max(maxY, y); }
+      const int ya = max(0, (int)floorf(minY)), yb = min(size - 1, (int)ceilf(maxY));
+      for (int py = ya; py <= yb; ++py) {
+        const float yc = py + 0.5f;
+        int nx = 0;
+        float px0, py0; toPx(ft.first + ft.count - 1, px0, py0);
+        for (uint32_t k = ft.first; k < ft.first + ft.count && nx < 64; ++k) {
+          float px1, py1; toPx(k, px1, py1);
+          if ((py0 <= yc) != (py1 <= yc)) xs[nx++] = px0 + (yc - py0) * (px1 - px0) / (py1 - py0);
+          px0 = px1; py0 = py1;
+        }
+        std::sort(xs, xs + nx);
+        for (int j = 0; j + 1 < nx; j += 2)
+          for (int px = (int)ceilf(xs[j] - 0.5f); px <= (int)floorf(xs[j + 1] - 0.5f); ++px) ovPlot(R, px, py, col);
+      }
+    }
+  }
+  // 2) taxiways, then 3) runways on top. Runways: dark halo first (separates parallel
+  //    runways and lifts them off the street map), then an anti-aliased body.
+  const uint16_t cHalo = ov565(0x031012);
+  auto strokeFeature = [&](const Feature &ft, float w, uint16_t col, float alpha) {
+    float x0, y0; toPx(ft.first, x0, y0);
+    for (uint32_t k = ft.first + 1; k < ft.first + ft.count; ++k) {
+      float x1, y1; toPx(k, x1, y1);
+      ovLineAA(R, x0, y0, x1, y1, w, col, alpha);
+      x0 = x1; y0 = y1;
+    }
+  };
+  if (medium)
+    for (int i = 0; i < featCount; ++i) {
+      const Feature &ft = feats[i];
+      if (ft.type != F_TAXIWAY || ft.count < 2) continue;
+      const float w = detail ? max(1.0f, (ft.widthM > 0 ? ft.widthM : 23.0f) * pxPerM) : 1.0f;
+      strokeFeature(ft, w, cTaxi, detail ? 0.85f : 0.6f);
+    }
+  for (int pass = 0; pass < 2; ++pass)
+    for (int i = 0; i < featCount; ++i) {
+      const Feature &ft = feats[i];
+      if (ft.type != F_RUNWAY || ft.count < 2) continue;
+      const float w = max(medium ? 2.0f : 1.6f, (ft.widthM > 0 ? ft.widthM : 45.0f) * pxPerM);
+      if (pass == 0) strokeFeature(ft, w + 2.0f, cHalo, 0.75f);
+      else strokeFeature(ft, w, cRunway, 1.0f);
+    }
+  LogV.printf("Radar: aeroporto %s desenhado no mapa (%.0f km) em %lums\n", mapCode, radiusKm, (unsigned long)(millis() - t0));
+}
+
 // ---------------------------------------------------------------- network: job entry
 // ---------------------------------------------------------------- details of the selected aircraft
 // Same source as the Flight Radar (adsbdb.com): model, owner, airline, route.
@@ -1060,14 +1196,21 @@ static void canvasEvent(lv_event_t *e) {
   }
   if (code == LV_EVENT_SHORT_CLICKED) {                            // nearest aircraft within 22 px
     if (!traffic) return;
+    // Hit-test the icons where they are DRAWN. They glide up to one poll behind the
+    // last report, so testing the raw report position missed moving aircraft, and it
+    // could also pick aircraft that are not shown (higher traffic belongs to the radar).
+    char hitHex[8] = "";
+    { float hitD = 30 * 30;                                        // ~finger size
+      for (int i = 0; i < MAX_AC; ++i) {
+        if (lv_obj_has_flag(planeImg[i], LV_OBJ_FLAG_HIDDEN) || !glide[i].on) continue;
+        const float x = lv_obj_get_x(planeImg[i]) + ICON_PX / 2.0f, y = lv_obj_get_y(planeImg[i]) + ICON_PX / 2.0f;
+        const float d = (x - p.x) * (x - p.x) + (y - p.y) * (y - p.y);
+        if (d < hitD) { hitD = d; snprintf(hitHex, sizeof hitHex, "%s", glide[i].hex); }
+      } }
     xSemaphoreTake(mtx, portMAX_DELAY);
-    int best = -1; float bestD = 22 * 22;
-    for (int i = 0; i < traffic->count; ++i) {
-      float mx, my; proj(traffic->ac[i].latitude, traffic->ac[i].longitude, mx, my);
-      const float x = sx(mx), y = MAP_Y + sy(my);
-      const float d = (x - p.x) * (x - p.x) + (y - p.y) * (y - p.y);
-      if (d < bestD) { bestD = d; best = i; }
-    }
+    int best = -1;
+    if (hitHex[0]) for (int i = 0; i < traffic->count; ++i) if (!strcmp(traffic->ac[i].icao24, hitHex)) { best = i; break; }
+    Log.printf("Airport: toque em %d,%d -> %s\n", (int)p.x, (int)p.y, best >= 0 ? hitHex : "nenhum avião");
     if (best < 0 && lv_tick_elaps(lastTapMs) < 400) {                // double tap on the map: recenter
       xSemaphoreGive(mtx); lastTapMs = 0; recenter(nullptr); return;
     }
@@ -1295,7 +1438,11 @@ void airportRender() {
     snprintf(b, sizeof b, "%d fonte%s", ns, ns == 1 ? "" : "s"); }
   setLabelIfChanged(srcLbl, b);
 
-  if (!changed && !(stale)) { if (selectedHex[0]) renderInfo(t); return; }
+  // Stale data: refresh the faded markers once per second, not on every UI tick.
+  static uint32_t staleDrawMs = 0;
+  const bool staleRedraw = stale && lv_tick_elaps(staleDrawMs) >= 1000;
+  if (!changed && !staleRedraw) { if (selectedHex[0]) renderInfo(t); return; }
+  if (staleRedraw) staleDrawMs = lv_tick_get();
   renderedTrafficVersion = ver;
   int shown = 0;
   static char keepHex[MAX_AC][8]; static uint8_t keepN = 0;   // on screen last draw
