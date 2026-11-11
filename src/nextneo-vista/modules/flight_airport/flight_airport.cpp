@@ -1162,9 +1162,7 @@ void buildAirportScreen(lv_obj_t *scr) {
   lv_obj_set_style_radius(hdr, 0, 0); lv_obj_set_style_border_width(hdr, 0, 0); lv_obj_set_style_pad_all(hdr, 0, 0);
   lv_obj_set_style_bg_color(hdr, lv_color_hex(C_BG2), 0); lv_obj_remove_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_remove_flag(hdr, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_t *back = addBackButton(airportView);
-  lv_obj_set_size(back, 40, 30); lv_obj_set_pos(back, 0, 2);
-  lv_obj_set_style_bg_color(back, lv_color_hex(0x13283E), 0); lv_obj_set_style_bg_grad_color(back, lv_color_hex(0x13283E), 0);
+  addBackButton(airportView);                           // standard back button (main.cpp)
   title = makeLabel(airportView, "Aeroporto", &lv_font_weather_14, C_TEXT);
   lv_obj_set_pos(title, 50, 9);
   statusDot = lv_obj_create(airportView);

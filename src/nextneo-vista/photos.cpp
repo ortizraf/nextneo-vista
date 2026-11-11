@@ -201,8 +201,7 @@ void buildPhotosScreen(lv_obj_t *scr) {
     lv_obj_add_flag(dots[i], LV_OBJ_FLAG_HIDDEN);
   }
 
-  backBtn = addBackButton(photosView);
-  lv_obj_set_pos(backBtn, 6, 6);
+  backBtn = addBackButton(photosView);                    // standard back button (main.cpp)
   lv_obj_add_flag(backBtn, LV_OBJ_FLAG_HIDDEN);
 
   slideTimer = lv_timer_create(slideCb, PHOTO_SLIDE_MS, NULL);   lv_timer_pause(slideTimer);

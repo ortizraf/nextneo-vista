@@ -397,7 +397,8 @@ static bool doWeather() {
                "&longitude=" + String(cfg.lon, 4) +
                "&current=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m,apparent_temperature,uv_index"
                "&hourly=temperature_2m,weather_code,precipitation_probability"
-               "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+               "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,"
+               "precipitation_sum,precipitation_hours,cloud_cover_mean"
                "&timezone=auto&forecast_days=7&forecast_hours=24";
   JsonDocument doc(SpiRamJsonAllocator::instance());  // PSRAM: keep internal RAM for TLS
   String error;
@@ -464,6 +465,20 @@ static bool doWeather() {
     sh.tmax[i] = doc["daily"]["temperature_2m_max"][i] | 0.0f;
     sh.tmin[i] = doc["daily"]["temperature_2m_min"][i] | 0.0f;
     sh.dcode[i] = doc["daily"]["weather_code"][i] | 0;
+    // Open-Meteo's daily code is the WORST hour of the day: one hour of drizzle turns the
+    // whole day into "rain". Keep rain only if it really rains (>= 1 mm and >= 2 h);
+    // otherwise show the day's mean cloud cover instead.
+    {
+      const int dc = sh.dcode[i];
+      const bool wet = (dc >= 51 && dc <= 67) || (dc >= 80 && dc <= 82) || dc >= 95;
+      const float mm = doc["daily"]["precipitation_sum"][i] | -1.0f;
+      const float hrs = doc["daily"]["precipitation_hours"][i] | -1.0f;
+      if (wet && mm >= 0 && hrs >= 0 && (mm < 1.0f || hrs < 2.0f)) {
+        const int cc = doc["daily"]["cloud_cover_mean"][i] | 50;
+        sh.dcode[i] = cc < 25 ? 1 : cc < 65 ? 2 : 3;
+        LogV.printf("Weather: dia %d código %d -> %d (chuva %.1f mm em %.0f h, nuvens %d%%)\n", i, dc, sh.dcode[i], mm, hrs, cc);
+      }
+    }
     sh.dayRain[i] = doc["daily"]["precipitation_probability_max"][i] | 0;
     const char *d = doc["daily"]["time"][i] | "";
     int y, m, dd;
@@ -1729,19 +1744,30 @@ static void build_main_menu(lv_obj_t *menu) {
   lv_obj_align(menuWifiIcon, LV_ALIGN_TOP_RIGHT, -3, 3);
 }
 
+// The one back button of the app: same size (40x34), position and "glass" look on
+// every screen. Screens must not restyle or move it.
+static void backPressFx(lv_event_t *e) {
+  lv_obj_t *b = (lv_obj_t *)lv_event_get_target(e);
+  const bool down = lv_event_get_code(e) == LV_EVENT_PRESSED;
+  lv_obj_set_style_bg_opa(b, down ? LV_OPA_70 : LV_OPA_40, LV_PART_MAIN);
+}
 lv_obj_t *addBackButton(lv_obj_t *parent) {
   lv_obj_t *back = lv_button_create(parent);
   lv_obj_set_size(back, 40, 34);
-  lv_obj_align(back, LV_ALIGN_TOP_LEFT, 0, 0);
-  lv_obj_set_style_bg_color(back, lv_color_hex(0x0878B8), LV_PART_MAIN);
-  lv_obj_set_style_bg_grad_color(back, lv_color_hex(0x07528A), LV_PART_MAIN);
-  lv_obj_set_style_bg_grad_dir(back, LV_GRAD_DIR_VER, LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(back, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_border_width(back, 0, LV_PART_MAIN);
-  lv_obj_set_style_radius(back, 10, LV_PART_MAIN);
-  lv_obj_set_style_shadow_width(back, 3, LV_PART_MAIN);
-  lv_obj_set_style_shadow_opa(back, LV_OPA_30, LV_PART_MAIN);
+  lv_obj_set_pos(back, 4, 4);
+  lv_obj_set_style_bg_color(back, lv_color_hex(0x0A1220), LV_PART_MAIN);
+  lv_obj_set_style_bg_grad_dir(back, LV_GRAD_DIR_NONE, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(back, LV_OPA_40, LV_PART_MAIN);           // translucent, readable on any background
+  lv_obj_set_style_border_color(back, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_border_opa(back, LV_OPA_30, LV_PART_MAIN);       // thin light rim, like iOS glass buttons
+  lv_obj_set_style_border_width(back, 1, LV_PART_MAIN);
+  lv_obj_set_style_radius(back, 12, LV_PART_MAIN);
+  lv_obj_set_style_shadow_width(back, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(back, 0, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(back, lv_color_hex(0x0A1220), LV_STATE_PRESSED);
+  lv_obj_add_event_cb(back, backPressFx, LV_EVENT_PRESSED, NULL);
+  lv_obj_add_event_cb(back, backPressFx, LV_EVENT_RELEASED, NULL);
+  lv_obj_add_event_cb(back, backPressFx, LV_EVENT_PRESS_LOST, NULL);
   lv_obj_add_event_cb(back, showMenuEvent, LV_EVENT_CLICKED, NULL);
   lv_obj_t *arrow = lv_label_create(back);
   lv_label_set_text(arrow, LV_SYMBOL_LEFT);

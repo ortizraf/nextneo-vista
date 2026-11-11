@@ -384,9 +384,7 @@ void buildWeatherScreen(lv_obj_t *scr) {
   build_days(days);
   // One back button on the view itself, above the tabview: buttons inside the
   // scrollable tab pages lost their clicks to the tab content/swipe handling.
-  lv_obj_t *back = addBackButton(weatherView);
-  lv_obj_set_pos(back, 6, 6);
-  lv_obj_move_foreground(back);
+  lv_obj_move_foreground(addBackButton(weatherView));   // standard back button (main.cpp)
 
 }
 

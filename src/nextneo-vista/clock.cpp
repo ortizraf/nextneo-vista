@@ -406,10 +406,7 @@ void buildClockScreen(lv_obj_t *scr) {
   show(card, false);
   for (int &c : iconCodes) c = -99;
 
-  lv_obj_t *back = addBackButton(clockView);
-  lv_obj_set_style_bg_opa(back, LV_OPA_30, 0);
-  lv_obj_set_style_shadow_width(back, 0, 0);
-  lv_obj_move_foreground(back);
+  lv_obj_move_foreground(addBackButton(clockView));     // standard back button (main.cpp)
 
   animTimer = lv_timer_create(animCb, FRAME_MS, NULL);
   lv_timer_pause(animTimer);
