@@ -212,7 +212,7 @@ static void build_home(lv_obj_t *t) {
                -15 + lv_obj_get_style_pad_right(t, LV_PART_MAIN),
                7 - lv_obj_get_style_pad_top(t, LV_PART_MAIN));
   lblClock = makeLabel(t, "--:--", &lv_font_montserrat_42, 0xEFF4FA);   // ~15 % bigger than 36
-  lv_obj_align(lblClock, LV_ALIGN_TOP_RIGHT, -46, 10);   // a bit away from the Wi-Fi icon (top-right corner)
+  lv_obj_align(lblClock, LV_ALIGN_TOP_RIGHT, -31, 10);   // a bit away from the Wi-Fi icon (top-right corner)
 
   // Big temperature + condition: same font/size and emphasis as before.
   lblTemp = makeLabel(t, "--°", &lv_font_montserrat_48, 0xFFFFFF);

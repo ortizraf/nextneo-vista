@@ -763,7 +763,7 @@ static void updateAena(const char *code) {
   xSemaphoreGive(mtx);
 }
 
-// Stand position from the OSM map: parking_position line (nose end first) or gate node.
+// Stand position from the OSM map: parking_position line (nose towards the terminal) or gate node.
 static bool standPose(const char *box, double &lat, double &lon, float &heading, bool &hasHeading) {
   if (!mapReady) return false;
   int best = -1;
@@ -777,11 +777,29 @@ static bool standPose(const char *box, double &lat, double &lon, float &heading,
   if (ft.count >= 2) {
     const uint32_t last = ft.first + ft.count - 1;
     float e1, n1; unrot(pts[last * 2], pts[last * 2 + 1], e1, n1);
-    const float de = e0 - e1, dn = n0 - n1, len = sqrtf(de * de + dn * dn);   // tail -> nose
+    // The nose is the end of the stand line closer to the terminal: the gate node with the
+    // same ref when the map has one, else the terminal buildings' centre. (The direction
+    // of the line itself varies in OSM: in CGH ~1/4 of the stands are drawn the other way.)
+    float re = 0, rn = 0; int rc = 0;
+    for (int i = 0; i < featCount; ++i)
+      if (feats[i].type == F_PARKING && feats[i].count == 1 && !strcmp(feats[i].ref, box)) {
+        unrot(pts[feats[i].first * 2], pts[feats[i].first * 2 + 1], re, rn); rc = 1; break;
+      }
+    if (!rc)
+      for (int i = 0; i < featCount; ++i) if (feats[i].type == F_TERMINAL)
+        for (uint32_t q = feats[i].first; q < feats[i].first + feats[i].count; ++q) {
+          float te, tn; unrot(pts[q * 2], pts[q * 2 + 1], te, tn); re += te; rn += tn; ++rc;
+        }
+    if (rc) { re /= rc; rn /= rc; }
+    float ne = e1, nn = n1, te = e0, tn = n0;              // nose / tail ends
+    if (rc && (e0 - re) * (e0 - re) + (n0 - rn) * (n0 - rn) < (e1 - re) * (e1 - re) + (n1 - rn) * (n1 - rn)) {
+      ne = e0; nn = n0; te = e1; tn = n1;
+    }
+    const float de = ne - te, dn = nn - tn, len = sqrtf(de * de + dn * dn);   // tail -> nose
     if (len > 1) {
       heading = fmodf(atan2f(de, dn) * 180 / (float)M_PI + 360, 360); hasHeading = true;
       const float k = len > 40 ? 20 / len : 0.5f;          // aircraft centre ~20 m behind the nose mark
-      e = e0 - de * k; n = n0 - dn * k;
+      e = ne - de * k; n = nn - dn * k;
     }
   }
   lat = mapLat + n / 110540.0;
