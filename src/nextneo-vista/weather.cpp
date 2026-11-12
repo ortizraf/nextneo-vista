@@ -115,7 +115,7 @@ static void addRainDrops(lv_obj_t *parent, int code, float s) {
   }
 }
 
-static lv_obj_t *makeWeatherIcon(lv_obj_t *parent, int x, int y, int size, int code) {
+static lv_obj_t *makeWeatherIcon(lv_obj_t *parent, int x, int y, int size, int code, bool night = false) {
   lv_obj_t *icon = lv_obj_create(parent);
   lv_obj_set_size(icon, size, size);
   lv_obj_set_pos(icon, x, y);
@@ -129,13 +129,23 @@ static lv_obj_t *makeWeatherIcon(lv_obj_t *parent, int x, int y, int size, int c
   const float s = size / 150.0f;
   auto scaled = [s](int value) { return (int)(value * s + 0.5f); };
   if (code <= 2) {
+    // Day: sun. Night: pale moon (crescent cut by a disc in the night-sky colour).
     lv_obj_t *sun = lv_obj_create(icon);
-    lv_obj_set_size(sun, scaled(62), scaled(62));
-    lv_obj_set_pos(sun, scaled(68), scaled(5));
+    lv_obj_set_size(sun, scaled(night ? 50 : 62), scaled(night ? 50 : 62));
+    lv_obj_set_pos(sun, scaled(night ? 74 : 68), scaled(night ? 8 : 5));
     lv_obj_set_style_radius(sun, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(sun, lv_color_hex(0xFFC96B), 0);
+    lv_obj_set_style_bg_color(sun, lv_color_hex(night ? 0xE9EEF7 : 0xFFC96B), 0);
     lv_obj_set_style_border_width(sun, 0, 0);
     lv_obj_move_to_index(sun, 0);
+    if (night) {
+      lv_obj_t *cut = lv_obj_create(icon);
+      lv_obj_set_size(cut, scaled(42), scaled(42));
+      lv_obj_set_pos(cut, scaled(92), scaled(0));
+      lv_obj_set_style_radius(cut, LV_RADIUS_CIRCLE, 0);
+      lv_obj_set_style_bg_color(cut, lv_color_hex(0x1B2740), 0);
+      lv_obj_set_style_border_width(cut, 0, 0);
+      lv_obj_move_to_index(cut, 1);
+    }
   }
   lv_obj_t *base = lv_obj_create(icon);
   lv_obj_set_size(base, scaled(106), scaled(42));
@@ -475,6 +485,7 @@ void updateWeatherScreen() {
   memcpy(hours, sh.hourLabel, sizeof hours);
   memcpy(htemp, sh.hourTemp, sizeof htemp);
   memcpy(hcode, sh.hourCode, sizeof hcode);
+  const bool isDay = sh.isDay; bool hday[8]; memcpy(hday, sh.hourIsDay, sizeof hday);
   memcpy(hrain, sh.hourRain, sizeof hrain);
   memcpy(dn, sh.dayName, sizeof dn);
   memcpy(mx, sh.tmax, sizeof mx);
@@ -491,7 +502,7 @@ void updateWeatherScreen() {
   lv_label_set_text(lblCity, city.c_str());
   if (have) {
     lv_label_set_text_fmt(lblTemp, "%.0f°C", temp);
-    lv_label_set_text(lblCond, weatherText(code));
+    lv_label_set_text(lblCond, weatherText(code, !isDay));
     lv_label_set_text_fmt(lblRange, LV_SYMBOL_UP " %.0f°   " LV_SYMBOL_DOWN " %.0f°   ·   sensação %.0f°", mx[0], mn[0], feels);
     lv_label_set_text_fmt(lblHumidity, "%d%%", humidity);
     lv_label_set_text_fmt(lblWind, "%.0f km/h", wind);
@@ -523,21 +534,22 @@ void updateWeatherScreen() {
       if (i < hourCount) {
         if (i == 0) lv_label_set_text(hourTime[i], "Agora");
         else lv_label_set_text_fmt(hourTime[i], "%sh", hours[i]);
-        lv_label_set_text(hourCond[i], weatherText(hcode[i]));
+        lv_label_set_text(hourCond[i], weatherText(hcode[i], !hday[i]));
         lv_label_set_text_fmt(hourTemp[i], "%.0f°", htemp[i]);
         lv_label_set_text_fmt(hourRain[i], "%d%%", hrain[i]);
-        if (renderedHourCodes[i] != hcode[i]) {
+        const int hkey = hcode[i] * 2 + !hday[i];               // icon changes with day/night too
+        if (renderedHourCodes[i] != hkey) {
           if (hourArt[i]) lv_obj_del(hourArt[i]);
-          hourArt[i] = makeWeatherIcon(hourCard[i], 14, 40, 48, hcode[i]);
-          renderedHourCodes[i] = hcode[i];
+          hourArt[i] = makeWeatherIcon(hourCard[i], 14, 40, 48, hcode[i], !hday[i]);
+          renderedHourCodes[i] = hkey;
         }
         lv_obj_remove_flag(hourCard[i], LV_OBJ_FLAG_HIDDEN);
       } else {
         lv_obj_add_flag(hourCard[i], LV_OBJ_FLAG_HIDDEN);
       }
     }
-    if (renderedCode != code) {
-      renderedCode = code;
+    if (renderedCode != code * 2 + !isDay) {
+      renderedCode = code * 2 + !isDay;
       // Change the scene colours to suit the current condition.
       refreshSky(code, true);      // the sky photo now carries the condition
       lv_obj_clean(weatherArt);
@@ -558,13 +570,22 @@ void updateWeatherScreen() {
       lv_obj_set_style_radius(puff2, LV_RADIUS_CIRCLE, 0);
       lv_obj_set_style_bg_color(puff2, lv_color_hex(0xD8E7F5), 0);
       lv_obj_set_style_border_width(puff2, 0, 0);
-      if (code <= 2) {
+      if (code <= 2) {                                         // sun by day, moon at night
         lv_obj_t *sun = lv_obj_create(weatherArt);
-        lv_obj_set_pos(sun, 68, 5); lv_obj_set_size(sun, 62, 62);
+        if (isDay) { lv_obj_set_pos(sun, 68, 5); lv_obj_set_size(sun, 62, 62); }
+        else       { lv_obj_set_pos(sun, 74, 8); lv_obj_set_size(sun, 50, 50); }
         lv_obj_set_style_radius(sun, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(sun, lv_color_hex(0xFFC96B), 0);
+        lv_obj_set_style_bg_color(sun, lv_color_hex(isDay ? 0xFFC96B : 0xE9EEF7), 0);
         lv_obj_set_style_border_width(sun, 0, 0);
         lv_obj_move_to_index(sun, 0);
+        if (!isDay) {
+          lv_obj_t *cut = lv_obj_create(weatherArt);
+          lv_obj_set_pos(cut, 92, 0); lv_obj_set_size(cut, 42, 42);
+          lv_obj_set_style_radius(cut, LV_RADIUS_CIRCLE, 0);
+          lv_obj_set_style_bg_color(cut, lv_color_hex(0x1B2740), 0);
+          lv_obj_set_style_border_width(cut, 0, 0);
+          lv_obj_move_to_index(cut, 1);
+        }
       }
       addRainDrops(weatherArt, code, 1.0f);
     }

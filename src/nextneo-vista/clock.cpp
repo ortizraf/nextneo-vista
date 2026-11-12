@@ -479,8 +479,9 @@ void clockRender() {
   const bool have = sh.haveWeather;
   const int code = sh.code, rain = sh.dayRain[0], hcount = sh.hourCount;
   const float temp = sh.temp, tmax = sh.tmax[0], tmin = sh.tmin[0];
-  char hl[HOURS][6]; float ht[HOURS]; int hc[HOURS];
-  for (int i = 0; i < HOURS; ++i) { memcpy(hl[i], sh.hourLabel[i], 6); ht[i] = sh.hourTemp[i]; hc[i] = sh.hourCode[i]; }
+  char hl[HOURS][6]; float ht[HOURS]; int hc[HOURS]; bool hd[HOURS];
+  for (int i = 0; i < HOURS; ++i) { memcpy(hl[i], sh.hourLabel[i], 6); ht[i] = sh.hourTemp[i]; hc[i] = sh.hourCode[i]; hd[i] = sh.hourIsDay[i]; }
+  const bool liveDay = sh.isDay;
   const uint32_t wv = sh.weatherVersion;
   xSemaphoreGive(mtx);
   WxCache wc = {};
@@ -512,10 +513,11 @@ void clockRender() {
 
   if (!have && !cached) { showCard(false); return; }        // nothing yet: keep just sky + clock
   snprintf(b, sizeof b, "%.0f\xC2\xB0", wc.temp); setLabelIfChanged(nowTemp, b);
-  setLabelIfChanged(nowCond, weatherText(wc.code));
+  const bool nowNight = have ? !liveDay : night;           // Open-Meteo is_day when live, clock hours otherwise
+  setLabelIfChanged(nowCond, weatherText(wc.code, nowNight));   // "Céu limpo" at night
   snprintf(b, sizeof b, "%.0f\xC2\xB0 / %.0f\xC2\xB0  \xC2\xB7  chuva %d%%", wc.tmax, wc.tmin, wc.rain);
   setLabelIfChanged(nowRange, b);
-  if (iconCodes[0] != wc.code * 2 + night) { iconCodes[0] = wc.code * 2 + night; drawMiniIcon(nowIcon, wc.code, night, 1.15f); }
+  if (iconCodes[0] != wc.code * 2 + nowNight) { iconCodes[0] = wc.code * 2 + nowNight; drawMiniIcon(nowIcon, wc.code, nowNight, 1.15f); }
   showCard(true);
   show(chev, have && hcount > 0);
   if (!have) return;                                          // hours only with fresh data
@@ -525,8 +527,7 @@ void clockRender() {
     if (!ok) continue;
     setLabelIfChanged(hourLbl[i], i == 0 ? "Agora" : hl[i]);
     snprintf(b, sizeof b, "%.0f\xC2\xB0", ht[i]); setLabelIfChanged(hourTmp[i], b);
-    const int hh = atoi(hl[i]);
-    const bool hn = hh < 6 || hh >= 19;
+    const bool hn = !hd[i];                                   // Open-Meteo is_day (sunrise/sunset of the place)
     if (iconCodes[i + 1] != hc[i] * 2 + hn) { iconCodes[i + 1] = hc[i] * 2 + hn; drawMiniIcon(hourIco[i], hc[i], hn); }
   }
 }

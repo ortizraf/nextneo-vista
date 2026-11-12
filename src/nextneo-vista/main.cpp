@@ -116,8 +116,8 @@ bool screenJobStillCurrent() {
 }
 
 // ---------------------------------------------------------------- helpers
-const char *weatherText(int c) {
-  if (c == 0) return "Ensolarado";
+const char *weatherText(int c, bool night) {
+  if (c == 0) return night ? "C\xC3\xA9u limpo" : "Ensolarado";
   if (c == 1) return "Poucas nuvens";
   if (c == 2) return "Parcialmente nublado";
   if (c == 3) return "Nublado";
@@ -406,12 +406,18 @@ static void applyTime() { configTime(cfg.utcOffset, 0, "pool.ntp.org", "time.goo
 // when the sky is mostly covered (>= 60 %) AND it is really raining (>= 0.2 mm in 15 min);
 // otherwise show the sky from the cloud cover. Showers / storms (80+) are kept as sent.
 // Hourly / daily codes are forecasts and are not touched.
+static constexpr int OVERCAST_PCT = 71;   // total cloud cover from which "now" is shown as overcast
+
 static int checkCurrentCode(int code, float precipMm, int cloudPct) {
-  if (code < 51 || code > 67 || cloudPct < 0) return code;
+  if (cloudPct < 0) return code;
+  // Clear / partly cloudy with lots of cloud: the model often misses low clouds -> overcast.
+  if (code <= 2) return cloudPct >= OVERCAST_PCT ? 3 : code;
+  if (code < 51 || code > 67) return code;   // fog, snow, showers, storms: as the API says
+  // Drizzle / rain (51-67): kept only if it is really raining; otherwise use the cloud cover.
   if (cloudPct >= 60 && precipMm >= 0.2f) return code;
   if (cloudPct < 20) return 0;          // céu limpo
   if (cloudPct < 50) return 1;          // poucas nuvens
-  if (cloudPct < 85) return 2;          // parcialmente nublado
+  if (cloudPct < OVERCAST_PCT) return 2;   // parcialmente nublado
   return 3;                             // nublado
 }
 
@@ -419,8 +425,8 @@ static bool doWeather() {
   if (WiFi.status() != WL_CONNECTED) return false;
   String url = "https://api.open-meteo.com/v1/forecast?latitude=" + String(cfg.lat, 4) +
                "&longitude=" + String(cfg.lon, 4) +
-               "&current=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m,apparent_temperature,uv_index,precipitation,cloud_cover"
-               "&hourly=temperature_2m,weather_code,precipitation_probability"
+               "&current=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m,apparent_temperature,uv_index,precipitation,cloud_cover,is_day"
+               "&hourly=temperature_2m,weather_code,precipitation_probability,is_day"
                "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,"
                "precipitation_sum,precipitation_hours,cloud_cover_mean"
                "&timezone=auto&forecast_days=7&forecast_hours=24";
@@ -434,6 +440,7 @@ static bool doWeather() {
   JsonArray hourlyTemps = doc["hourly"]["temperature_2m"].as<JsonArray>();
   JsonArray hourlyCodes = doc["hourly"]["weather_code"].as<JsonArray>();
   JsonArray hourlyRain = doc["hourly"]["precipitation_probability"].as<JsonArray>();
+  JsonArray hourlyIsDay = doc["hourly"]["is_day"].as<JsonArray>();
   JsonArray dailyTimes = doc["daily"]["time"].as<JsonArray>();
   JsonArray dailyMax = doc["daily"]["temperature_2m_max"].as<JsonArray>();
   JsonArray dailyMin = doc["daily"]["temperature_2m_min"].as<JsonArray>();
@@ -461,6 +468,7 @@ static bool doWeather() {
     const float precip = doc["current"]["precipitation"] | 0.0f;
     const int cloud = doc["current"]["cloud_cover"] | -1;
     sh.code = checkCurrentCode(apiCode, precip, cloud);
+    sh.isDay = (doc["current"]["is_day"] | 1) != 0;
     if (sh.code != apiCode)
       Log.printf("Clima: API disse %d (%s), mas nuvens %d%% e %.1f mm -> mostrando %d\n",
                  apiCode, weatherText(apiCode), cloud, precip, sh.code);
@@ -491,6 +499,7 @@ static bool doWeather() {
     sh.hourTemp[j] = hourlyTemp[i] | 0.0f;
     sh.hourCode[j] = hourlyCode[i] | 0;
     sh.hourRain[j] = hourlyRain[i] | 0;
+    sh.hourIsDay[j] = (hourlyIsDay.isNull() ? 1 : (hourlyIsDay[i] | 1)) != 0;
     sh.hourCount++;
   }
   // O card "Agora" deve mostrar o mesmo valor do bloco principal (current),
@@ -498,6 +507,7 @@ static bool doWeather() {
   if (sh.hourCount > 0) {
     sh.hourTemp[0] = sh.temp;
     sh.hourCode[0] = sh.code;
+    sh.hourIsDay[0] = sh.isDay;
   }
   for (int i = 0; i < 7; i++) {
     sh.tmax[i] = doc["daily"]["temperature_2m_max"][i] | 0.0f;
@@ -662,6 +672,7 @@ static const char *cmdName(uint8_t cmd) {
     case CMD_FLIGHT_DETAILS: return "flight-details";
     case CMD_SERVERS: return "servers";
     case CMD_AIRPORT: return "airport";
+    case CMD_SKY: return "sky";
   }
   return "?";
 }
@@ -696,6 +707,7 @@ static void runJob(const NetJob &job) {
       case CMD_FLIGHT_DETAILS: ok = updateFlightRadarDetails(); break;
       case CMD_SERVERS: ok = serversFetch(); break;
       case CMD_AIRPORT: ok = airportFetch(); break;
+      case CMD_SKY: ok = skyFetch(); break;
       default: ran = false; break;
     }
   }
@@ -935,6 +947,12 @@ static lv_obj_t *menuWifiIcon;
 static lv_obj_t *menuServersBadge;
 static lv_obj_t *menuClock;
 static lv_obj_t *menuCalDay, *menuCalWeek;
+static constexpr int MENU_ART_MAX = 32;
+static lv_obj_t *menuArt[MENU_ART_MAX];
+static int menuArtN = 0;
+static lv_obj_t *menuSnapImg = nullptr;
+static lv_draw_buf_t *menuSnap = nullptr;
+static int menuSnapKey = -100;
 lv_obj_t *calendarView;
 int calendarOffset = 0;
 lv_obj_t *calendarTitle;
@@ -957,8 +975,41 @@ void postScreenJob(int cmd) {
   if (xQueueSend(cmdQ, &job, 0) != pdTRUE) gCmdPending[cmd] = false;
 }
 
+// Our fonts (lv_font_weather_14/20) have ASCII, Latin-1, Latin Extended-A, "•" and "€";
+// LVGL's symbols (U+F000..F8FF) come from the Montserrat fallback. Anything else (an em
+// dash, curly quotes from an API, ...) would show as an empty box, so it is replaced.
+static bool glyphOk(uint32_t c) {
+  return c < 0x80 || (c >= 0xA0 && c <= 0x17F) || c == 0x2022 || c == 0x20AC || (c >= 0xF000 && c <= 0xF8FF);
+}
+const char *uiSafeText(const char *in, char *out, size_t n) {
+  const uint8_t *p = (const uint8_t *)in;
+  bool clean = true;
+  for (const uint8_t *q = p; *q; ++q) if (*q >= 0xE0) { clean = false; break; }   // 3/4-byte chars only
+  if (clean || n < 4) return in;
+  size_t o = 0;
+  while (*p && o + 4 < n) {
+    uint32_t c = *p; int len = 1;
+    if (c >= 0xF0 && p[1] && p[2] && p[3]) { c = ((c & 7) << 18) | ((p[1] & 63) << 12) | ((p[2] & 63) << 6) | (p[3] & 63); len = 4; }
+    else if (c >= 0xE0 && p[1] && p[2]) { c = ((c & 15) << 12) | ((p[1] & 63) << 6) | (p[2] & 63); len = 3; }
+    else if (c >= 0xC0 && p[1]) len = 2;
+    if (len < 3 || glyphOk(c)) { memcpy(out + o, p, len); o += len; }
+    else if (c >= 0x2010 && c <= 0x2015) out[o++] = '-';
+    else if (c >= 0x2018 && c <= 0x201B) out[o++] = '\'';
+    else if (c >= 0x201C && c <= 0x201F) out[o++] = '"';
+    else if (c == 0x2026) { memcpy(out + o, "...", 3); o += 3; }
+    else if (c == 0x2039) out[o++] = '<';
+    else if (c == 0x203A) out[o++] = '>';
+    else out[o++] = '?';
+    p += len;
+  }
+  out[o] = 0;
+  return out;
+}
+
 void setLabelIfChanged(lv_obj_t *label, const char *text) {
   if (!label || !text) return;
+  char safe[256];
+  text = uiSafeText(text, safe, sizeof safe);
   const char *current = lv_label_get_text(label);
   if (current && strcmp(current, text) == 0) return;  // avoid needless invalidation/redraw
   lv_label_set_text(label, text);
@@ -970,6 +1021,38 @@ static bool renderedWifiKnown = false;
 
 static void renderWifiIndicator(lv_obj_t *icon, bool up) {
   lv_obj_set_style_text_color(icon, up ? lv_color_hex(0x42D392) : lv_color_hex(0xF07878), 0);
+}
+
+static void refreshMenuSnapshot(int key) {
+  if (!mainMenu) return;
+  menuSnapKey = key;
+  const uint32_t t0 = millis();
+  const bool badge = menuServersBadge && !lv_obj_has_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);
+  const bool wifi = menuWifiIcon && !lv_obj_has_flag(menuWifiIcon, LV_OBJ_FLAG_HIDDEN);
+  if (badge) lv_obj_add_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);
+  if (wifi) lv_obj_add_flag(menuWifiIcon, LV_OBJ_FLAG_HIDDEN);
+  if (menuSnapImg) lv_obj_add_flag(menuSnapImg, LV_OBJ_FLAG_HIDDEN);
+  for (int i = 0; i < menuArtN; ++i) lv_obj_remove_flag(menuArt[i], LV_OBJ_FLAG_HIDDEN);
+  lv_obj_update_layout(mainMenu);
+  lv_draw_buf_t *nb = lv_snapshot_take(mainMenu, LV_COLOR_FORMAT_RGB565);
+  if (nb) {
+    if (!menuSnapImg) {
+      menuSnapImg = lv_image_create(mainMenu);
+      lv_obj_set_pos(menuSnapImg, 0, 0);
+      lv_obj_remove_flag(menuSnapImg, LV_OBJ_FLAG_CLICKABLE);
+      lv_obj_move_background(menuSnapImg);
+    }
+    lv_image_set_src(menuSnapImg, nb);
+    if (menuSnap) lv_draw_buf_destroy(menuSnap);              // image already points to the new one
+    menuSnap = nb;
+    lv_obj_remove_flag(menuSnapImg, LV_OBJ_FLAG_HIDDEN);
+    for (int i = 0; i < menuArtN; ++i) lv_obj_add_flag(menuArt[i], LV_OBJ_FLAG_HIDDEN);
+  } else if (menuSnapImg) {
+    lv_obj_add_flag(menuSnapImg, LV_OBJ_FLAG_HIDDEN);       // no memory: keep the live icons
+  }
+  if (badge) lv_obj_remove_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);
+  if (wifi) lv_obj_remove_flag(menuWifiIcon, LV_OBJ_FLAG_HIDDEN);
+  LogV.printf("Menu: imagem %s em %lums\n", nb ? "gerada" : "FALHOU", (unsigned long)(millis() - t0));
 }
 
 static void renderMenu() {
@@ -990,7 +1073,8 @@ static void renderMenu() {
       static const char *wd[] = {"DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SAB"};
       if (menuCalWeek) setLabelIfChanged(menuCalWeek, wd[ti.tm_wday]);
       if (menuCalDay) { snprintf(b, sizeof b, "%d", ti.tm_mday); setLabelIfChanged(menuCalDay, b); }
-    }
+      if (menuSnapKey != ti.tm_mday) refreshMenuSnapshot(ti.tm_mday);
+    } else if (menuSnapKey == -100) refreshMenuSnapshot(-1);
   }
   if (menuServersBadge) {
     const bool alert = serversAlert();
@@ -1056,6 +1140,7 @@ static void requestFlightRadar() { postScreenJob(CMD_FLIGHT_RADAR); }
 static void requestFlightDetails() { postScreenJob(CMD_FLIGHT_DETAILS); }
 static void requestServers() { postScreenJob(CMD_SERVERS); }
 static void requestAirport() { postScreenJob(CMD_AIRPORT); }
+static void requestSky() { postScreenJob(CMD_SKY); }
 static void requestClockWeather() { postScreenJob(CMD_WEATHER); }   // sky follows the weather
 
 // ---------------------------------------------------------------- screen manager
@@ -1078,6 +1163,8 @@ static const ScreenLifecycle kScreens[] = {
   {SCREEN_AIRPORT, "airport", &airportView, airportOnEnter, airportOnExit, requestAirport, airportRender,
    AIRPORT_UPDATE_INTERVAL_MS, AIRPORT_RETRY_INTERVAL_MS},
   {SCREEN_PHOTOS, "photos", &photosView, photosOnEnter, photosOnExit, nullptr, nullptr, 0, 0},   // no network
+  {SCREEN_SKY, "sky", &skyView, skyOnEnter, skyOnExit, requestSky, skyRender,
+   SKY_UPDATE_INTERVAL_MS, SKY_RETRY_INTERVAL_MS},   // satellites only
 };
 static_assert(sizeof(kScreens) / sizeof(kScreens[0]) == SCREEN_COUNT, "kScreens must list every ScreenID in order");
 
@@ -1598,6 +1685,7 @@ static void showServersEvent(lv_event_t *) { showView(serversView); }
 static void showClockEvent(lv_event_t *) { showView(clockView); }
 static void showAirportEvent(lv_event_t *) { showView(airportView); }
 static void showPhotosEvent(lv_event_t *) { showView(photosView); }
+static void showSkyEvent(lv_event_t *) { showView(skyView); }
 
 // iOS-style app icon: 64 px squircle-ish tile, vertical gradient (lighter on top),
 // 1 px top highlight, soft drop shadow, press = shrink to 92 % + darken.
@@ -1718,6 +1806,12 @@ static void drawAppGlyph(lv_obj_t *box, const char *app, const char *symbol) {
     static const lv_point_precise_t hh[] = {{28, 28}, {17, 21}}, mh[] = {{28, 28}, {44, 17}};
     polyline(face, hh, 2, 4, 0x15171C); polyline(face, mh, 2, 3, 0x15171C);
     blob(face, 25, 25, 6, 6, 0xF49B35);
+  } else if (!strcmp(app, "C\xC3\xA9u")) {          // night sky: stars + crescent moon
+    iconBg(box, 0x0B1638, 0x27407A);
+    static const int st[7][3] = {{10, 12, 3}, {40, 9, 2}, {18, 34, 2}, {44, 40, 3}, {30, 22, 2}, {8, 46, 2}, {50, 24, 2}};
+    for (int k = 0; k < 7; ++k) blob(box, st[k][0], st[k][1], st[k][2], st[k][2], 0xEAF0FF);
+    blob(box, 26, 14, 24, 24, 0xF4E9C0);
+    blob(box, 33, 10, 22, 22, 0x13224C);
   } else if (!strcmp(app, "Fotos")) {                // 8-petal colour flower
     iconBg(box, 0xFFFFFF, 0xF3F4F7);
     static const uint32_t pc[8] = {0xFF9F0A, 0xFFD60A, 0x8FD14F, 0x34C759, 0x32ADE6, 0x5E5CE6, 0xBF5AF2, 0xFF375F};
@@ -1732,6 +1826,17 @@ static void drawAppGlyph(lv_obj_t *box, const char *app, const char *symbol) {
   }
 }
 
+// Menu performance: the icons are ~150 small LVGL objects (gradients, shadows, round
+// blobs). Drawing them every time the menu shows/refreshes is slow, so the whole menu
+// is rendered ONCE into a 480x320 RGB565 picture (lv_snapshot, PSRAM) and shown as a
+// single opaque image; the tiles stay as invisible touch areas on top. The picture is
+// rebuilt only when the calendar icon changes (new day).
+static void tilePressFx(lv_event_t *e) {
+  lv_obj_t *shade = (lv_obj_t *)lv_event_get_user_data(e);
+  if (lv_event_get_code(e) == LV_EVENT_PRESSED) lv_obj_remove_flag(shade, LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_add_flag(shade, LV_OBJ_FLAG_HIDDEN);
+}
+
 static lv_obj_t *menuTile(lv_obj_t *parent, const char *symbol, const char *caption,
                           uint32_t tileColor, lv_event_cb_t callback) {
   lv_obj_t *tile = callback ? lv_button_create(parent) : lv_obj_create(parent);
@@ -1742,16 +1847,6 @@ static lv_obj_t *menuTile(lv_obj_t *parent, const char *symbol, const char *capt
   lv_obj_set_style_shadow_width(tile, 0, 0);
   lv_obj_set_style_pad_all(tile, 0, 0);
   lv_obj_remove_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
-  // press feedback: scale the whole tile around its centre
-  lv_obj_set_style_transform_pivot_x(tile, TILE_W / 2, 0);
-  lv_obj_set_style_transform_pivot_y(tile, ICON / 2, 0);
-  lv_obj_set_style_transform_scale(tile, 236, LV_STATE_PRESSED);
-  static lv_style_transition_dsc_t tr;
-  static const lv_style_prop_t props[] = {LV_STYLE_TRANSFORM_SCALE_X, LV_STYLE_TRANSFORM_SCALE_Y, LV_STYLE_PROP_INV};
-  static bool trInit = false;
-  if (!trInit) { lv_style_transition_dsc_init(&tr, props, lv_anim_path_ease_out, 90, 0, NULL); trInit = true; }
-  lv_obj_set_style_transition(tile, &tr, 0);
-  lv_obj_set_style_transition(tile, &tr, LV_STATE_PRESSED);
   if (callback) lv_obj_add_event_cb(tile, callback, LV_EVENT_CLICKED, NULL);
   else lv_obj_remove_flag(tile, LV_OBJ_FLAG_CLICKABLE);
 
@@ -1775,6 +1870,17 @@ static lv_obj_t *menuTile(lv_obj_t *parent, const char *symbol, const char *capt
   lv_obj_set_style_shadow_color(iconBox, lv_color_hex(0x01040C), 0);
 
   drawAppGlyph(iconBox, caption, symbol);
+  if (menuArtN < MENU_ART_MAX) menuArt[menuArtN++] = iconBox;
+  if (callback) {                                   // press feedback: darken the icon (cheap, no transform layer)
+    lv_obj_t *shade = lv_obj_create(tile);
+    lv_obj_set_size(shade, ICON, ICON); lv_obj_align(shade, LV_ALIGN_TOP_MID, 0, 0); noClickBox(shade);
+    lv_obj_set_style_radius(shade, 17, 0);
+    lv_obj_set_style_bg_color(shade, lv_color_black(), 0); lv_obj_set_style_bg_opa(shade, LV_OPA_40, 0);
+    lv_obj_add_flag(shade, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(tile, tilePressFx, LV_EVENT_PRESSED, shade);
+    lv_obj_add_event_cb(tile, tilePressFx, LV_EVENT_RELEASED, shade);
+    lv_obj_add_event_cb(tile, tilePressFx, LV_EVENT_PRESS_LOST, shade);
+  }
   lv_obj_t *label = lv_label_create(tile);
   lv_label_set_text(label, caption);
   lv_obj_set_width(label, TILE_W);
@@ -1783,6 +1889,7 @@ static lv_obj_t *menuTile(lv_obj_t *parent, const char *symbol, const char *capt
   lv_obj_set_style_text_font(label, &lv_font_weather_14, 0);
   lv_obj_set_style_text_color(label, lv_color_hex(0xF4F7FF), 0);
   lv_obj_align(label, LV_ALIGN_TOP_MID, 0, ICON + 4);
+  if (menuArtN < MENU_ART_MAX) menuArt[menuArtN++] = label;
   return tile;
 }
 
@@ -1828,6 +1935,7 @@ static void build_main_menu(lv_obj_t *menu) {
   menuTile(grid, LV_SYMBOL_TINT, "Clima", 0x078BDD, showWeatherEvent);
   menuTile(grid, LV_SYMBOL_HOME, "Relógio", 0x22252B, showClockEvent);
   menuTile(grid, "", "Aeroporto", 0x0B1A2E, showAirportEvent);
+  menuTile(grid, LV_SYMBOL_EYE_OPEN, "C\xC3\xA9u", 0x1B2C5E, showSkyEvent);
   menuWifiIcon = makeLabel(menu, LV_SYMBOL_WIFI, &lv_font_weather_14, 0xEAF2FF);
   lv_obj_align(menuWifiIcon, LV_ALIGN_TOP_RIGHT, -3, 3);
 }
@@ -1884,6 +1992,7 @@ static void build_ui() {
   buildClockScreen(scr);
   buildAirportScreen(scr);
   buildPhotosScreen(scr);
+  buildSkyScreen(scr);
   flightRadarView = lv_obj_create(scr);
   buildFlightRadarScreen(flightRadarView);
   settingsView = lv_obj_create(scr);

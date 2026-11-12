@@ -35,6 +35,8 @@ struct Shared {
   char hourLabel[8][6] = {{0}};
   float hourTemp[8] = {0};
   int hourCode[8] = {0};
+  bool isDay = true;                  // Open-Meteo is_day for "now"
+  bool hourIsDay[8] = {true, true, true, true, true, true, true, true};
   int hourRain[8] = {0};
   int humidity = 0;
   float wind = 0;
@@ -94,6 +96,7 @@ enum ScreenID : uint8_t {
   SCREEN_CLOCK,
   SCREEN_AIRPORT,
   SCREEN_PHOTOS,
+  SCREEN_SKY,
   SCREEN_COUNT
 };
 
@@ -125,6 +128,8 @@ static constexpr uint32_t SERVERS_RETRY_INTERVAL_MS       = 10UL * 1000UL;
 // ~1.5-3 s job (keep-alive) + 2.5 s = about one update every 5 s.
 static constexpr uint32_t AIRPORT_UPDATE_INTERVAL_MS      = 1000UL;    // ADSB.lol only, almost continuous: ~2 s request + 1 s = ~3 s
 static constexpr uint32_t AIRPORT_RETRY_INTERVAL_MS       = 10000UL;
+static constexpr uint32_t SKY_UPDATE_INTERVAL_MS          = 30UL * 60UL * 1000UL;   // skyFetch skips if < 6 h old
+static constexpr uint32_t SKY_RETRY_INTERVAL_MS           = 3UL * 60UL * 1000UL;
 
 enum Cmd : uint8_t {
   CMD_SCAN, CMD_CONNECT, CMD_GEOCODE,          // context-free commands (Settings / web page)
@@ -132,6 +137,7 @@ enum Cmd : uint8_t {
   CMD_FLIGHT_RADAR, CMD_FLIGHT_DETAILS,        // screen-bound API jobs
   CMD_SERVERS,                                 // Beszel status (Servers screen)
   CMD_AIRPORT,                                 // OSM map + ADSB.lol traffic (Airport screen)
+  CMD_SKY,                                     // CelesTrak satellite elements (Sky screen)
   CMD_COUNT
 };
 
@@ -170,8 +176,9 @@ extern lv_point_t calTouchStart;
 lv_obj_t *makeLabel(lv_obj_t *parent, const char *txt, const lv_font_t *font, uint32_t color);
 lv_obj_t *makeCard(lv_obj_t *parent, int w, int h);
 lv_obj_t *addBackButton(lv_obj_t *parent);
+const char *uiSafeText(const char *in, char *out, size_t n);   // replaces glyphs our fonts lack
 void showView(lv_obj_t *view);
-const char *weatherText(int code);
+const char *weatherText(int code, bool night = false);   // night: "Céu limpo" instead of "Ensolarado"
 bool isRainCode(int code);
 int rainLevel(int code);   // 0 none, 1 garoa, 2 chuva, 3 chuva forte / tempestade
 
@@ -239,5 +246,13 @@ bool photosFsReady();
 bool photoExists(int slot);
 void photoPath(int slot, char *out, size_t n);
 void photosChanged();                                // after an upload/delete on the web page
+
+// ---- Sky screen (sky.cpp): real sky over cfg.lat/lon, 8 directions, computed offline
+extern lv_obj_t *skyView;
+void buildSkyScreen(lv_obj_t *screen);
+void skyOnEnter();
+void skyOnExit();
+void skyRender();
+bool skyFetch();                                     // network task: TLEs, at most every 6 h
 extern volatile uint8_t gTouchCount;                 // fingers on the panel (touch driver)
 extern volatile int16_t gTouch2X, gTouch2Y;          // 2nd finger, landscape coordinates                     // network task: drop the keep-alive TLS session
