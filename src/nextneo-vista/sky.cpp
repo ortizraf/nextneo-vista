@@ -231,7 +231,9 @@ static void drawScene() {
   }
 
   // stars + constellation lines
-  static float sx[SKY_STARS], sy[SKY_STARS], salt[SKY_STARS];
+  static float *sx, *sy, *salt;                          // PSRAM: keep internal RAM for TLS
+  if (!sx) { sx = (float *)heap_caps_malloc(SKY_STARS * 12, MALLOC_CAP_SPIRAM); sy = sx + SKY_STARS; salt = sy + SKY_STARS; }
+  if (!sx) return;
   for (int i = 0; i < SKY_STARS; ++i) {
     const SkyStar &s = kSkyStars[i];
     float a, z; altAz(s.ra * 360.0 / 65535.0, s.dec * 90.0 / 32767.0, lst, lat, a, z);

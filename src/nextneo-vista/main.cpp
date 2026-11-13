@@ -673,6 +673,7 @@ static const char *cmdName(uint8_t cmd) {
     case CMD_SERVERS: return "servers";
     case CMD_AIRPORT: return "airport";
     case CMD_SKY: return "sky";
+    case CMD_F1: return "f1";
   }
   return "?";
 }
@@ -708,6 +709,7 @@ static void runJob(const NetJob &job) {
       case CMD_SERVERS: ok = serversFetch(); break;
       case CMD_AIRPORT: ok = airportFetch(); break;
       case CMD_SKY: ok = skyFetch(); break;
+      case CMD_F1: ok = f1Fetch(); break;
       default: ran = false; break;
     }
   }
@@ -1141,6 +1143,7 @@ static void requestFlightDetails() { postScreenJob(CMD_FLIGHT_DETAILS); }
 static void requestServers() { postScreenJob(CMD_SERVERS); }
 static void requestAirport() { postScreenJob(CMD_AIRPORT); }
 static void requestSky() { postScreenJob(CMD_SKY); }
+static void requestF1() { postScreenJob(CMD_F1); }
 static void requestClockWeather() { postScreenJob(CMD_WEATHER); }   // sky follows the weather
 
 // ---------------------------------------------------------------- screen manager
@@ -1165,6 +1168,8 @@ static const ScreenLifecycle kScreens[] = {
   {SCREEN_PHOTOS, "photos", &photosView, photosOnEnter, photosOnExit, nullptr, nullptr, 0, 0},   // no network
   {SCREEN_SKY, "sky", &skyView, skyOnEnter, skyOnExit, requestSky, skyRender,
    SKY_UPDATE_INTERVAL_MS, SKY_RETRY_INTERVAL_MS},   // satellites only
+  {SCREEN_F1, "f1", &f1View, f1OnEnter, f1OnExit, requestF1, f1Render, F1_UPDATE_INTERVAL_MS, F1_RETRY_INTERVAL_MS},
+  {SCREEN_ART, "art", &artView, artOnEnter, artOnExit, nullptr, nullptr, 0, 0},   // no network
 };
 static_assert(sizeof(kScreens) / sizeof(kScreens[0]) == SCREEN_COUNT, "kScreens must list every ScreenID in order");
 
@@ -1686,6 +1691,8 @@ static void showClockEvent(lv_event_t *) { showView(clockView); }
 static void showAirportEvent(lv_event_t *) { showView(airportView); }
 static void showPhotosEvent(lv_event_t *) { showView(photosView); }
 static void showSkyEvent(lv_event_t *) { showView(skyView); }
+static void showF1Event(lv_event_t *) { showView(f1View); }
+static void showArtEvent(lv_event_t *) { showView(artView); }
 
 // iOS-style app icon: 64 px squircle-ish tile, vertical gradient (lighter on top),
 // 1 px top highlight, soft drop shadow, press = shrink to 92 % + darken.
@@ -1722,7 +1729,15 @@ static void iconBg(lv_obj_t *box, uint32_t top, uint32_t bottom) {
 }
 
 static void drawAppGlyph(lv_obj_t *box, const char *app, const char *symbol) {
-  if (!strcmp(app, "Clima")) {                       // sun behind a cloud
+  if (!strcmp(app, "Arte")) {                        // generative art: glowing waves + particles
+    iconBg(box, 0x0B2A6B, 0x020A24);
+    static const lv_point_precise_t w1[] = {{8, 40}, {18, 30}, {28, 38}, {38, 48}, {48, 40}, {58, 28}, {64, 32}};
+    static const lv_point_precise_t w2[] = {{8, 48}, {18, 42}, {28, 50}, {38, 56}, {48, 50}, {58, 42}, {64, 46}};
+    polyline(box, w2, 7, 3, 0x1E6BFF);
+    polyline(box, w1, 7, 3, 0x38D6F5);
+    blob(box, 16, 14, 5, 5, 0x9FEFFF); blob(box, 34, 18, 4, 4, 0x38D6F5);
+    blob(box, 50, 12, 6, 6, 0x9FEFFF); blob(box, 26, 22, 3, 3, 0x1E90FF);
+  } else if (!strcmp(app, "Clima")) {                       // sun behind a cloud
     iconBg(box, 0x4FB3FF, 0x1A6FE0);
     blob(box, 34, 12, 24, 24, 0xFFD43B);
     blob(box, 14, 34, 22, 22, 0xFFFFFF); blob(box, 26, 26, 26, 26, 0xFFFFFF);
@@ -1812,6 +1827,23 @@ static void drawAppGlyph(lv_obj_t *box, const char *app, const char *symbol) {
     for (int k = 0; k < 7; ++k) blob(box, st[k][0], st[k][1], st[k][2], st[k][2], 0xEAF0FF);
     blob(box, 26, 14, 24, 24, 0xF4E9C0);
     blob(box, 33, 10, 22, 22, 0x13224C);
+  } else if (!strcmp(app, "F1")) {                   // bold italic block "F1" in red + grey speed line
+    iconBg(box, 0xFFFFFF, 0xF1F2F5);
+    struct Bar { lv_point_precise_t a, b; int w; uint32_t c; };
+    static const Bar kBars[] = {
+      {{18, 52}, {28, 16}, 10, 0xE10600},               // F stem
+      {{22, 20}, {48, 20}, 9, 0xE10600},                // F top arm
+      {{18, 35}, {39, 35}, 8, 0xE10600},                // F middle arm
+      {{50, 52}, {60, 16}, 10, 0xE10600},               // 1 stem
+      {{45, 27}, {55, 19}, 6, 0xE10600},                // 1 flag
+      {{9, 58}, {59, 58}, 2, 0xAAAAAF},                 // speed line
+    };
+    for (const auto &bar : kBars) {
+      static lv_point_precise_t pts[sizeof kBars / sizeof kBars[0]][2];
+      const int i = &bar - kBars;
+      pts[i][0] = bar.a; pts[i][1] = bar.b;
+      lv_obj_set_style_line_rounded(polyline(box, pts[i], 2, bar.w, bar.c), false, 0);   // square ends: block letters
+    }
   } else if (!strcmp(app, "Fotos")) {                // 8-petal colour flower
     iconBg(box, 0xFFFFFF, 0xF3F4F7);
     static const uint32_t pc[8] = {0xFF9F0A, 0xFFD60A, 0x8FD14F, 0x34C759, 0x32ADE6, 0x5E5CE6, 0xBF5AF2, 0xFF375F};
@@ -1936,6 +1968,8 @@ static void build_main_menu(lv_obj_t *menu) {
   menuTile(grid, LV_SYMBOL_HOME, "Relógio", 0x22252B, showClockEvent);
   menuTile(grid, "", "Aeroporto", 0x0B1A2E, showAirportEvent);
   menuTile(grid, LV_SYMBOL_EYE_OPEN, "C\xC3\xA9u", 0x1B2C5E, showSkyEvent);
+  menuTile(grid, "", "F1", 0x15171D, showF1Event);
+  menuTile(grid, "", "Arte", 0x07112A, showArtEvent);
   menuWifiIcon = makeLabel(menu, LV_SYMBOL_WIFI, &lv_font_weather_14, 0xEAF2FF);
   lv_obj_align(menuWifiIcon, LV_ALIGN_TOP_RIGHT, -3, 3);
 }
@@ -1993,6 +2027,8 @@ static void build_ui() {
   buildAirportScreen(scr);
   buildPhotosScreen(scr);
   buildSkyScreen(scr);
+  buildF1Screen(scr);
+  buildArtScreen(scr);
   flightRadarView = lv_obj_create(scr);
   buildFlightRadarScreen(flightRadarView);
   settingsView = lv_obj_create(scr);
