@@ -11,6 +11,7 @@ LV_FONT_DECLARE(lv_font_weather_14);
 LV_FONT_DECLARE(lv_font_weather_20);
 
 #define GFX_BL 1
+#define DEVICE_HOSTNAME "nextneovista"   // http://nextneovista.local (mDNS) + DHCP name
 #define SCR_W 480
 #define SCR_H 320
 
@@ -234,6 +235,7 @@ bool normalizeFinanceSymbol(const char *in, char *out, size_t outSize);
 void financeDisplayName(const char *symbol, char *out, size_t outSize);
 const char *currencySymbol(const char *currency);
 void configSyncRadarUi();
+void configSyncCityUi();     // city field = web page text ("Nome @ lat,lon" or geocoded name)
 void weatherOnEnter();
 void updateWeatherScreen();
 

@@ -302,13 +302,13 @@ void updateFinanceScreen() {
     for (int i=0; i<count; ++i) {
       char ageText[20];
       uint32_t quoteEpoch = financeQuoteEpoch[i];
-      if (!fxok[i]) snprintf(ageText, sizeof ageText, "sem cotação");
+      if (!fxok[i]) snprintf(ageText, sizeof ageText, "n/d");   // "sem cotação" wrapped in 72 px and showed only "sem"
       else if (!quoteEpoch || nowEpoch < 1700000000 || nowEpoch < (time_t)quoteEpoch) snprintf(ageText, sizeof ageText, "hora n/d");
       else {
         uint32_t ageSec = (uint32_t)(nowEpoch - (time_t)quoteEpoch);
         if (ageSec < 60) snprintf(ageText, sizeof ageText, "agora");
         else if (ageSec < 3600) snprintf(ageText, sizeof ageText, "há %lum", (unsigned long)(ageSec/60));
-        else if (ageSec < 86400) snprintf(ageText, sizeof ageText, "há %luh%02lum", (unsigned long)(ageSec/3600), (unsigned long)((ageSec%3600)/60));
+        else if (ageSec < 86400) snprintf(ageText, sizeof ageText, "há %luh", (unsigned long)(ageSec/3600));   // short: fits the 72 px label
         else snprintf(ageText, sizeof ageText, "há %lud", (unsigned long)(ageSec/86400));
       }
       setLabelIfChanged(financeAgeLabel[i], ageText);

@@ -60,6 +60,7 @@ static void loadSettings() {
   autoIdx = prefs.getUChar("gaAutoI", 1);
   ambientBl = prefs.getUChar("gaAmbBl", 30);
   // safe limits even if prefs hold garbage
+  if (savedPattern >= engine.patternCount()) savedPattern = 0;   // e.g. a removed pattern
   if (params.speed < 0.25f || params.speed > 2.0f) params.speed = 1.0f;
   if (params.density < 25 || params.density > 100) params.density = 60;
   if (params.palette >= art::PALETTE_COUNT) params.palette = 0;

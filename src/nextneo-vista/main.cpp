@@ -24,7 +24,9 @@ static bool localNow(struct tm *t) {
   return true;
 }
 #include "services/https_fetch.h"
+#include "services/web_auth.h"
 #include <LittleFS.h>
+#include <ESPmDNS.h>
 static const char PHOTOS_PAGE[] PROGMEM = R"HTML(<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NextNeo Vista | Fotos</title>
 <style>*{box-sizing:border-box}body{margin:0;background:#0b1424;color:#d9e4f2;font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:16px}
 main{max-width:560px;margin:0 auto}h1{font-size:22px;margin:0 0 4px}.muted{color:#8fa6c2;font-size:13px}a{color:#7cc4ff}
@@ -1242,6 +1244,7 @@ static void renderWeather() {
 
 static void renderSettings() {
   configSyncRadarUi();
+  configSyncCityUi();
   xSemaphoreTake(mtx, portMAX_DELAY);
   String status = sh.status;
   String list = sh.ssidList;
@@ -1249,7 +1252,8 @@ static void renderSettings() {
   uint32_t scanVersion = sh.scanVersion;
   xSemaphoreGive(mtx);
   setLabelIfChanged(setStatusLbl, status.c_str());
-  String wifiInfo = up ? "Conectado: " + WiFi.SSID() + "  |  IP " + WiFi.localIP().toString()
+  String wifiInfo = up ? "Conectado: " + WiFi.SSID() + "  |  IP " + WiFi.localIP().toString() +
+                           "\nP\xC3\xA1gina: http://" DEVICE_HOSTNAME ".local"
                        : "Desconectado  |  aguardando reconexão";
   setLabelIfChanged(wifiInfoLbl, wifiInfo.c_str());
   if (scanVersion != seenScan) {
@@ -1454,7 +1458,7 @@ button.sec{background:#ffffff1a;color:#edf4ff}small{display:block;margin-top:12p
 <main>
 <div class="card"><h1>NextNeo Vista</h1><div class="muted">Ajustes do aparelho</div>
 <div class="status %NOTICECLASS%">%NOTICE%Wi-Fi: %STATUS%<br>Endereço: http://%IP%</div>
-<a class="btnlink" href="/log">Ver log da aplicação</a></div>
+<a class="btnlink" href="/log">Ver log da aplicação</a><a class="btnlink" href="/logout">Sair</a></div>
 
 <form class="card" method="post" action="/save-display"><h2>Tela (desempenho)</h2>
 <div class="muted">Velocidade do barramento QSPI da tela. Valores maiores deixam as animações mais fluidas; se aparecerem listras ou chiado, volte para 40 MHz. A placa reinicia ao salvar.</div>
@@ -1627,9 +1631,12 @@ tick();</script></html>)HTML";
   configServer.sendContent("");   // end of chunked response
 }
 
+// Every page/action needs a login session (services/web_auth); /login and /logout are open.
+#define WEB_AUTH if (!webAuthCheck(configServer)) { webAuthDeny(configServer); return; }
 static void startConfigServer() {
-  configServer.on("/", HTTP_GET, []() { sendConfigPage(""); });
-  configServer.on("/save-city", HTTP_POST, []() {
+  webAuthBegin(configServer);
+  configServer.on("/", HTTP_GET, []() { WEB_AUTH sendConfigPage(""); });
+  configServer.on("/save-city", HTTP_POST, []() { WEB_AUTH
     String city = configServer.arg("city");
     city.trim();
     cfg.h24 = configServer.hasArg("h24");
@@ -1655,7 +1662,7 @@ static void startConfigServer() {
     }
     sendConfigPage(city.isEmpty() ? "Formato de hora salvo." : "Ajustes salvos; atualizando a previsão.");
   });
-  configServer.on("/save-radar", HTTP_POST, []() {
+  configServer.on("/save-radar", HTTP_POST, []() { WEB_AUTH
     String airport = configServer.arg("airport");
     airport.trim();
     const int radius = configServer.arg("radius").toInt();
@@ -1671,7 +1678,7 @@ static void startConfigServer() {
     else notice = String("Radar salvo: ") + airport + ", " + String(radius) + " km.";
     sendConfigPage(notice);
   });
-  configServer.on("/save-finance", HTTP_POST, []() {
+  configServer.on("/save-finance", HTTP_POST, []() { WEB_AUTH
     FinanceAsset input[FINANCE_MAX_ASSETS];
     uint8_t count = 0;
     String invalid;
@@ -1700,7 +1707,7 @@ static void startConfigServer() {
     if (!invalid.isEmpty()) notice += " Ignorados (caracteres inválidos): " + invalid + ".";
     sendConfigPage(notice);
   });
-  configServer.on("/save-servers", HTTP_POST, []() {
+  configServer.on("/save-servers", HTTP_POST, []() { WEB_AUTH
     String user = configServer.arg("bzuser"); user.trim();
     String pass = configServer.arg("bzpass");
     serversSetCredentials(user.c_str(), pass.c_str());
@@ -1716,7 +1723,7 @@ static void startConfigServer() {
     else notice += " Abra a tela Servers para consultar.";
     sendConfigPage(notice);
   });
-  configServer.on("/save-display", HTTP_POST, []() {
+  configServer.on("/save-display", HTTP_POST, []() { WEB_AUTH
     const int mhz = configServer.arg("qspi").toInt();
     if (mhz == 40 || mhz == 60 || mhz == 80) prefs.putUInt("qspiHz", (uint32_t)mhz * 1000000UL);
     configServer.send(200, "text/html; charset=utf-8",
@@ -1725,10 +1732,10 @@ static void startConfigServer() {
     delay(400);
     ESP.restart();
   });
-  configServer.on("/log", HTTP_GET, []() { sendLogPage(); });
+  configServer.on("/log", HTTP_GET, []() { WEB_AUTH sendLogPage(); });
   // ---- Photos: the page crops/resizes in the browser and sends 480x320 JPEGs
-  configServer.on("/photos", HTTP_GET, []() { configServer.send_P(200, "text/html; charset=utf-8", PHOTOS_PAGE); });
-  configServer.on("/photo", HTTP_GET, []() {
+  configServer.on("/photos", HTTP_GET, []() { WEB_AUTH configServer.send_P(200, "text/html; charset=utf-8", PHOTOS_PAGE); });
+  configServer.on("/photo", HTTP_GET, []() { WEB_AUTH
     const int slot = configServer.arg("slot").toInt();
     char p[24]; photoPath(slot, p, sizeof p);
     if (!photoExists(slot)) { configServer.send(404, "text/plain", ""); return; }
@@ -1737,7 +1744,7 @@ static void startConfigServer() {
     configServer.streamFile(f, "image/jpeg");
     f.close();
   });
-  configServer.on("/photo-delete", HTTP_POST, []() {
+  configServer.on("/photo-delete", HTTP_POST, []() { WEB_AUTH
     const int slot = configServer.arg("slot").toInt();
     char p[24]; photoPath(slot, p, sizeof p);
     if (photoExists(slot)) LittleFS.remove(p);
@@ -1746,7 +1753,7 @@ static void startConfigServer() {
     configServer.send(200, "text/plain", "ok");
   });
   static File photoUp; static bool photoUpOk = false; static size_t photoUpBytes = 0;
-  configServer.on("/photo-upload", HTTP_POST, []() {
+  configServer.on("/photo-upload", HTTP_POST, []() { WEB_AUTH
     const int slot = configServer.arg("slot").toInt();
     char p[24], tmp[28]; photoPath(slot, p, sizeof p); snprintf(tmp, sizeof tmp, "%s.tmp", p);
     if (!photoUpOk) { LittleFS.remove(tmp); configServer.send(500, "text/plain", "sem espaço ou falha ao gravar"); return; }
@@ -1756,6 +1763,7 @@ static void startConfigServer() {
                (unsigned)((LittleFS.totalBytes() - LittleFS.usedBytes()) / 1024));
     configServer.send(200, "text/plain", "ok");
   }, []() {
+    if (!webAuthCheck(configServer)) { photoUpOk = false; return; }   // no session: ignore the data
     HTTPUpload &up = configServer.upload();
     const int slot = configServer.arg("slot").toInt();
     char p[24], tmp[28]; photoPath(slot, p, sizeof p); snprintf(tmp, sizeof tmp, "%s.tmp", p);
@@ -1773,7 +1781,7 @@ static void startConfigServer() {
       if (up.status == UPLOAD_FILE_ABORTED) photoUpOk = false;
     }
   });
-  configServer.on("/log-verbose", HTTP_GET, []() {         // ?on=1 / ?on=0, saved
+  configServer.on("/log-verbose", HTTP_GET, []() { WEB_AUTH         // ?on=1 / ?on=0, saved
     gLogVerbose = configServer.arg("on") == "1";
     prefs.putBool("logVerbose", gLogVerbose);
     Log.printf("Log verbose %s\n", gLogVerbose ? "ativado" : "desativado");
@@ -1783,6 +1791,13 @@ static void startConfigServer() {
   configServer.onNotFound([]() { configServer.send(404, "text/plain; charset=utf-8", "Nao encontrado"); });
   configServer.begin();
   configServerStarted = true;
+  // http://nextneovista.local : the web page without knowing the IP (mDNS / Bonjour).
+  // ESPmDNS follows Wi-Fi reconnects on its own; started once, like the web server.
+  if (MDNS.begin(DEVICE_HOSTNAME)) {
+    MDNS.setInstanceName("NextNeo Vista");     // friendly name in Bonjour/network browsers
+    MDNS.addService("http", "tcp", 80);
+    Log.printf("mDNS: http://%s.local\n", DEVICE_HOSTNAME);
+  } else Log.println("mDNS: falha ao iniciar");
 }
 
 lv_obj_t *makeLabel(lv_obj_t *parent, const char *txt, const lv_font_t *font, uint32_t color) {
@@ -1854,6 +1869,7 @@ static void iconBg(lv_obj_t *box, uint32_t top, uint32_t bottom) {
   lv_obj_set_style_bg_grad_color(box, lv_color_hex(bottom), 0);
 }
 
+LV_IMAGE_DECLARE(icon_financas);
 static void drawAppGlyph(lv_obj_t *box, const char *app, const char *symbol) {
   if (!strcmp(app, "Arte")) {                        // generative art: glowing waves + particles
     iconBg(box, 0x0B2A6B, 0x020A24);
@@ -1868,12 +1884,12 @@ static void drawAppGlyph(lv_obj_t *box, const char *app, const char *symbol) {
     blob(box, 34, 12, 24, 24, 0xFFD43B);
     blob(box, 14, 34, 22, 22, 0xFFFFFF); blob(box, 26, 26, 26, 26, 0xFFFFFF);
     blob(box, 42, 34, 18, 18, 0xFFFFFF); blob(box, 14, 42, 46, 14, 0xFFFFFF, 7);
-  } else if (!strcmp(app, "Finanças")) {             // rising chart
-    iconBg(box, 0x2FD27A, 0x0E9F54);
-    static const lv_point_precise_t up[] = {{14, 52}, {28, 38}, {38, 44}, {56, 22}};
-    static const lv_point_precise_t ah[] = {{46, 22}, {56, 22}, {56, 32}};
-    polyline(box, up, 4, 5, 0xFFFFFF); polyline(box, ah, 3, 5, 0xFFFFFF);
-    blob(box, 12, 56, 48, 3, 0xFFFFFF, 2, LV_OPA_50);
+  } else if (!strcmp(app, "Finanças")) {             // NXTN pixel chart (icon_financas.c)
+    iconBg(box, 0x44484F, 0x14161A);                   // same grey as the picture's corners
+    lv_obj_t *img = lv_image_create(box);
+    lv_image_set_src(img, &icon_financas);
+    lv_obj_align(img, LV_ALIGN_CENTER, 0, 0);            // centred: the 1 px top highlight border shifts the content area
+    lv_obj_remove_flag(img, LV_OBJ_FLAG_CLICKABLE);
   } else if (!strcmp(app, "Servidores")) {           // 3-unit rack with LEDs
     iconBg(box, 0x3A4558, 0x161B24);
     for (int r = 0; r < 3; ++r) {
@@ -2074,7 +2090,7 @@ static void build_main_menu(lv_obj_t *menu) {
   lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
   lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
   lv_obj_remove_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
-  menuTile(grid, "$", "Finanças", 0x0E9F54, showFinanceEvent);
+  menuTile(grid, "$", "Finanças", 0x15171D, showFinanceEvent);
   menuTile(grid, LV_SYMBOL_IMAGE, "Fotos", 0x39B982, showPhotosEvent);
   {
     lv_obj_t *srv = menuTile(grid, LV_SYMBOL_DRIVE, "Servidores", 0x2E3A4C, showServersEvent);
@@ -2232,6 +2248,11 @@ void setup() {
   build_ui();
 
   WiFi.mode(WIFI_STA);
+  WiFi.setHostname(DEVICE_HOSTNAME);            // name shown in the router's client list (DHCP)
+  // Wi-Fi modem sleep off: with power save the radio only wakes on DTIM beacons, so mDNS
+  // queries (nextneovista.local) were answered late or missed and the browser retried for
+  // seconds. Also lowers web page / API latency. Cost: a few tens of mA (screen is on anyway).
+  WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
   String ssid = prefs.getString("ssid", "");
   if (ssid.length()) {
