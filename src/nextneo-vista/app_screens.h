@@ -17,6 +17,7 @@ LV_FONT_DECLARE(lv_font_weather_20);
 // One asset on the Finance screen: Yahoo Finance symbol + optional caption.
 // Examples: USDBRL=X (dólar), EURBRL=X, BTC-USD, AAPL, PETR4.SA, ^BVSP (Ibovespa).
 static constexpr uint8_t FINANCE_MAX_ASSETS = 8;
+static constexpr uint8_t FINANCE_HISTORY = 48;     // card sparkline: whole trading day downsampled
 struct FinanceAsset {
   char symbol[16] = {};
   char label[32] = {};
@@ -54,7 +55,7 @@ struct Shared {
   float finance[FINANCE_MAX_ASSETS] = {};
   float previousFinance[FINANCE_MAX_ASSETS] = {}, financeChange[FINANCE_MAX_ASSETS] = {};
   bool haveChange[FINANCE_MAX_ASSETS] = {};
-  float history[FINANCE_MAX_ASSETS][24] = {};
+  float history[FINANCE_MAX_ASSETS][FINANCE_HISTORY] = {};
   uint8_t historyCount[FINANCE_MAX_ASSETS] = {};
   bool haveFinance[FINANCE_MAX_ASSETS] = {};
   bool financeRefreshing = false;
@@ -143,6 +144,7 @@ enum Cmd : uint8_t {
   CMD_AIRPORT,                                 // OSM map + ADSB.lol traffic (Airport screen)
   CMD_SKY,                                     // CelesTrak satellite elements (Sky screen)
   CMD_F1,                                      // Jolpica calendar/standings + circuit maps (F1 screen)
+  CMD_FINANCE_DETAIL,                          // Yahoo chart of one asset/range (Finance detail, on demand)
   CMD_COUNT
 };
 
@@ -172,7 +174,7 @@ extern lv_obj_t *ddSsid, *taPass, *taCity, *kb, *setStatusLbl, *wifiInfoLbl, *sw
 extern lv_obj_t *financeStrip, *financeStatusLabel, *financeAgeLabel[FINANCE_MAX_ASSETS], *financeValue[FINANCE_MAX_ASSETS];
 extern lv_obj_t *financeDelta[FINANCE_MAX_ASSETS], *financePlot[FINANCE_MAX_ASSETS], *financeLine[FINANCE_MAX_ASSETS];
 extern lv_obj_t *financeHeader[FINANCE_MAX_ASSETS], *financeCard[FINANCE_MAX_ASSETS];
-extern lv_point_precise_t financeLinePoints[FINANCE_MAX_ASSETS][24];
+extern lv_point_precise_t financeLinePoints[FINANCE_MAX_ASSETS][FINANCE_HISTORY];
 extern volatile int8_t financeSingleIndex;   // asset refreshed by CMD_FINANCE_ONE
 extern lv_obj_t *calendarTitle, *calendarGrid;
 extern int calendarOffset;
@@ -196,6 +198,34 @@ void drawCalendar();
 void calendarOnEnter();
 void calendarRequestUpdate();
 void financeOnEnter();
+void financeOnExit();
+
+// ---- Finance detail (long press on a card). UI writes financeDetailWant, the network
+// task answers in financeDetail (both under mtx). Only fetched while Finance is active.
+static constexpr uint8_t FIN_RANGES = 5;              // 1D 5D 1M 6M 1A
+static constexpr int FIN_DETAIL_POINTS = 120;
+enum FinMarketState : uint8_t { FIN_MKT_UNKNOWN = 0, FIN_MKT_OPEN, FIN_MKT_CLOSED, FIN_MKT_PRE, FIN_MKT_POST, FIN_MKT_24H };
+struct FinanceDetailRequest {
+  char symbol[16] = {};
+  uint8_t range = 0;
+};
+struct FinanceDetail {
+  char symbol[16] = {};
+  uint8_t range = 0;
+  bool ok = false;                 // false: request answered but no data (error / blocked)
+  uint32_t version = 0;
+  uint32_t fetchedMs = 0;
+  float price = 0, open = NAN, dayHigh = NAN, dayLow = NAN, wk52High = NAN, wk52Low = NAN;
+  float rangeRef = NAN;            // close before the range start (period change baseline)
+  float periodHigh = 0, periodLow = 0;
+  float series[FIN_DETAIL_POINTS] = {};
+  uint8_t count = 0;
+  uint32_t t0 = 0, t1 = 0;         // first / last candle (epoch)
+  uint8_t market = FIN_MKT_UNKNOWN;
+  char currency[4] = {};
+};
+extern FinanceDetail financeDetail;
+extern FinanceDetailRequest financeDetailWant;
 void updateFinanceScreen();
 // Finance asset list (finance_assets.cpp). UI thread / web handler.
 void loadFinanceAssets();

@@ -182,14 +182,37 @@ struct Quote {
   bool ok = false;
   float price = 0, changePct = 0, previousClose = 0;
   uint32_t epoch = 0;
-  float series[24] = {};
+  float series[FINANCE_HISTORY] = {};
   uint8_t count = 0;
   char currency[4] = {};
 };
 
 static void appendPoint(Quote &q, float x) {
-  if (q.count < 24) q.series[q.count++] = x;
-  else { memmove(q.series, q.series + 1, sizeof(float) * 23); q.series[23] = x; }
+  if (q.count < FINANCE_HISTORY) q.series[q.count++] = x;
+  else { memmove(q.series, q.series + 1, sizeof(float) * (FINANCE_HISTORY - 1)); q.series[FINANCE_HISTORY - 1] = x; }
+}
+
+// Evenly picks up to `maxOut` of the valid (> 0) values of a Yahoo close[] array, always
+// keeping the first and the last one, so a sparkline covers the whole period instead of
+// only its last candles. Returns how many were written. min/max (optional) see every value.
+static int downsampleCloses(JsonArrayConst arr, float *out, int maxOut, float *lo = nullptr, float *hi = nullptr) {
+  int n = 0;
+  for (JsonVariantConst v : arr) if ((v | 0.0f) > 0) ++n;
+  if (!n) return 0;
+  const int m = n < maxOut ? n : maxOut;
+  int k = 0, j = 0, next = 0, written = 0;
+  for (JsonVariantConst v : arr) {
+    const float x = v | 0.0f;
+    if (x <= 0) continue;
+    if (lo && (k == 0 || x < *lo)) *lo = x;
+    if (hi && (k == 0 || x > *hi)) *hi = x;
+    if (j < m && k == next) {
+      out[written++] = x; ++j;
+      next = m > 1 ? (int)((int64_t)j * (n - 1) / (m - 1)) : n;
+    }
+    ++k;
+  }
+  return written;
 }
 
 // Parses {meta:{...}, indicators:{quote:[{close:[...]}]}} (same shape in chart and spark).
@@ -201,11 +224,7 @@ static bool parseYahooResult(JsonVariantConst result, Quote &q) {
   if (p <= 0 || !isfinite(p)) return false;
   if (!isfinite(pct) && prev > 0) pct = (p - prev) * 100.0f / prev;
   if (!isfinite(pct)) pct = 0;
-  q.count = 0;
-  for (JsonVariantConst v : result["indicators"]["quote"][0]["close"].as<JsonArrayConst>()) {
-    const float x = v | 0.0f;
-    if (x > 0) appendPoint(q, x);
-  }
+  q.count = (uint8_t)downsampleCloses(result["indicators"]["quote"][0]["close"].as<JsonArrayConst>(), q.series, FINANCE_HISTORY);
   // Yahoo may stop returning intraday candles before the current quote time
   // (e.g. outside FX trading hours): append the current quote so the line
   // does not visually stop at the last historical candle.
@@ -343,6 +362,110 @@ static bool doFinance(int onlyIndex) {
   for (uint8_t i = 0; i < FINANCE_MAX_ASSETS; ++i) { retryAfter = max(retryAfter, financeRetryAfterMs[i]); financeRetryAfterMs[i] = 0; }
   if (retryAfter) financeBlockedUntilMs = millis() + retryAfter;
   return anySuccess;
+}
+
+// ---------------------------------------------------------------- Finance detail (on demand)
+FinanceDetail financeDetail;                  // network task -> UI (mtx)
+FinanceDetailRequest financeDetailWant;       // UI -> network task (mtx)
+static const char *const kFinRange[FIN_RANGES][2] = {{"1d", "5m"}, {"5d", "15m"}, {"1mo", "1d"}, {"6mo", "1d"}, {"1y", "1d"}};
+static const uint32_t kFinRangeTtlMs[FIN_RANGES] = {60000UL, 300000UL, 1800000UL, 3600000UL, 3600000UL};
+
+static bool parseFinanceDetail(JsonVariantConst r, uint8_t range, FinanceDetail &d) {
+  JsonObjectConst meta = r["meta"];
+  const float p = meta["regularMarketPrice"] | 0.0f;
+  if (p <= 0 || !isfinite(p)) return false;
+  d.price = p;
+  d.dayHigh = meta["regularMarketDayHigh"] | NAN;
+  d.dayLow = meta["regularMarketDayLow"] | NAN;
+  d.wk52High = meta["fiftyTwoWeekHigh"] | NAN;
+  d.wk52Low = meta["fiftyTwoWeekLow"] | NAN;
+  d.rangeRef = meta["chartPreviousClose"] | NAN;
+  snprintf(d.currency, sizeof d.currency, "%s", (const char *)(meta["currency"] | ""));
+  JsonVariantConst quote = r["indicators"]["quote"][0];
+  float lo = 0, hi = 0;
+  d.count = (uint8_t)downsampleCloses(quote["close"].as<JsonArrayConst>(), d.series, FIN_DETAIL_POINTS, &lo, &hi);
+  if (d.count && fabsf(d.series[d.count - 1] - p) > 0.0001f) {        // line ends at the live quote
+    if (d.count < FIN_DETAIL_POINTS) d.series[d.count++] = p; else d.series[d.count - 1] = p;
+    if (p < lo) lo = p;
+    if (p > hi) hi = p;
+  }
+  if (!d.count) { d.series[0] = p; d.count = 1; lo = hi = p; }
+  d.periodLow = lo; d.periodHigh = hi;
+  d.open = NAN;
+  if (range == 0) for (JsonVariantConst v : quote["open"].as<JsonArrayConst>()) { const float x = v | 0.0f; if (x > 0) { d.open = x; break; } }
+  JsonArrayConst ts = r["timestamp"].as<JsonArrayConst>();
+  d.t0 = ts.size() ? (uint32_t)(ts[0] | 0UL) : 0;
+  d.t1 = ts.size() ? (uint32_t)(ts[ts.size() - 1] | 0UL) : 0;
+  const char *type = meta["instrumentType"] | "";
+  const time_t now = time(nullptr);
+  d.market = FIN_MKT_UNKNOWN;
+  if (!strcmp(type, "CRYPTOCURRENCY")) d.market = FIN_MKT_24H;
+  else if (now > 1700000000) {
+    JsonObjectConst tp = meta["currentTradingPeriod"];
+    auto in = [&](const char *k) {
+      const long a = tp[k]["start"] | 0L, b = tp[k]["end"] | 0L;
+      return a && b && now >= a && now < b;
+    };
+    if (!tp.isNull()) d.market = in("regular") ? FIN_MKT_OPEN : in("pre") ? FIN_MKT_PRE : in("post") ? FIN_MKT_POST : FIN_MKT_CLOSED;
+  }
+  return true;
+}
+
+// Network task only. Answers financeDetailWant: from a small per-range cache (same
+// symbol) when fresh enough, otherwise one chart request on the Finance keep-alive
+// session. Always publishes an answer for the wanted symbol/range (data or failure),
+// so the UI never re-posts in a loop.
+static bool doFinanceDetail() {
+  FinanceDetailRequest want;
+  xSemaphoreTake(mtx, portMAX_DELAY); want = financeDetailWant; xSemaphoreGive(mtx);
+  if (!want.symbol[0] || want.range >= FIN_RANGES) return false;
+  static FinanceDetail *cache = nullptr;                 // FIN_RANGES entries, PSRAM, allocated once
+  static FinanceDetail *work = nullptr;
+  static char cacheSymbol[16] = "";
+  if (!cache) cache = (FinanceDetail *)psramCalloc(FIN_RANGES + 1, sizeof(FinanceDetail));
+  if (!cache) return false;
+  work = cache + FIN_RANGES;
+  if (strcmp(cacheSymbol, want.symbol)) {
+    for (int i = 0; i < FIN_RANGES; ++i) { cache[i].ok = false; cache[i].fetchedMs = 0; }
+    snprintf(cacheSymbol, sizeof cacheSymbol, "%s", want.symbol);
+  }
+  FinanceDetail &e = cache[want.range];
+  bool ok = e.ok && millis() - e.fetchedMs < kFinRangeTtlMs[want.range];
+  if (!ok && WiFi.status() == WL_CONNECTED && (int32_t)(millis() - financeBlockedUntilMs) >= 0) {
+    String url = String("https://query1.finance.yahoo.com/v8/finance/chart/") + yahooSymbolParam(want.symbol) +
+                 "?range=" + kFinRange[want.range][0] + "&interval=" + kFinRange[want.range][1] +
+                 "&includePrePost=false&nocache=" + String(millis());
+    uint32_t retryAfterMs = 0;
+    if (financeGetWithRetry(url, "detalhe", retryAfterMs, 12000)) {
+      JsonDocument filter(SpiRamJsonAllocator::instance());
+      JsonObject f = filter["chart"]["result"].add<JsonObject>();
+      f["meta"] = true; f["timestamp"] = true;
+      f["indicators"]["quote"].add<JsonObject>()["close"] = true;
+      f["indicators"]["quote"][0]["open"] = true;
+      JsonDocument doc(SpiRamJsonAllocator::instance());
+      if (!deserializeJson(doc, financeBody.c_str(), financeBody.length(), DeserializationOption::Filter(filter))) {
+        *work = FinanceDetail();
+        if (parseFinanceDetail(doc["chart"]["result"][0], want.range, *work)) {
+          if (want.range && cache[0].ok) work->open = cache[0].open;   // day open comes from the 1D data
+          snprintf(work->symbol, sizeof work->symbol, "%s", want.symbol);
+          work->range = want.range; work->ok = true; work->fetchedMs = millis();
+          e = *work;
+          ok = true;
+        } else Log.printf("Finance detalhe %s: sem dados\n", want.symbol);
+      } else Log.printf("Finance detalhe %s: JSON inválido\n", want.symbol);
+    }
+    if (retryAfterMs) financeBlockedUntilMs = millis() + retryAfterMs;
+  }
+  if (!screenJobStillCurrent()) return false;
+  xSemaphoreTake(mtx, portMAX_DELAY);
+  const uint32_t v = financeDetail.version + 1;
+  if (ok) financeDetail = e;
+  else { financeDetail = FinanceDetail(); financeDetail.ok = false; }
+  snprintf(financeDetail.symbol, sizeof financeDetail.symbol, "%s", want.symbol);
+  financeDetail.range = want.range;
+  financeDetail.version = v;
+  xSemaphoreGive(mtx);
+  return ok;
 }
 
 static String urlEncode(const String &s) {
@@ -674,6 +797,7 @@ static const char *cmdName(uint8_t cmd) {
     case CMD_AIRPORT: return "airport";
     case CMD_SKY: return "sky";
     case CMD_F1: return "f1";
+    case CMD_FINANCE_DETAIL: return "finance-detail";
   }
   return "?";
 }
@@ -710,6 +834,7 @@ static void runJob(const NetJob &job) {
       case CMD_AIRPORT: ok = airportFetch(); break;
       case CMD_SKY: ok = skyFetch(); break;
       case CMD_F1: ok = f1Fetch(); break;
+      case CMD_FINANCE_DETAIL: ok = doFinanceDetail(); break;
       default: ran = false; break;
     }
   }
@@ -717,7 +842,8 @@ static void runJob(const NetJob &job) {
     if (!ran) {
       LogV.printf("[net] %s descartado (tela inativa)\n", cmdName(job.cmd));
     } else if (screenJobStillCurrent()) {
-      gJobOutcome[job.screen] = ok ? JOB_OK : JOB_FAILED;
+      // the on-demand detail must not move the screen's periodic refresh timer
+      if (job.cmd != CMD_FINANCE_DETAIL) gJobOutcome[job.screen] = ok ? JOB_OK : JOB_FAILED;
       (ok ? LogV : Log).printf("[net] %s %s em %lums (interno livre %u, maior bloco %u)\n", cmdName(job.cmd),
                     ok ? "ok" : "falhou", (unsigned long)(millis() - started),
                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -944,7 +1070,7 @@ lv_obj_t *ddSsid, *taPass, *taCity, *kb, *setStatusLbl, *wifiInfoLbl, *swH24;
 lv_obj_t *mainMenu, *weatherView, *settingsView, *weatherTabs;
 lv_obj_t *financeView, *financeStrip, *financeStatusLabel, *financeAgeLabel[FINANCE_MAX_ASSETS], *financeValue[FINANCE_MAX_ASSETS], *financeDelta[FINANCE_MAX_ASSETS], *financePlot[FINANCE_MAX_ASSETS], *financeLine[FINANCE_MAX_ASSETS], *financeHeader[FINANCE_MAX_ASSETS], *financeCard[FINANCE_MAX_ASSETS];
 lv_obj_t *flightRadarView;
-lv_point_precise_t financeLinePoints[FINANCE_MAX_ASSETS][24] = {};
+lv_point_precise_t financeLinePoints[FINANCE_MAX_ASSETS][FINANCE_HISTORY] = {};
 static lv_obj_t *menuWifiIcon;
 static lv_obj_t *menuServersBadge;
 static lv_obj_t *menuClock;
@@ -1152,7 +1278,7 @@ static const ScreenLifecycle kScreens[] = {
   {SCREEN_MENU, "menu", &mainMenu, nullptr, nullptr, nullptr, renderMenu, 0, 0},
   {SCREEN_WEATHER, "weather", &weatherView, weatherOnEnter, nullptr, requestWeather, renderWeather,
    WEATHER_UPDATE_INTERVAL_MS, WEATHER_RETRY_INTERVAL_MS},
-  {SCREEN_FINANCE, "finance", &financeView, financeOnEnter, nullptr, requestFinance, updateFinanceScreen,
+  {SCREEN_FINANCE, "finance", &financeView, financeOnEnter, financeOnExit, requestFinance, updateFinanceScreen,
    FINANCE_UPDATE_INTERVAL_MS, FINANCE_RETRY_INTERVAL_MS},
   {SCREEN_CALENDARIO, "calendario", &calendarView, calendarOnEnter, nullptr, calendarRequestUpdate, nullptr,
    CALENDARIO_UPDATE_INTERVAL_MS, CALENDARIO_UPDATE_INTERVAL_MS},
