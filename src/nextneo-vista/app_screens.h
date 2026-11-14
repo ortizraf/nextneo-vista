@@ -101,6 +101,7 @@ enum ScreenID : uint8_t {
   SCREEN_SKY,
   SCREEN_F1,
   SCREEN_ART,
+  SCREEN_FOOTBALL,
   SCREEN_COUNT
 };
 
@@ -136,6 +137,9 @@ static constexpr uint32_t SKY_UPDATE_INTERVAL_MS          = 30UL * 60UL * 1000UL
 static constexpr uint32_t SKY_RETRY_INTERVAL_MS           = 3UL * 60UL * 1000UL;
 static constexpr uint32_t F1_UPDATE_INTERVAL_MS           = 15UL * 60UL * 1000UL;  // f1Fetch skips fresh data
 static constexpr uint32_t F1_RETRY_INTERVAL_MS            = 2UL * 60UL * 1000UL;
+// Futebol: the job runs often and fetches only what is stale (live leagues ~40 s, others 10 min)
+static constexpr uint32_t FOOTBALL_UPDATE_INTERVAL_MS     = 20UL * 1000UL;
+static constexpr uint32_t FOOTBALL_RETRY_INTERVAL_MS      = 30UL * 1000UL;
 
 enum Cmd : uint8_t {
   CMD_SCAN, CMD_CONNECT, CMD_GEOCODE,          // context-free commands (Settings / web page)
@@ -145,6 +149,7 @@ enum Cmd : uint8_t {
   CMD_AIRPORT,                                 // OSM map + ADSB.lol traffic (Airport screen)
   CMD_SKY,                                     // CelesTrak satellite elements (Sky screen)
   CMD_F1,                                      // Jolpica calendar/standings + circuit maps (F1 screen)
+  CMD_FOOTBALL,                                // ESPN scores/table/crests (Futebol screen)
   CMD_FINANCE_DETAIL,                          // Yahoo chart of one asset/range (Finance detail, on demand)
   CMD_COUNT
 };
@@ -304,6 +309,17 @@ extern lv_obj_t *artView;
 void buildArtScreen(lv_obj_t *screen);
 void artOnEnter();
 void artOnExit();
-void artSetAmbient(bool on);                         // manual today; hook for a future idle manager
+void artSetAmbient(bool on);
+
+// ---- Futebol screen (football.cpp): ESPN public API, only while the screen is active
+extern lv_obj_t *footballView;
+void buildFootballScreen(lv_obj_t *screen);
+void footballOnEnter();
+void footballOnExit();
+void footballRender();
+bool footballFetch();                                // network task
+void footballReleaseConnection();                    // network task: drop the keep-alive TLS session
+void footballSetFavorites(const char *list);         // "FLA,PAL" (ESPN abbreviations)
+String footballFavorites();                         // manual today; hook for a future idle manager
 extern volatile uint8_t gTouchCount;                 // fingers on the panel (touch driver)
 extern volatile int16_t gTouch2X, gTouch2Y;          // 2nd finger, landscape coordinates                     // network task: drop the keep-alive TLS session

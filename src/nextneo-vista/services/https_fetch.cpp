@@ -22,6 +22,7 @@ int httpsFetch(WiFiClientSecure &client, const char *url, PsramBuffer &body,
   http.setReuse(reuse);
   http.useHTTP10(false);
   http.setUserAgent(options.userAgent);
+  if (options.followRedirects) http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   if (!http.begin(client, url)) return HTTPC_ERROR_CONNECTION_REFUSED;
   const char *responseHeaders[] = {"Retry-After"};
   if (options.retryAfterSeconds) { *options.retryAfterSeconds = 0; http.collectHeaders(responseHeaders, 1); }

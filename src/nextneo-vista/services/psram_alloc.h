@@ -44,6 +44,7 @@ class PsramBuffer : public Stream {
   explicit PsramBuffer(size_t maxBytes) : max_(maxBytes) {}
   ~PsramBuffer() { if (data_) heap_caps_free(data_); }
   void clear() { len_ = 0; overflow_ = false; }
+  void release() { if (data_) heap_caps_free(data_); data_ = nullptr; cap_ = len_ = 0; overflow_ = false; }   // give the memory back
   bool reserve(size_t bytes) {
     if (bytes <= cap_) return true;
     if (bytes > max_) bytes = max_;

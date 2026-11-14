@@ -14,6 +14,7 @@ struct HttpsFetchOptions {
   const char *userAgent = "NextNeoVista/1.0 (ESP32-S3)";
   bool noCache = false;                 // adds Cache-Control/Pragma: no-cache
   uint32_t *retryAfterSeconds = nullptr; // filled from Retry-After (429/503)
+  bool followRedirects = false;         // e.g. image CDNs that answer with a 301/302
 };
 
 int httpsFetch(WiFiClientSecure &client, const char *url, PsramBuffer &body,

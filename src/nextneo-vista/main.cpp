@@ -803,6 +803,7 @@ static const char *cmdName(uint8_t cmd) {
     case CMD_SKY: return "sky";
     case CMD_F1: return "f1";
     case CMD_FINANCE_DETAIL: return "finance-detail";
+    case CMD_FOOTBALL: return "football";
   }
   return "?";
 }
@@ -840,6 +841,7 @@ static void runJob(const NetJob &job) {
       case CMD_SKY: ok = skyFetch(); break;
       case CMD_F1: ok = f1Fetch(); break;
       case CMD_FINANCE_DETAIL: ok = doFinanceDetail(); break;
+      case CMD_FOOTBALL: ok = footballFetch(); break;
       default: ran = false; break;
     }
   }
@@ -876,6 +878,7 @@ static void workerTask(void *) {
     if (gActiveScreen != SCREEN_FLIGHT_RADAR && gActiveScreen != SCREEN_AIRPORT) adsbLolReleaseConnection();
     if (gActiveScreen != SCREEN_AIRPORT) airportReleaseConnection();
     if (gActiveScreen != SCREEN_FINANCE) financeReleaseConnection();
+    if (gActiveScreen != SCREEN_FOOTBALL) footballReleaseConnection();
 
     const bool up = WiFi.status() == WL_CONNECTED;
     const uint32_t now = millis();
@@ -1082,10 +1085,25 @@ static lv_obj_t *menuClock;
 static lv_obj_t *menuCalDay, *menuCalWeek;
 static constexpr int MENU_ART_MAX = 32;
 static lv_obj_t *menuArt[MENU_ART_MAX];
+static uint8_t menuArtPage[MENU_ART_MAX];
 static int menuArtN = 0;
-static lv_obj_t *menuSnapImg = nullptr;
-static lv_draw_buf_t *menuSnap = nullptr;
 static int menuSnapKey = -100;
+// Menu pages: page 0 = the original 12 apps, page 1 = new apps (Futebol, ...).
+// Each page is its own 480x320 object, rendered once into its own picture; a long
+// horizontal swipe (MENU_PAGE_SWIPE_PCT of the width) moves the strip between pages.
+static constexpr int MENU_PAGES = 2;
+static constexpr int MENU_PAGE_SWIPE_PCT = 30;        // drag at least 30 % of the width to change page
+static constexpr int MENU_DRAG_START_PX = 10;         // beyond this the touch is a drag, never a tap
+static constexpr uint32_t MENU_TAP_BLOCK_MS = 300;    // icons ignore taps right after a page change
+static lv_obj_t *menuStrip, *menuPage[MENU_PAGES], *menuDot[MENU_PAGES];
+static lv_obj_t *menuSnapImg[MENU_PAGES];
+static lv_draw_buf_t *menuSnap[MENU_PAGES];
+static int menuBuildPage = 0, menuCurPage = 0;
+static bool menuSwDown = false, menuSwDrag = false, menuSwMoved = false;
+static lv_point_t menuSwStart;
+static int32_t menuSwDx = 0;
+static uint32_t menuSwipeEndMs = 0;
+static lv_timer_t *menuSwipeTimer = nullptr;
 lv_obj_t *calendarView;
 int calendarOffset = 0;
 lv_obj_t *calendarTitle;
@@ -1157,35 +1175,33 @@ static void renderWifiIndicator(lv_obj_t *icon, bool up) {
 }
 
 static void refreshMenuSnapshot(int key) {
-  if (!mainMenu) return;
+  if (!mainMenu || !menuPage[0]) return;
   menuSnapKey = key;
   const uint32_t t0 = millis();
   const bool badge = menuServersBadge && !lv_obj_has_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);
-  const bool wifi = menuWifiIcon && !lv_obj_has_flag(menuWifiIcon, LV_OBJ_FLAG_HIDDEN);
-  if (badge) lv_obj_add_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);
-  if (wifi) lv_obj_add_flag(menuWifiIcon, LV_OBJ_FLAG_HIDDEN);
-  if (menuSnapImg) lv_obj_add_flag(menuSnapImg, LV_OBJ_FLAG_HIDDEN);
-  for (int i = 0; i < menuArtN; ++i) lv_obj_remove_flag(menuArt[i], LV_OBJ_FLAG_HIDDEN);
-  lv_obj_update_layout(mainMenu);
-  lv_draw_buf_t *nb = lv_snapshot_take(mainMenu, LV_COLOR_FORMAT_RGB565);
-  if (nb) {
-    if (!menuSnapImg) {
-      menuSnapImg = lv_image_create(mainMenu);
-      lv_obj_set_pos(menuSnapImg, 0, 0);
-      lv_obj_remove_flag(menuSnapImg, LV_OBJ_FLAG_CLICKABLE);
-      lv_obj_move_background(menuSnapImg);
-    }
-    lv_image_set_src(menuSnapImg, nb);
-    if (menuSnap) lv_draw_buf_destroy(menuSnap);              // image already points to the new one
-    menuSnap = nb;
-    lv_obj_remove_flag(menuSnapImg, LV_OBJ_FLAG_HIDDEN);
-    for (int i = 0; i < menuArtN; ++i) lv_obj_add_flag(menuArt[i], LV_OBJ_FLAG_HIDDEN);
-  } else if (menuSnapImg) {
-    lv_obj_add_flag(menuSnapImg, LV_OBJ_FLAG_HIDDEN);       // no memory: keep the live icons
+  if (badge) lv_obj_add_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);   // live overlay, not baked in
+  bool allOk = true;
+  for (int p = 0; p < MENU_PAGES; ++p) {
+    if (menuSnapImg[p]) lv_obj_add_flag(menuSnapImg[p], LV_OBJ_FLAG_HIDDEN);
+    for (int i = 0; i < menuArtN; ++i) if (menuArtPage[i] == p) lv_obj_remove_flag(menuArt[i], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_update_layout(menuPage[p]);
+    lv_draw_buf_t *nb = lv_snapshot_take(menuPage[p], LV_COLOR_FORMAT_RGB565);
+    if (nb) {
+      if (!menuSnapImg[p]) {
+        menuSnapImg[p] = lv_image_create(menuPage[p]);
+        lv_obj_set_pos(menuSnapImg[p], 0, 0);
+        lv_obj_remove_flag(menuSnapImg[p], LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_move_background(menuSnapImg[p]);
+      }
+      lv_image_set_src(menuSnapImg[p], nb);
+      if (menuSnap[p]) lv_draw_buf_destroy(menuSnap[p]);      // image already points to the new one
+      menuSnap[p] = nb;
+      lv_obj_remove_flag(menuSnapImg[p], LV_OBJ_FLAG_HIDDEN);
+      for (int i = 0; i < menuArtN; ++i) if (menuArtPage[i] == p) lv_obj_add_flag(menuArt[i], LV_OBJ_FLAG_HIDDEN);
+    } else allOk = false;                                       // no memory: keep that page's live icons
   }
   if (badge) lv_obj_remove_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);
-  if (wifi) lv_obj_remove_flag(menuWifiIcon, LV_OBJ_FLAG_HIDDEN);
-  LogV.printf("Menu: imagem %s em %lums\n", nb ? "gerada" : "FALHOU", (unsigned long)(millis() - t0));
+  LogV.printf("Menu: imagens %s em %lums\n", allOk ? "geradas" : "FALHARAM", (unsigned long)(millis() - t0));
 }
 
 static void renderMenu() {
@@ -1277,12 +1293,15 @@ static void requestServers() { postScreenJob(CMD_SERVERS); }
 static void requestAirport() { postScreenJob(CMD_AIRPORT); }
 static void requestSky() { postScreenJob(CMD_SKY); }
 static void requestF1() { postScreenJob(CMD_F1); }
+static void requestFootball() { postScreenJob(CMD_FOOTBALL); }
+static void menuOnEnter();
+static void menuOnExit();
 static void requestClockWeather() { postScreenJob(CMD_WEATHER); }   // sky follows the weather
 
 // ---------------------------------------------------------------- screen manager
 static const ScreenLifecycle kScreens[] = {
   {SCREEN_NONE, "none", nullptr, nullptr, nullptr, nullptr, nullptr, 0, 0},
-  {SCREEN_MENU, "menu", &mainMenu, nullptr, nullptr, nullptr, renderMenu, 0, 0},
+  {SCREEN_MENU, "menu", &mainMenu, menuOnEnter, menuOnExit, nullptr, renderMenu, 0, 0},
   {SCREEN_WEATHER, "weather", &weatherView, weatherOnEnter, nullptr, requestWeather, renderWeather,
    WEATHER_UPDATE_INTERVAL_MS, WEATHER_RETRY_INTERVAL_MS},
   {SCREEN_FINANCE, "finance", &financeView, financeOnEnter, financeOnExit, requestFinance, updateFinanceScreen,
@@ -1303,6 +1322,8 @@ static const ScreenLifecycle kScreens[] = {
    SKY_UPDATE_INTERVAL_MS, SKY_RETRY_INTERVAL_MS},   // satellites only
   {SCREEN_F1, "f1", &f1View, f1OnEnter, f1OnExit, requestF1, f1Render, F1_UPDATE_INTERVAL_MS, F1_RETRY_INTERVAL_MS},
   {SCREEN_ART, "art", &artView, artOnEnter, artOnExit, nullptr, nullptr, 0, 0},   // no network
+  {SCREEN_FOOTBALL, "football", &footballView, footballOnEnter, footballOnExit, requestFootball, footballRender,
+   FOOTBALL_UPDATE_INTERVAL_MS, FOOTBALL_RETRY_INTERVAL_MS},
 };
 static_assert(sizeof(kScreens) / sizeof(kScreens[0]) == SCREEN_COUNT, "kScreens must list every ScreenID in order");
 
@@ -1463,6 +1484,11 @@ button.sec{background:#ffffff1a;color:#edf4ff}small{display:block;margin-top:12p
 <div class="status %NOTICECLASS%">%NOTICE%Wi-Fi: %STATUS%<br>Endereço: http://%IP%</div>
 <a class="btnlink" href="/log">Ver log da aplicação</a><a class="btnlink" href="/logout">Sair</a></div>
 
+<form class="card" method="post" action="/save-football" accept-charset="UTF-8"><h2>Futebol</h2>
+<div class="muted">Times favoritos ficam em destaque e sempre no topo da aba Ao vivo. Use a sigla da ESPN, separadas por vírgula (ex.: <code>FLA</code>, <code>PAL,SAN</code>, <code>RMA</code>).</div>
+<label class="label" for="fav">Times favoritos</label><input id="fav" name="fav" value="%FUTFAV%" maxlength="60" placeholder="FLA">
+<button type="submit">Salvar</button></form>
+
 <form class="card" method="post" action="/save-display"><h2>Tela (desempenho)</h2>
 <div class="muted">Velocidade do barramento QSPI da tela. Valores maiores deixam as animações mais fluidas; se aparecerem listras ou chiado, volte para 40 MHz. A placa reinicia ao salvar.</div>
 <select name="qspi"><option value="40" %Q40%>40 MHz (padrão, seguro)</option><option value="60" %Q60%>60 MHz</option><option value="80" %Q80%>80 MHz (mais rápido)</option></select>
@@ -1527,6 +1553,7 @@ const c=document.createElement('button');c.type='button';c.className='chip';c.te
   page.replace("%R50%", radius == 50 ? "selected" : "");
   page.replace("%ROWS%", rows);
   page.replace("%Q40%", qspiHz == 40000000 ? "selected" : "");
+  page.replace("%FUTFAV%", htmlEscape(footballFavorites()));
   page.replace("%Q60%", qspiHz == 60000000 ? "selected" : "");
   page.replace("%Q80%", qspiHz == 80000000 ? "selected" : "");
   String bzRows;
@@ -1726,6 +1753,10 @@ static void startConfigServer() {
     else notice += " Abra a tela Servers para consultar.";
     sendConfigPage(notice);
   });
+  configServer.on("/save-football", HTTP_POST, []() { WEB_AUTH
+    footballSetFavorites(configServer.arg("fav").c_str());
+    sendConfigPage(String("Futebol: favoritos ") + (footballFavorites().length() ? footballFavorites() : String("(nenhum)")) + ".");
+  });
   configServer.on("/save-display", HTTP_POST, []() { WEB_AUTH
     const int mhz = configServer.arg("qspi").toInt();
     if (mhz == 40 || mhz == 60 || mhz == 80) prefs.putUInt("qspiHz", (uint32_t)mhz * 1000000UL);
@@ -1837,6 +1868,7 @@ static void showPhotosEvent(lv_event_t *) { showView(photosView); }
 static void showSkyEvent(lv_event_t *) { showView(skyView); }
 static void showF1Event(lv_event_t *) { showView(f1View); }
 static void showArtEvent(lv_event_t *) { showView(artView); }
+static void showFootballEvent(lv_event_t *) { showView(footballView); }
 
 // iOS-style app icon: 64 px squircle-ish tile, vertical gradient (lighter on top),
 // 1 px top highlight, soft drop shadow, press = shrink to 92 % + darken.
@@ -1882,6 +1914,17 @@ static void drawAppGlyph(lv_obj_t *box, const char *app, const char *symbol) {
     polyline(box, w1, 7, 3, 0x38D6F5);
     blob(box, 16, 14, 5, 5, 0x9FEFFF); blob(box, 34, 18, 4, 4, 0x38D6F5);
     blob(box, 50, 12, 6, 6, 0x9FEFFF); blob(box, 26, 22, 3, 3, 0x1E90FF);
+  } else if (!strcmp(app, "Futebol")) {                     // pitch + ball
+    iconBg(box, 0x2FB55A, 0x167A36);
+    blob(box, 8, 10, 56, 2, 0xFFFFFF, 0, LV_OPA_60); blob(box, 8, 60, 56, 2, 0xFFFFFF, 0, LV_OPA_60);
+    blob(box, 35, 10, 2, 52, 0xFFFFFF, 0, LV_OPA_60);
+    lv_obj_t *ring = blob(box, 24, 24, 24, 24, 0xFFFFFF, LV_RADIUS_CIRCLE, LV_OPA_TRANSP);
+    lv_obj_set_style_border_width(ring, 2, 0); lv_obj_set_style_border_color(ring, lv_color_white(), 0);
+    lv_obj_set_style_border_opa(ring, LV_OPA_60, 0);
+    lv_obj_t *ball = blob(box, 40, 36, 20, 20, 0xFFFFFF);
+    lv_obj_set_style_border_width(ball, 1, 0); lv_obj_set_style_border_color(ball, lv_color_hex(0x1B1B1B), 0);
+    blob(ball, 6, 6, 7, 7, 0x1B1B1B); blob(ball, 1, 2, 4, 4, 0x1B1B1B); blob(ball, 14, 2, 4, 4, 0x1B1B1B);
+    blob(ball, 1, 13, 4, 4, 0x1B1B1B); blob(ball, 14, 13, 4, 4, 0x1B1B1B);
   } else if (!strcmp(app, "Clima")) {                       // sun behind a cloud
     iconBg(box, 0x4FB3FF, 0x1A6FE0);
     blob(box, 34, 12, 24, 24, 0xFFD43B);
@@ -2014,6 +2057,12 @@ static void tilePressFx(lv_event_t *e) {
   else lv_obj_add_flag(shade, LV_OBJ_FLAG_HIDDEN);
 }
 
+// A drag (or the moment right after a page change) never opens an app.
+static void menuTileClick(lv_event_t *e) {
+  if (menuSwMoved || menuSwDrag || lv_tick_elaps(menuSwipeEndMs) < MENU_TAP_BLOCK_MS) return;
+  ((lv_event_cb_t)lv_event_get_user_data(e))(e);
+}
+
 static lv_obj_t *menuTile(lv_obj_t *parent, const char *symbol, const char *caption,
                           uint32_t tileColor, lv_event_cb_t callback) {
   lv_obj_t *tile = callback ? lv_button_create(parent) : lv_obj_create(parent);
@@ -2024,7 +2073,7 @@ static lv_obj_t *menuTile(lv_obj_t *parent, const char *symbol, const char *capt
   lv_obj_set_style_shadow_width(tile, 0, 0);
   lv_obj_set_style_pad_all(tile, 0, 0);
   lv_obj_remove_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
-  if (callback) lv_obj_add_event_cb(tile, callback, LV_EVENT_CLICKED, NULL);
+  if (callback) lv_obj_add_event_cb(tile, menuTileClick, LV_EVENT_CLICKED, (void *)callback);
   else lv_obj_remove_flag(tile, LV_OBJ_FLAG_CLICKABLE);
 
   const lv_color_t base = lv_color_hex(tileColor);
@@ -2047,7 +2096,7 @@ static lv_obj_t *menuTile(lv_obj_t *parent, const char *symbol, const char *capt
   lv_obj_set_style_shadow_color(iconBox, lv_color_hex(0x01040C), 0);
 
   drawAppGlyph(iconBox, caption, symbol);
-  if (menuArtN < MENU_ART_MAX) menuArt[menuArtN++] = iconBox;
+  if (menuArtN < MENU_ART_MAX) { menuArtPage[menuArtN] = menuBuildPage; menuArt[menuArtN++] = iconBox; }
   if (callback) {                                   // press feedback: darken the icon (cheap, no transform layer)
     lv_obj_t *shade = lv_obj_create(tile);
     lv_obj_set_size(shade, ICON, ICON); lv_obj_align(shade, LV_ALIGN_TOP_MID, 0, 0); noClickBox(shade);
@@ -2066,8 +2115,70 @@ static lv_obj_t *menuTile(lv_obj_t *parent, const char *symbol, const char *capt
   lv_obj_set_style_text_font(label, &lv_font_weather_14, 0);
   lv_obj_set_style_text_color(label, lv_color_hex(0xF4F7FF), 0);
   lv_obj_align(label, LV_ALIGN_TOP_MID, 0, ICON + 4);
-  if (menuArtN < MENU_ART_MAX) menuArt[menuArtN++] = label;
+  if (menuArtN < MENU_ART_MAX) { menuArtPage[menuArtN] = menuBuildPage; menuArt[menuArtN++] = label; }
   return tile;
+}
+
+static void menuStripAnim(void *obj, int32_t x) { lv_obj_set_x((lv_obj_t *)obj, x); }
+static void menuGoPage(int p, bool anim) {
+  if (p < 0) p = 0;
+  if (p >= MENU_PAGES) p = MENU_PAGES - 1;
+  menuCurPage = p;
+  const int32_t target = -p * SCR_W;
+  lv_anim_delete(menuStrip, menuStripAnim);
+  if (anim && lv_obj_get_x(menuStrip) != target) {
+    lv_anim_t a; lv_anim_init(&a);
+    lv_anim_set_var(&a, menuStrip);
+    lv_anim_set_exec_cb(&a, menuStripAnim);
+    lv_anim_set_values(&a, lv_obj_get_x(menuStrip), target);
+    lv_anim_set_duration(&a, 220);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
+  } else lv_obj_set_x(menuStrip, target);
+  for (int i = 0; i < MENU_PAGES; ++i) if (menuDot[i]) {
+    lv_obj_set_style_bg_color(menuDot[i], lv_color_hex(i == p ? 0xFFFFFF : 0x5A6E96), 0);
+    lv_obj_set_style_bg_opa(menuDot[i], LV_OPA_COVER, 0);
+  }
+}
+// Swipe between pages: polls the touch while the menu is shown (no events needed from
+// the icons). Only a long, mostly horizontal drag changes the page.
+static void menuSwipeCb(lv_timer_t *) {
+  lv_indev_t *ind = lv_indev_get_next(NULL);
+  if (!ind || !menuStrip) return;
+  const bool pressed = lv_indev_get_state(ind) == LV_INDEV_STATE_PRESSED;
+  lv_point_t pt; lv_indev_get_point(ind, &pt);
+  if (pressed && !menuSwDown) {                              // finger down
+    menuSwDown = true; menuSwDrag = false; menuSwMoved = false; menuSwStart = pt; menuSwDx = 0;
+    lv_anim_delete(menuStrip, menuStripAnim);
+  } else if (pressed) {                                      // finger moving
+    menuSwDx = pt.x - menuSwStart.x;
+    const int32_t dy = pt.y - menuSwStart.y;
+    if (abs(menuSwDx) > MENU_DRAG_START_PX || abs(dy) > MENU_DRAG_START_PX) menuSwMoved = true;
+    if (!menuSwDrag && abs(menuSwDx) > MENU_DRAG_START_PX && abs(menuSwDx) > abs(dy) * 13 / 10) menuSwDrag = true;
+    if (menuSwDrag) {
+      int32_t x = -menuCurPage * SCR_W + menuSwDx;
+      if (x > 40) x = 40;                                    // a little give at the ends
+      if (x < -(MENU_PAGES - 1) * SCR_W - 40) x = -(MENU_PAGES - 1) * SCR_W - 40;
+      lv_obj_set_x(menuStrip, x);
+    }
+  } else if (menuSwDown) {                                   // finger up
+    menuSwDown = false;
+    if (menuSwDrag) {
+      int p = menuCurPage;
+      if (abs(menuSwDx) >= SCR_W * MENU_PAGE_SWIPE_PCT / 100) p += menuSwDx < 0 ? 1 : -1;
+      menuGoPage(p, true);                                   // short drag: springs back
+      menuSwipeEndMs = lv_tick_get();
+    }
+    menuSwDrag = false;
+  }
+}
+static void menuOnEnter() {
+  menuSwDown = menuSwDrag = menuSwMoved = false;
+  if (menuSwipeTimer) { lv_timer_reset(menuSwipeTimer); lv_timer_resume(menuSwipeTimer); }
+}
+static void menuOnExit() {
+  if (menuSwipeTimer) lv_timer_pause(menuSwipeTimer);
+  menuSwDown = menuSwDrag = false;
 }
 
 static void build_main_menu(lv_obj_t *menu) {
@@ -2081,22 +2192,50 @@ static void build_main_menu(lv_obj_t *menu) {
   menuClock = makeLabel(menu, "--:--", &lv_font_weather_14, 0xEAF2FF);
   lv_obj_add_flag(menuClock, LV_OBJ_FLAG_HIDDEN);   // no status bar: more room between rows
 
-  // 4 x 3 grid = 12 apps
-  lv_obj_t *grid = lv_obj_create(menu);
-  lv_obj_set_size(grid, 4 * TILE_W + 3 * 6, 3 * TILE_H + 2 * 11);
-  lv_obj_align(grid, LV_ALIGN_CENTER, 0, 0);
-  lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(grid, 0, 0);
-  lv_obj_set_style_pad_all(grid, 0, 0);
-  lv_obj_set_style_pad_row(grid, 11, 0);
-  lv_obj_set_style_pad_column(grid, 6, 0);
-  lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-  lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-  lv_obj_remove_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
-  menuTile(grid, "$", "Finanças", 0x15171D, showFinanceEvent);
-  menuTile(grid, LV_SYMBOL_IMAGE, "Fotos", 0x39B982, showPhotosEvent);
+  // strip with one 480x320 page per screenful of apps (4 x 3 grid each)
+  menuStrip = lv_obj_create(menu);
+  lv_obj_set_size(menuStrip, SCR_W * MENU_PAGES, SCR_H);
+  lv_obj_set_pos(menuStrip, 0, 0);
+  lv_obj_set_style_bg_opa(menuStrip, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(menuStrip, 0, 0);
+  lv_obj_set_style_pad_all(menuStrip, 0, 0);
+  lv_obj_set_style_radius(menuStrip, 0, 0);
+  lv_obj_remove_flag(menuStrip, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(menuStrip, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_t *grid[MENU_PAGES];
+  for (int p = 0; p < MENU_PAGES; ++p) {
+    lv_obj_t *pg = menuPage[p] = lv_obj_create(menuStrip);
+    lv_obj_set_size(pg, SCR_W, SCR_H);
+    lv_obj_set_pos(pg, p * SCR_W, 0);
+    lv_obj_set_style_bg_color(pg, lv_color_hex(0x06163C), 0);      // same gradient as the menu (opaque snapshot)
+    lv_obj_set_style_bg_grad_color(pg, lv_color_hex(0x073B86), 0);
+    lv_obj_set_style_bg_grad_dir(pg, LV_GRAD_DIR_VER, 0);
+    lv_obj_set_style_bg_opa(pg, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(pg, 0, 0);
+    lv_obj_set_style_pad_all(pg, 0, 0);
+    lv_obj_set_style_radius(pg, 0, 0);
+    lv_obj_remove_flag(pg, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(pg, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t *g = grid[p] = lv_obj_create(pg);
+    lv_obj_set_size(g, 4 * TILE_W + 3 * 6, 3 * TILE_H + 2 * 11);
+    lv_obj_align(g, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_opa(g, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(g, 0, 0);
+    lv_obj_set_style_pad_all(g, 0, 0);
+    lv_obj_set_style_pad_row(g, 11, 0);
+    lv_obj_set_style_pad_column(g, 6, 0);
+    lv_obj_set_flex_flow(g, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(g, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_remove_flag(g, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(g, LV_OBJ_FLAG_CLICKABLE);
+  }
+  // ---- page 1: the original 12 apps (unchanged order)
+  menuBuildPage = 0;
+  lv_obj_t *gridA = grid[0];
+  menuTile(gridA, "$", "Finanças", 0x15171D, showFinanceEvent);
+  menuTile(gridA, LV_SYMBOL_IMAGE, "Fotos", 0x39B982, showPhotosEvent);
   {
-    lv_obj_t *srv = menuTile(grid, LV_SYMBOL_DRIVE, "Servidores", 0x2E3A4C, showServersEvent);
+    lv_obj_t *srv = menuTile(gridA, LV_SYMBOL_DRIVE, "Servidores", 0x2E3A4C, showServersEvent);
     menuServersBadge = lv_obj_create(srv);   // red dot when a server is offline
     lv_obj_set_size(menuServersBadge, 16, 16); lv_obj_align(menuServersBadge, LV_ALIGN_TOP_RIGHT, -12, -4);
     lv_obj_set_style_radius(menuServersBadge, LV_RADIUS_CIRCLE, 0);
@@ -2106,17 +2245,36 @@ static void build_main_menu(lv_obj_t *menu) {
     lv_obj_remove_flag(menuServersBadge, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);
   }
-  menuTile(grid, LV_SYMBOL_SETTINGS, "Ajustes", 0x8993A3, showSettingsEvent);
-  menuTile(grid, "", "Calendário", 0xF8F8FA, showCalendarEvent);
-  menuTile(grid, "", "Radar", 0x126E58, showFlightRadarEvent);
-  menuTile(grid, LV_SYMBOL_TINT, "Clima", 0x078BDD, showWeatherEvent);
-  menuTile(grid, LV_SYMBOL_HOME, "Relógio", 0x22252B, showClockEvent);
-  menuTile(grid, "", "Aeroporto", 0x0B1A2E, showAirportEvent);
-  menuTile(grid, LV_SYMBOL_EYE_OPEN, "C\xC3\xA9u", 0x1B2C5E, showSkyEvent);
-  menuTile(grid, "", "F1", 0x15171D, showF1Event);
-  menuTile(grid, "", "Arte", 0x07112A, showArtEvent);
+  menuTile(gridA, LV_SYMBOL_SETTINGS, "Ajustes", 0x8993A3, showSettingsEvent);
+  menuTile(gridA, "", "Calendário", 0xF8F8FA, showCalendarEvent);
+  menuTile(gridA, "", "Radar", 0x126E58, showFlightRadarEvent);
+  menuTile(gridA, LV_SYMBOL_TINT, "Clima", 0x078BDD, showWeatherEvent);
+  menuTile(gridA, LV_SYMBOL_HOME, "Relógio", 0x22252B, showClockEvent);
+  menuTile(gridA, "", "Aeroporto", 0x0B1A2E, showAirportEvent);
+  menuTile(gridA, LV_SYMBOL_EYE_OPEN, "C\xC3\xA9u", 0x1B2C5E, showSkyEvent);
+  menuTile(gridA, "", "F1", 0x15171D, showF1Event);
+  menuTile(gridA, "", "Arte", 0x07112A, showArtEvent);
+  // ---- page 2: new apps
+  menuBuildPage = 1;
+  menuTile(grid[1], "", "Futebol", 0x167A36, showFootballEvent);
+  menuBuildPage = 0;
+  // page dots (live objects over the pictures; tap a dot to jump)
+  for (int p = 0; p < MENU_PAGES; ++p) {
+    lv_obj_t *d = menuDot[p] = lv_obj_create(menu);
+    lv_obj_set_size(d, 7, 7);
+    lv_obj_set_pos(d, SCR_W / 2 - (MENU_PAGES * 15) / 2 + p * 15 + 4, SCR_H - 9);
+    lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(d, 0, 0);
+    lv_obj_set_style_pad_all(d, 0, 0);
+    lv_obj_set_ext_click_area(d, 10);
+    lv_obj_add_event_cb(d, [](lv_event_t *e) { menuGoPage((int)(intptr_t)lv_event_get_user_data(e), true); },
+                        LV_EVENT_CLICKED, (void *)(intptr_t)p);
+  }
+  menuGoPage(0, false);
   menuWifiIcon = makeLabel(menu, LV_SYMBOL_WIFI, &lv_font_weather_14, 0xEAF2FF);
   lv_obj_align(menuWifiIcon, LV_ALIGN_TOP_RIGHT, -3, 3);
+  menuSwipeTimer = lv_timer_create(menuSwipeCb, 15, NULL);
+  lv_timer_pause(menuSwipeTimer);
 }
 
 // The one back button of the app: same size (40x34), position and "glass" look on
@@ -2174,6 +2332,7 @@ static void build_ui() {
   buildSkyScreen(scr);
   buildF1Screen(scr);
   buildArtScreen(scr);
+  buildFootballScreen(scr);
   flightRadarView = lv_obj_create(scr);
   buildFlightRadarScreen(flightRadarView);
   settingsView = lv_obj_create(scr);
