@@ -67,7 +67,7 @@ JsonDocument &detailsFilter() {
 }
 
 int getJson(WiFiClientSecure &client, const char *url, JsonDocument &doc) {
-  const int status = httpsFetch(client, url, body, 8000, false);
+  const int status = httpsFetch(client, url, body, 8000, true);   // 2nd request (route) reuses it
   if (status != HTTP_CODE_OK) return status;
   if (deserializeJson(doc, body.c_str(), body.length(),
                       DeserializationOption::Filter(detailsFilter()))) return -100;

@@ -7,6 +7,10 @@
 // anyway, so we skip the attempt and report a clear error instead.
 static constexpr size_t TLS_MIN_INTERNAL_BLOCK = 22 * 1024;
 
+// A reused keep-alive session must answer within this time; otherwise it is treated as
+// closed by the server and the request is repeated once on a new connection.
+static constexpr uint32_t REUSED_TIMEOUT_MS = 4000;
+
 // GET (or POST when postBody != nullptr) into a PSRAM buffer.
 // Handles chunked transfer encoding. Returns the HTTP status code (>0) or a
 // negative HTTPClient error. `reuse` keeps the TLS session open afterwards.

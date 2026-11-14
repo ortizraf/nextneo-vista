@@ -13,7 +13,7 @@ static void test_menu_has_a_tile_for_every_screen() {
   for (const ui::ScreenCase &c : ui::kScreens) {
     lv_obj_t *tile = ui::menuTile(c.caption);
     TEST_ASSERT_NOT_NULL_MESSAGE(tile, c.caption);
-    TEST_ASSERT_TRUE_MESSAGE(lv_obj_has_flag(tile, LV_OBJ_FLAG_CLICKABLE), c.caption);
+    TEST_ASSERT_TRUE_MESSAGE(lv_obj_is_clickable(tile), c.caption);
   }
 }
 

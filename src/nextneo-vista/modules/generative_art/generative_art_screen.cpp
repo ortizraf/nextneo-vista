@@ -43,7 +43,7 @@ static uint32_t lastFrameMs = 0, autoElapsedMs = 0, pressStartMs = 0;
 static uint32_t perfSteps = 0, perfStepUs = 0, perfLastMs = 0;
 
 static void show(lv_obj_t *o, bool on) {
-  if (on) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+  if (on) lv_obj_set_hidden(o, false); else lv_obj_set_hidden(o, true);
 }
 
 static void applyBacklight() {
@@ -86,15 +86,15 @@ static void saveSettings() {
 // ---------------------------------------------------------------- controls
 static void showControls(bool on) {
   show(backBtn, on); show(bar, on);
-  show(titleLbl, on && lv_obj_has_flag(capLbl, LV_OBJ_FLAG_HIDDEN));   // the caption already names the scene
+  show(titleLbl, on && lv_obj_is_hidden(capLbl));   // the caption already names the scene
   if (on) { lv_timer_reset(hideTimer); lv_timer_resume(hideTimer); }
   else lv_timer_pause(hideTimer);
 }
 static void hideCb(lv_timer_t *) {
-  if (!lv_obj_has_flag(panel, LV_OBJ_FLAG_HIDDEN)) { lv_timer_reset(hideTimer); return; }   // keep while editing
+  if (!lv_obj_is_hidden(panel)) { lv_timer_reset(hideTimer); return; }   // keep while editing
   showControls(false);
 }
-static void bumpControls() { if (!lv_obj_has_flag(bar, LV_OBJ_FLAG_HIDDEN)) lv_timer_reset(hideTimer); }
+static void bumpControls() { if (!lv_obj_is_hidden(bar)) lv_timer_reset(hideTimer); }
 
 static void syncPatternUi() {
   lv_label_set_text(titleLbl, engine.patternName(engine.pattern()));
@@ -198,8 +198,8 @@ static void artTouchEvent(lv_event_t *e) {
     engine.setTouch(false, p.x, p.y);
     // a short tap toggles the controls; a drag is pure interaction
     if (code == LV_EVENT_RELEASED && lv_tick_elaps(pressStartMs) < 350) {
-      if (!lv_obj_has_flag(panel, LV_OBJ_FLAG_HIDDEN)) closePanelEvent(nullptr);
-      else showControls(lv_obj_has_flag(bar, LV_OBJ_FLAG_HIDDEN));
+      if (!lv_obj_is_hidden(panel)) closePanelEvent(nullptr);
+      else showControls(lv_obj_is_hidden(bar));
     }
   }
 }
@@ -302,7 +302,7 @@ static lv_obj_t *panelSwitch(const char *caption, bool on, lv_event_cb_t cb) {
   lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(row, 0, 0);
   lv_obj_set_style_pad_all(row, 0, 0);
-  lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(row, false);
   lv_obj_t *l = makeLabel(row, caption, &lv_font_weather_14, 0x8FB8F0);
   lv_obj_align(l, LV_ALIGN_LEFT_MID, 0, 0);
   lv_obj_t *sw = lv_switch_create(row);
@@ -337,7 +337,7 @@ static void buildPanel() {
   lv_obj_set_style_bg_opa(head, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(head, 0, 0);
   lv_obj_set_style_pad_all(head, 0, 0);
-  lv_obj_remove_flag(head, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(head, false);
   lv_obj_t *t = makeLabel(head, "Arte generativa", &lv_font_weather_20, 0xEAF2FF);
   lv_obj_align(t, LV_ALIGN_LEFT_MID, 0, 0);
   lv_obj_t *close = glassButton(head, LV_SYMBOL_OK, closePanelEvent);
@@ -376,8 +376,8 @@ static void buildArtScreen(lv_obj_t *screen) {
   lv_obj_set_style_border_width(artView, 0, 0);
   lv_obj_set_style_radius(artView, 0, 0);
   lv_obj_set_style_pad_all(artView, 0, 0);
-  lv_obj_remove_flag(artView, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_remove_flag(artView, LV_OBJ_FLAG_GESTURE_BUBBLE);
+  lv_obj_set_scrollable(artView, false);
+  lv_obj_set_gesture_bubble(artView, false);
   lv_obj_add_event_cb(artView, artTouchEvent, LV_EVENT_PRESSED, NULL);
   lv_obj_add_event_cb(artView, artTouchEvent, LV_EVENT_PRESSING, NULL);
   lv_obj_add_event_cb(artView, artTouchEvent, LV_EVENT_RELEASED, NULL);
@@ -386,7 +386,7 @@ static void buildArtScreen(lv_obj_t *screen) {
   frameImg = lv_image_create(artView);                 // src set in artOnEnter (buffer lives only while visible)
   lv_obj_set_pos(frameImg, 0, 0);
   lv_obj_set_size(frameImg, SCR_W, SCR_H);
-  lv_obj_remove_flag(frameImg, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(frameImg, false);
 
   errLbl = makeLabel(artView, "Mem\xC3\xB3ria insuficiente para a arte", &lv_font_weather_14, 0x8FB8F0);
   lv_obj_center(errLbl);
@@ -419,7 +419,7 @@ static void buildArtScreen(lv_obj_t *screen) {
   lv_obj_set_style_pad_all(bar, 6, 0);
   lv_obj_set_style_pad_column(bar, 8, 0);
   lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
-  lv_obj_remove_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(bar, false);
   glassButton(bar, LV_SYMBOL_PREV, prevEvent);
   glassButton(bar, LV_SYMBOL_PAUSE, pauseEvent, &pauseLbl);
   glassButton(bar, LV_SYMBOL_NEXT, nextEvent);
@@ -433,7 +433,7 @@ static void buildArtScreen(lv_obj_t *screen) {
   lv_timer_pause(frameTimer);
   hideTimer = lv_timer_create(hideCb, ART_CONTROLS_HIDE_MS, NULL);
   lv_timer_pause(hideTimer);
-  lv_obj_add_flag(artView, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(artView, true);
 }
 
 // ---------------------------------------------------------------- lifecycle

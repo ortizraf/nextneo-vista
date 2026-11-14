@@ -43,13 +43,13 @@ lv_obj_t *screenView(ScreenID id) {
 // Written only by the UI thread, read by the network task.
 static volatile ScreenID gActiveScreen = SCREEN_NONE;
 static volatile uint32_t gScreenEpoch = 0;
-// Dedup: a command already queued/in flight is not queued again.
-static volatile bool gCmdPending[CMD_COUNT] = {};
+// Dedup: a job already queued/in flight is not queued again (per screen, per job).
+static volatile bool gJobPending[SCREEN_COUNT][MAX_SCREEN_JOBS] = {};
 // Result of the last job per screen (network task -> UI thread).
 enum JobOutcome : uint8_t { JOB_NONE = 0, JOB_OK, JOB_FAILED };
 static volatile uint8_t gJobOutcome[SCREEN_COUNT] = {};
 // Job currently executed by the network task.
-static NetJob gCurrentJob = {CMD_COUNT, SCREEN_NONE, 0};
+static NetJob gCurrentJob = {0, SCREEN_NONE, 0};
 
 ScreenID activeScreenId() { return gActiveScreen; }
 
@@ -59,26 +59,29 @@ bool screenJobStillCurrent() {
 }
 
 void jobSetCurrent(const NetJob &job) { gCurrentJob = job; }
-void jobClearCurrent() { gCurrentJob = {CMD_COUNT, SCREEN_NONE, 0}; }
-void jobClearPending(uint8_t cmd) { if (cmd < CMD_COUNT) gCmdPending[cmd] = false; }
+void jobClearCurrent() { gCurrentJob = {0, SCREEN_NONE, 0}; }
+void jobClearPending(const NetJob &job) {
+  if (job.screen != SCREEN_NONE && job.screen < SCREEN_COUNT && job.job < MAX_SCREEN_JOBS) gJobPending[job.screen][job.job] = false;
+}
 void jobReportOutcome(ScreenID screen, bool ok) {
   if (screen < SCREEN_COUNT) gJobOutcome[screen] = ok ? JOB_OK : JOB_FAILED;
 }
-NetJob jobForActiveScreen(uint8_t cmd) { return {cmd, gActiveScreen, gScreenEpoch}; }
+NetJob jobForActiveScreen(uint8_t job) { return {job, gActiveScreen, gScreenEpoch}; }
 
-void post(int cmd) {
+void post(GlobalCmd cmd) {
   NetJob job = {(uint8_t)cmd, SCREEN_NONE, 0};
   xQueueSend(cmdQ, &job, 0);
 }
 
-// Queues an API job tagged with the active screen and its visit epoch.
-// Never blocks the UI thread; duplicates of an in-flight command are dropped.
-void postScreenJob(int cmd) {
-  if (cmd < 0 || cmd >= CMD_COUNT || gActiveScreen == SCREEN_NONE) return;
-  if (gCmdPending[cmd]) return;
-  NetJob job = {(uint8_t)cmd, gActiveScreen, gScreenEpoch};
-  gCmdPending[cmd] = true;
-  if (xQueueSend(cmdQ, &job, 0) != pdTRUE) gCmdPending[cmd] = false;
+// Queues job `index` of the active screen, tagged with its visit epoch.
+// Never blocks the UI thread; duplicates of an in-flight job are dropped.
+void postScreenJob(uint8_t index) {
+  const ScreenID id = gActiveScreen;
+  if (id == SCREEN_NONE || index >= screenLifecycle(id)->jobCount) return;
+  if (gJobPending[id][index]) return;
+  NetJob job = {index, id, gScreenEpoch};
+  gJobPending[id][index] = true;
+  if (xQueueSend(cmdQ, &job, 0) != pdTRUE) gJobPending[id][index] = false;
 }
 
 // ---------------------------------------------------------------- refresh timer
@@ -88,7 +91,7 @@ static bool hasPeriodicUpdate(const ScreenLifecycle &s) { return s.requestUpdate
 
 static void requestUpdate(const ScreenLifecycle &s) {
   if (s.requestUpdate) s.requestUpdate();
-  else if (s.jobCount) postScreenJob(s.jobs[0].cmd);
+  else if (s.jobCount) postScreenJob(JOB_UPDATE);
 }
 
 static void restartContextTimer(uint32_t period) {
@@ -138,8 +141,8 @@ void switchScreen(ScreenID id) {
   // ---- Swap the visible container.
   for (const ScreenLifecycle *screen : kScreens) {
     if (!screen->view || !*screen->view) continue;
-    if (screen->id == id) lv_obj_remove_flag(*screen->view, LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_add_flag(*screen->view, LV_OBJ_FLAG_HIDDEN);
+    if (screen->id == id) lv_obj_set_hidden(*screen->view, false);
+    else lv_obj_set_hidden(*screen->view, true);
   }
 
   // ---- On-Enter: paint cached data now, request fresh data after the debounce.
@@ -167,9 +170,11 @@ static void uiTick(lv_timer_t *) {
 void screenManagerBegin(lv_obj_t *root) {
   for (int i = 0; i < SCREEN_COUNT; ++i)
     if (kScreens[i]->id != i) Log.printf("ERRO: kScreens[%d] é a tela %s (ordem errada)\n", i, kScreens[i]->name);
+  for (const ScreenLifecycle *screen : kScreens)
+    if (screen->jobCount > MAX_SCREEN_JOBS) Log.printf("ERRO: tela %s tem %u jobs (máx. %u)\n", screen->name, screen->jobCount, MAX_SCREEN_JOBS);
   for (const ScreenLifecycle *screen : kScreens) if (screen->build) screen->build(root);
   for (const ScreenLifecycle *screen : kScreens)
-    if (screen->view && *screen->view) lv_obj_add_flag(*screen->view, LV_OBJ_FLAG_HIDDEN);
+    if (screen->view && *screen->view) lv_obj_set_hidden(*screen->view, true);
   contextTimer = lv_timer_create(contextTimerCb, SCREEN_ENTER_DEBOUNCE_MS, NULL);
   lv_timer_pause(contextTimer);
   lv_timer_create(uiTick, 500, NULL);

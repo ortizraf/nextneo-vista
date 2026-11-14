@@ -98,7 +98,7 @@ static bool showSlot(int slot) {
   dsc.data_size = SCR_W * SCR_H * 2; dsc.data = (const uint8_t *)pix;
   lv_image_set_src(img, &dsc);
   lv_obj_invalidate(img);
-  lv_obj_remove_flag(img, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(img, false);
   current = slot;
   LogV.printf("Fotos: %s em %lums\n", p, (unsigned long)(millis() - t0));
   return true;
@@ -108,8 +108,8 @@ static void updateDots() {
   int n = 0;
   for (int i = 0; i < PHOTO_SLOTS; ++i) {
     const bool has = photoExists(i);
-    if (!has) { lv_obj_add_flag(dots[i], LV_OBJ_FLAG_HIDDEN); continue; }
-    lv_obj_remove_flag(dots[i], LV_OBJ_FLAG_HIDDEN);
+    if (!has) { lv_obj_set_hidden(dots[i], true); continue; }
+    lv_obj_set_hidden(dots[i], false);
     lv_obj_set_style_bg_opa(dots[i], i == current ? LV_OPA_90 : LV_OPA_40, 0);
     ++n;
   }
@@ -122,12 +122,12 @@ static void go(int step) {
   for (int i = 0; i < PHOTO_SLOTS; ++i) any += photoExists(i);
   if (!any) {
     current = -1;
-    lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_remove_flag(emptyLbl, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(img, true);
+    lv_obj_set_hidden(emptyLbl, false);
     updateDots();
     return;
   }
-  lv_obj_add_flag(emptyLbl, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(emptyLbl, true);
   int s = current < 0 ? (step < 0 ? 0 : PHOTO_SLOTS - 1) : current;
   if (step == 0 && current >= 0 && photoExists(current)) { showSlot(current); updateDots(); return; }
   const int dir = step < 0 ? -1 : 1;
@@ -149,8 +149,8 @@ static void watchCb(lv_timer_t *) {                         // web changes show 
 static lv_timer_t *watchTimer;
 
 static void showBack(bool on) {
-  if (on) { lv_obj_remove_flag(backBtn, LV_OBJ_FLAG_HIDDEN); lv_timer_reset(hideBackTimer); lv_timer_resume(hideBackTimer); }
-  else lv_obj_add_flag(backBtn, LV_OBJ_FLAG_HIDDEN);
+  if (on) { lv_obj_set_hidden(backBtn, false); lv_timer_reset(hideBackTimer); lv_timer_resume(hideBackTimer); }
+  else lv_obj_set_hidden(backBtn, true);
 }
 static void hideBackCb(lv_timer_t *t) { showBack(false); lv_timer_pause(t); }
 
@@ -164,7 +164,7 @@ static void touchEvent(lv_event_t *e) {
   if (code != LV_EVENT_RELEASED) return;
   const int dx = p.x - pressAt.x, dy = p.y - pressAt.y;
   if (abs(dx) > 50 && abs(dx) > abs(dy)) go(dx < 0 ? +1 : -1);
-  else if (abs(dx) < 15 && abs(dy) < 15) showBack(lv_obj_has_flag(backBtn, LV_OBJ_FLAG_HIDDEN));
+  else if (abs(dx) < 15 && abs(dy) < 15) showBack(lv_obj_is_hidden(backBtn));
 }
 
 static void buildPhotosScreen(lv_obj_t *scr) {
@@ -173,16 +173,16 @@ static void buildPhotosScreen(lv_obj_t *scr) {
   lv_obj_set_style_radius(photosView, 0, 0);
   lv_obj_set_style_border_width(photosView, 0, 0); lv_obj_set_style_pad_all(photosView, 0, 0);
   lv_obj_set_style_bg_color(photosView, lv_color_hex(0x000000), 0); lv_obj_set_style_bg_opa(photosView, LV_OPA_COVER, 0);
-  lv_obj_remove_flag(photosView, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_flag(photosView, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_scrollable(photosView, false);
+  lv_obj_set_clickable(photosView, true);
   lv_obj_add_event_cb(photosView, touchEvent, LV_EVENT_PRESSED, NULL);
   lv_obj_add_event_cb(photosView, touchEvent, LV_EVENT_RELEASED, NULL);
-  lv_obj_add_flag(photosView, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(photosView, true);
 
   img = lv_image_create(photosView);
   lv_obj_set_pos(img, 0, 0); lv_obj_set_size(img, SCR_W, SCR_H);
-  lv_obj_remove_flag(img, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_clickable(img, false);
+  lv_obj_set_hidden(img, true);
 
   emptyLbl = lv_label_create(photosView);
   lv_label_set_text(emptyLbl, "Nenhuma foto ainda\n\nEnvie até 8 fotos em\nhttp://<ip da placa>/photos");
@@ -190,7 +190,7 @@ static void buildPhotosScreen(lv_obj_t *scr) {
   lv_obj_set_style_text_color(emptyLbl, lv_color_hex(0xB8C6D8), 0);
   lv_obj_set_style_text_font(emptyLbl, &lv_font_weather_14, 0);
   lv_obj_center(emptyLbl);
-  lv_obj_remove_flag(emptyLbl, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(emptyLbl, false);
 
   for (int i = 0; i < PHOTO_SLOTS; ++i) {                  // position dots at the bottom
     dots[i] = lv_obj_create(photosView);
@@ -199,12 +199,12 @@ static void buildPhotosScreen(lv_obj_t *scr) {
     lv_obj_set_style_radius(dots[i], LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(dots[i], 0, 0);
     lv_obj_set_style_bg_color(dots[i], lv_color_hex(0xFFFFFF), 0);
-    lv_obj_remove_flag(dots[i], LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(dots[i], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_clickable(dots[i], false);
+    lv_obj_set_hidden(dots[i], true);
   }
 
   backBtn = addBackButton(photosView);                    // standard back button (main.cpp)
-  lv_obj_add_flag(backBtn, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(backBtn, true);
 
   slideTimer = lv_timer_create(slideCb, PHOTO_SLIDE_MS, NULL);   lv_timer_pause(slideTimer);
   watchTimer = lv_timer_create(watchCb, 1000, NULL);             lv_timer_pause(watchTimer);

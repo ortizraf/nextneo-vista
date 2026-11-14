@@ -68,7 +68,7 @@ inline void bootApp() {
 }
 
 // ---- widget lookup
-inline bool isVisible(lv_obj_t *obj) { return obj && !lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN); }
+inline bool isVisible(lv_obj_t *obj) { return obj && !lv_obj_is_hidden(obj); }
 
 inline bool hasLabelChild(lv_obj_t *obj, const char *text) {
   const uint32_t n = lv_obj_get_child_count(obj);

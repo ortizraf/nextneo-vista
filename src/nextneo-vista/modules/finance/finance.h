@@ -3,6 +3,38 @@
 #include "app_screens.h"
 #include "modules/finance/finance_symbols.h"
 
+// One asset on the Finance screen: Yahoo Finance symbol + optional caption.
+// Examples: USDBRL=X (dólar), EURBRL=X, BTC-USD, AAPL, PETR4.SA, ^BVSP (Ibovespa).
+static constexpr uint8_t FINANCE_MAX_ASSETS = 8;
+static constexpr uint8_t FINANCE_HISTORY = 48;     // card sparkline: whole trading day downsampled
+struct FinanceAsset {
+  char symbol[16] = {};
+  char label[32] = {};
+};
+
+// Quotes published by the network task for the Finance screen (and the web page).
+// Always read/written under mtx.
+struct FinanceData {
+  FinanceAsset assets[FINANCE_MAX_ASSETS];
+  uint8_t assetCount = 0;
+  uint32_t configVersion = 0;          // bumped when the asset list changes
+  char currency[FINANCE_MAX_ASSETS][4] = {};
+  float price[FINANCE_MAX_ASSETS] = {};
+  float previousClose[FINANCE_MAX_ASSETS] = {}, changePct[FINANCE_MAX_ASSETS] = {};
+  bool haveChange[FINANCE_MAX_ASSETS] = {};
+  float history[FINANCE_MAX_ASSETS][FINANCE_HISTORY] = {};
+  uint8_t historyCount[FINANCE_MAX_ASSETS] = {};
+  bool havePrice[FINANCE_MAX_ASSETS] = {};
+  bool refreshing = false;
+  uint8_t successCount = 0;
+  bool apiKnown[FINANCE_MAX_ASSETS] = {};
+  bool apiOk[FINANCE_MAX_ASSETS] = {};
+  uint32_t lastSuccessMs = 0;
+  uint32_t version = 0;                // bumped on every refresh
+  uint32_t quoteEpoch[FINANCE_MAX_ASSETS] = {};
+};
+extern FinanceData fin;
+
 // ---- asset list (finance_assets.cpp). UI thread / web handler.
 void loadFinanceAssets();
 bool setFinanceAssets(const FinanceAsset *assets, uint8_t count);
@@ -33,7 +65,7 @@ struct FinanceDetail {
 };
 extern FinanceDetail financeDetail;
 extern FinanceDetailRequest financeDetailWant;
-extern volatile int8_t financeSingleIndex;   // asset refreshed by CMD_FINANCE_ONE
+extern volatile int8_t financeSingleIndex;   // asset refreshed by the FIN_JOB_ONE job
 
 // ---- network task (finance_fetch.cpp)
 bool financeFetchAll();

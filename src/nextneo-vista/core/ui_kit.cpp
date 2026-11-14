@@ -29,7 +29,7 @@ lv_obj_t *makeCard(lv_obj_t *parent, int w, int h) {
   lv_obj_set_style_border_width(card, 0, 0);
   lv_obj_set_style_radius(card, 16, 0);
   lv_obj_set_style_pad_all(card, 8, 0);
-  lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(card, false);
   return card;
 }
 
@@ -63,7 +63,7 @@ lv_obj_t *addBackButton(lv_obj_t *parent) {
   lv_obj_set_style_text_font(arrow, &lv_font_weather_14, 0);
   lv_obj_set_style_text_color(arrow, lv_color_hex(0xFFFFFF), 0);
   lv_obj_center(arrow);
-  lv_obj_remove_flag(arrow, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(arrow, false);
   return back;
 }
 

@@ -9,7 +9,6 @@
 #include "services/app_log.h"
 
 static lv_obj_t *mainMenu;
-lv_point_precise_t financeLinePoints[FINANCE_MAX_ASSETS][FINANCE_HISTORY] = {};
 static lv_obj_t *menuWifiIcon;
 static lv_obj_t *menuServersBadge;
 static lv_obj_t *menuClock;
@@ -42,29 +41,29 @@ static void refreshMenuSnapshot(int key) {
   if (!mainMenu || !menuPage[0]) return;
   menuSnapKey = key;
   const uint32_t t0 = millis();
-  const bool badge = menuServersBadge && !lv_obj_has_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);
-  if (badge) lv_obj_add_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);   // live overlay, not baked in
+  const bool badge = menuServersBadge && !lv_obj_is_hidden(menuServersBadge);
+  if (badge) lv_obj_set_hidden(menuServersBadge, true);   // live overlay, not baked in
   bool allOk = true;
   for (int p = 0; p < MENU_PAGES; ++p) {
-    if (menuSnapImg[p]) lv_obj_add_flag(menuSnapImg[p], LV_OBJ_FLAG_HIDDEN);
-    for (int i = 0; i < menuArtN; ++i) if (menuArtPage[i] == p) lv_obj_remove_flag(menuArt[i], LV_OBJ_FLAG_HIDDEN);
+    if (menuSnapImg[p]) lv_obj_set_hidden(menuSnapImg[p], true);
+    for (int i = 0; i < menuArtN; ++i) if (menuArtPage[i] == p) lv_obj_set_hidden(menuArt[i], false);
     lv_obj_update_layout(menuPage[p]);
     lv_draw_buf_t *nb = lv_snapshot_take(menuPage[p], LV_COLOR_FORMAT_RGB565);
     if (nb) {
       if (!menuSnapImg[p]) {
         menuSnapImg[p] = lv_image_create(menuPage[p]);
         lv_obj_set_pos(menuSnapImg[p], 0, 0);
-        lv_obj_remove_flag(menuSnapImg[p], LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_clickable(menuSnapImg[p], false);
         lv_obj_move_background(menuSnapImg[p]);
       }
       lv_image_set_src(menuSnapImg[p], nb);
       if (menuSnap[p]) lv_draw_buf_destroy(menuSnap[p]);      // image already points to the new one
       menuSnap[p] = nb;
-      lv_obj_remove_flag(menuSnapImg[p], LV_OBJ_FLAG_HIDDEN);
-      for (int i = 0; i < menuArtN; ++i) if (menuArtPage[i] == p) lv_obj_add_flag(menuArt[i], LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_hidden(menuSnapImg[p], false);
+      for (int i = 0; i < menuArtN; ++i) if (menuArtPage[i] == p) lv_obj_set_hidden(menuArt[i], true);
     } else allOk = false;                                       // no memory: keep that page's live icons
   }
-  if (badge) lv_obj_remove_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);
+  if (badge) lv_obj_set_hidden(menuServersBadge, false);
   LogV.printf("Menu: imagens %s em %lums\n", allOk ? "geradas" : "FALHARAM", (unsigned long)(millis() - t0));
 }
 
@@ -74,8 +73,8 @@ static void renderMenu() {
   xSemaphoreGive(mtx);
   if (!renderedWifiKnown || renderedWifiUp != up) {
     renderWifiIndicator(menuWifiIcon, up);
-    if (up) lv_obj_add_flag(menuWifiIcon, LV_OBJ_FLAG_HIDDEN);
-    else { lv_obj_remove_flag(menuWifiIcon, LV_OBJ_FLAG_HIDDEN); lv_obj_move_foreground(menuWifiIcon); }
+    if (up) lv_obj_set_hidden(menuWifiIcon, true);
+    else { lv_obj_set_hidden(menuWifiIcon, false); lv_obj_move_foreground(menuWifiIcon); }
     renderedWifiUp = up;
     renderedWifiKnown = true;
   }
@@ -91,9 +90,9 @@ static void renderMenu() {
   }
   if (menuServersBadge) {
     const bool alert = serversAlert();
-    if (alert != !lv_obj_has_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN)) {
-      if (alert) lv_obj_remove_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);
-      else lv_obj_add_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);
+    if (alert != !lv_obj_is_hidden(menuServersBadge)) {
+      if (alert) lv_obj_set_hidden(menuServersBadge, false);
+      else lv_obj_set_hidden(menuServersBadge, true);
     }
   }
 }
@@ -119,7 +118,7 @@ static constexpr int TILE_W = 112, TILE_H = 94, ICON = 72;
 
 static void noClickBox(lv_obj_t *o) {
   lv_obj_set_style_border_width(o, 0, 0); lv_obj_set_style_pad_all(o, 0, 0);
-  lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE); lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_clickable(o, false); lv_obj_set_scrollable(o, false);
 }
 
 // ---- hand-drawn app glyphs (shapes only, no bitmaps) --------------------------
@@ -139,7 +138,7 @@ static lv_obj_t *polyline(lv_obj_t *p, const lv_point_precise_t *pts, int n, int
   lv_obj_set_style_line_color(l, lv_color_hex(color), 0);
   lv_obj_set_style_line_rounded(l, true, 0);
   lv_obj_set_pos(l, 0, 0);
-  lv_obj_remove_flag(l, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(l, false);
   return l;
 }
 static void iconBg(lv_obj_t *box, uint32_t top, uint32_t bottom) {
@@ -178,7 +177,7 @@ static void drawAppGlyph(lv_obj_t *box, const char *app, const char *symbol) {
     lv_obj_t *img = lv_image_create(box);
     lv_image_set_src(img, &icon_financas);
     lv_obj_align(img, LV_ALIGN_CENTER, 0, 0);            // centred: the 1 px top highlight border shifts the content area
-    lv_obj_remove_flag(img, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(img, false);
   } else if (!strcmp(app, "Servidores")) {           // 3-unit rack with LEDs
     iconBg(box, 0x3A4558, 0x161B24);
     for (int r = 0; r < 3; ++r) {
@@ -241,7 +240,7 @@ static void drawAppGlyph(lv_obj_t *box, const char *app, const char *symbol) {
     lv_obj_set_style_image_recolor(jet, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_image_recolor_opa(jet, LV_OPA_COVER, 0);
     lv_obj_set_pos(jet, 30, 14);
-    lv_obj_remove_flag(jet, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(jet, false);
   } else if (!strcmp(app, "Relógio")) {              // white face, 10:10 hands
     iconBg(box, 0x22252B, 0x0B0C0F);
     lv_obj_t *face = blob(box, 8, 8, 56, 56, 0xFFFFFF);
@@ -296,8 +295,8 @@ static void drawAppGlyph(lv_obj_t *box, const char *app, const char *symbol) {
 // rebuilt only when the calendar icon changes (new day).
 static void tilePressFx(lv_event_t *e) {
   lv_obj_t *shade = (lv_obj_t *)lv_event_get_user_data(e);
-  if (lv_event_get_code(e) == LV_EVENT_PRESSED) lv_obj_remove_flag(shade, LV_OBJ_FLAG_HIDDEN);
-  else lv_obj_add_flag(shade, LV_OBJ_FLAG_HIDDEN);
+  if (lv_event_get_code(e) == LV_EVENT_PRESSED) lv_obj_set_hidden(shade, false);
+  else lv_obj_set_hidden(shade, true);
 }
 
 // A drag (or the moment right after a page change) never opens an app.
@@ -315,9 +314,9 @@ static lv_obj_t *menuTile(lv_obj_t *parent, const char *symbol, const char *capt
   lv_obj_set_style_border_width(tile, 0, 0);
   lv_obj_set_style_shadow_width(tile, 0, 0);
   lv_obj_set_style_pad_all(tile, 0, 0);
-  lv_obj_remove_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(tile, false);
   if (callback) lv_obj_add_event_cb(tile, menuTileClick, LV_EVENT_CLICKED, (void *)callback);
-  else lv_obj_remove_flag(tile, LV_OBJ_FLAG_CLICKABLE);
+  else lv_obj_set_clickable(tile, false);
 
   const lv_color_t base = lv_color_hex(tileColor);
   lv_obj_t *iconBox = lv_obj_create(tile);
@@ -345,7 +344,7 @@ static lv_obj_t *menuTile(lv_obj_t *parent, const char *symbol, const char *capt
     lv_obj_set_size(shade, ICON, ICON); lv_obj_align(shade, LV_ALIGN_TOP_MID, 0, 0); noClickBox(shade);
     lv_obj_set_style_radius(shade, 17, 0);
     lv_obj_set_style_bg_color(shade, lv_color_black(), 0); lv_obj_set_style_bg_opa(shade, LV_OPA_40, 0);
-    lv_obj_add_flag(shade, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(shade, true);
     lv_obj_add_event_cb(tile, tilePressFx, LV_EVENT_PRESSED, shade);
     lv_obj_add_event_cb(tile, tilePressFx, LV_EVENT_RELEASED, shade);
     lv_obj_add_event_cb(tile, tilePressFx, LV_EVENT_PRESS_LOST, shade);
@@ -435,11 +434,11 @@ static void buildMenuScreen(lv_obj_t *scr) {
   lv_obj_set_style_bg_grad_color(menu, lv_color_hex(0x073B86), 0);
   lv_obj_set_style_bg_grad_dir(menu, LV_GRAD_DIR_VER, 0);
   lv_obj_set_style_bg_opa(menu, LV_OPA_COVER, 0);
-  lv_obj_remove_flag(menu, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(menu, false);
 
   // status bar (clock left, Wi-Fi right) like the iPhone
   menuClock = makeLabel(menu, "--:--", &lv_font_weather_14, 0xEAF2FF);
-  lv_obj_add_flag(menuClock, LV_OBJ_FLAG_HIDDEN);   // no status bar: more room between rows
+  lv_obj_set_hidden(menuClock, true);   // no status bar: more room between rows
 
   // strip with one 480x320 page per screenful of apps (4 x 3 grid each)
   menuStrip = lv_obj_create(menu);
@@ -449,8 +448,8 @@ static void buildMenuScreen(lv_obj_t *scr) {
   lv_obj_set_style_border_width(menuStrip, 0, 0);
   lv_obj_set_style_pad_all(menuStrip, 0, 0);
   lv_obj_set_style_radius(menuStrip, 0, 0);
-  lv_obj_remove_flag(menuStrip, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_remove_flag(menuStrip, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_scrollable(menuStrip, false);
+  lv_obj_set_clickable(menuStrip, false);
   lv_obj_t *grid[MENU_PAGES];
   for (int p = 0; p < MENU_PAGES; ++p) {
     lv_obj_t *pg = menuPage[p] = lv_obj_create(menuStrip);
@@ -463,8 +462,8 @@ static void buildMenuScreen(lv_obj_t *scr) {
     lv_obj_set_style_border_width(pg, 0, 0);
     lv_obj_set_style_pad_all(pg, 0, 0);
     lv_obj_set_style_radius(pg, 0, 0);
-    lv_obj_remove_flag(pg, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_remove_flag(pg, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_scrollable(pg, false);
+    lv_obj_set_clickable(pg, false);
     lv_obj_t *g = grid[p] = lv_obj_create(pg);
     lv_obj_set_size(g, 4 * TILE_W + 3 * 6, 3 * TILE_H + 2 * 11);
     lv_obj_align(g, LV_ALIGN_CENTER, 0, 0);
@@ -475,8 +474,8 @@ static void buildMenuScreen(lv_obj_t *scr) {
     lv_obj_set_style_pad_column(g, 6, 0);
     lv_obj_set_flex_flow(g, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(g, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_remove_flag(g, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_remove_flag(g, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_scrollable(g, false);
+    lv_obj_set_clickable(g, false);
   }
   // ---- page 1: the original 12 apps (unchanged order)
   menuBuildPage = 0;
@@ -491,8 +490,8 @@ static void buildMenuScreen(lv_obj_t *scr) {
     lv_obj_set_style_bg_color(menuServersBadge, lv_color_hex(0xF0453A), 0);
     lv_obj_set_style_border_color(menuServersBadge, lv_color_hex(0x06163C), 0);
     lv_obj_set_style_border_width(menuServersBadge, 2, 0);
-    lv_obj_remove_flag(menuServersBadge, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(menuServersBadge, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_clickable(menuServersBadge, false);
+    lv_obj_set_hidden(menuServersBadge, true);
   }
   menuTile(gridA, LV_SYMBOL_SETTINGS, "Ajustes", 0x8993A3, showSettingsEvent);
   menuTile(gridA, "", "Calendário", 0xF8F8FA, showCalendarEvent);

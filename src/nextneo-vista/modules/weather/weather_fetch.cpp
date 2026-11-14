@@ -11,6 +11,8 @@
 #include "services/psram_alloc.h"
 #include "services/app_log.h"
 
+WeatherData wx;   // owned by this module; read by Weather / Clock / web page (under mtx)
+
 static String urlEncode(const String &s) {
   String o;
   for (size_t i = 0; i < s.length(); i++) {
@@ -119,22 +121,22 @@ bool weatherFetch() {
     applyTime();
   }
   xSemaphoreTake(mtx, portMAX_DELAY);
-  sh.temp = doc["current"]["temperature_2m"] | 0.0f;
+  wx.temp = doc["current"]["temperature_2m"] | 0.0f;
   {
     const int apiCode = doc["current"]["weather_code"] | 0;
     const float precip = doc["current"]["precipitation"] | 0.0f;
     const int cloud = doc["current"]["cloud_cover"] | -1;
-    sh.code = checkCurrentCode(apiCode, precip, cloud);
-    sh.isDay = (doc["current"]["is_day"] | 1) != 0;
-    if (sh.code != apiCode)
+    wx.code = checkCurrentCode(apiCode, precip, cloud);
+    wx.isDay = (doc["current"]["is_day"] | 1) != 0;
+    if (wx.code != apiCode)
       Log.printf("Clima: API disse %d (%s), mas nuvens %d%% e %.1f mm -> mostrando %d\n",
-                 apiCode, weatherText(apiCode), cloud, precip, sh.code);
+                 apiCode, weatherText(apiCode), cloud, precip, wx.code);
   }
-  sh.humidity = doc["current"]["relative_humidity_2m"] | 0;
-  sh.wind = doc["current"]["wind_speed_10m"] | 0.0f;
-  sh.feels = doc["current"]["apparent_temperature"] | sh.temp;
-  sh.uv = doc["current"]["uv_index"] | -1.0f;
-  sh.hourCount = 0;
+  wx.humidity = doc["current"]["relative_humidity_2m"] | 0;
+  wx.wind = doc["current"]["wind_speed_10m"] | 0.0f;
+  wx.feels = doc["current"]["apparent_temperature"] | wx.temp;
+  wx.uv = doc["current"]["uv_index"] | -1.0f;
+  wx.hourCount = 0;
   JsonArray times = hourlyTimes;
   JsonArray hourlyTemp = hourlyTemps;
   JsonArray hourlyCode = hourlyCodes;
@@ -150,41 +152,41 @@ bool weatherFetch() {
     if (i >= (int)times.size()) break;
     String hour = String(times[i] | "");
     if (hour.length() >= 13) {
-      sh.hourLabel[j][0] = hour[11]; sh.hourLabel[j][1] = hour[12];
-      sh.hourLabel[j][2] = 0;
+      wx.hourLabel[j][0] = hour[11]; wx.hourLabel[j][1] = hour[12];
+      wx.hourLabel[j][2] = 0;
     }
-    sh.hourTemp[j] = hourlyTemp[i] | 0.0f;
-    sh.hourCode[j] = hourlyCode[i] | 0;
-    sh.hourRain[j] = hourlyRain[i] | 0;
-    sh.hourIsDay[j] = (hourlyIsDay.isNull() ? 1 : (hourlyIsDay[i] | 1)) != 0;
-    sh.hourCount++;
+    wx.hourTemp[j] = hourlyTemp[i] | 0.0f;
+    wx.hourCode[j] = hourlyCode[i] | 0;
+    wx.hourRain[j] = hourlyRain[i] | 0;
+    wx.hourIsDay[j] = (hourlyIsDay.isNull() ? 1 : (hourlyIsDay[i] | 1)) != 0;
+    wx.hourCount++;
   }
   // O card "Agora" deve mostrar o mesmo valor do bloco principal (current),
   // e não a previsão da hora cheia (hh:00), que pode diferir 1-2 °C.
-  if (sh.hourCount > 0) {
-    sh.hourTemp[0] = sh.temp;
-    sh.hourCode[0] = sh.code;
-    sh.hourIsDay[0] = sh.isDay;
+  if (wx.hourCount > 0) {
+    wx.hourTemp[0] = wx.temp;
+    wx.hourCode[0] = wx.code;
+    wx.hourIsDay[0] = wx.isDay;
   }
   for (int i = 0; i < 7; i++) {
-    sh.tmax[i] = doc["daily"]["temperature_2m_max"][i] | 0.0f;
-    sh.tmin[i] = doc["daily"]["temperature_2m_min"][i] | 0.0f;
-    sh.dcode[i] = doc["daily"]["weather_code"][i] | 0;
+    wx.tmax[i] = doc["daily"]["temperature_2m_max"][i] | 0.0f;
+    wx.tmin[i] = doc["daily"]["temperature_2m_min"][i] | 0.0f;
+    wx.dcode[i] = doc["daily"]["weather_code"][i] | 0;
     // Open-Meteo's daily code is the WORST hour of the day: one hour of drizzle turns the
     // whole day into "rain". Keep rain only if it really rains (>= 1 mm and >= 2 h);
     // otherwise show the day's mean cloud cover instead.
     {
-      const int dc = sh.dcode[i];
+      const int dc = wx.dcode[i];
       const bool wet = (dc >= 51 && dc <= 67) || (dc >= 80 && dc <= 82) || dc >= 95;
       const float mm = doc["daily"]["precipitation_sum"][i] | -1.0f;
       const float hrs = doc["daily"]["precipitation_hours"][i] | -1.0f;
       if (wet && mm >= 0 && hrs >= 0 && (mm < 1.0f || hrs < 2.0f)) {
         const int cc = doc["daily"]["cloud_cover_mean"][i] | 50;
-        sh.dcode[i] = cc < 25 ? 1 : cc < 65 ? 2 : 3;
-        LogV.printf("Weather: dia %d código %d -> %d (chuva %.1f mm em %.0f h, nuvens %d%%)\n", i, dc, sh.dcode[i], mm, hrs, cc);
+        wx.dcode[i] = cc < 25 ? 1 : cc < 65 ? 2 : 3;
+        LogV.printf("Weather: dia %d código %d -> %d (chuva %.1f mm em %.0f h, nuvens %d%%)\n", i, dc, wx.dcode[i], mm, hrs, cc);
       }
     }
-    sh.dayRain[i] = doc["daily"]["precipitation_probability_max"][i] | 0;
+    wx.dayRain[i] = doc["daily"]["precipitation_probability_max"][i] | 0;
     const char *d = doc["daily"]["time"][i] | "";
     int y, m, dd;
     struct tm t = {};
@@ -192,11 +194,11 @@ bool weatherFetch() {
       t.tm_year = y - 1900; t.tm_mon = m - 1; t.tm_mday = dd; t.tm_hour = 12;
       mktime(&t);
       static const char *weekdays[] = {"Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"};
-      snprintf(sh.dayName[i], sizeof sh.dayName[i], "%s", weekdays[t.tm_wday]);
+      snprintf(wx.dayName[i], sizeof wx.dayName[i], "%s", weekdays[t.tm_wday]);
     }
   }
-  sh.haveWeather = true;
-  sh.weatherVersion++;
+  wx.haveWeather = true;
+  wx.weatherVersion++;
   sh.status = "Previsão atualizada";
   xSemaphoreGive(mtx);
   return true;
@@ -222,8 +224,8 @@ bool applyManualLocation(const String &input) {
   prefs.putString("city", name);
   prefs.putString("cityRaw", input);
   xSemaphoreTake(mtx, portMAX_DELAY);
-  sh.cityName = name;
-  sh.weatherVersion++;
+  wx.cityName = name;
+  wx.weatherVersion++;
   xSemaphoreGive(mtx);
   Log.println("Local manual salvo");   // no name/coordinates in the log (privacy)
   setStatus("Local salvo: " + name);
@@ -272,8 +274,8 @@ bool weatherGeocodeFetch() {
   prefs.putString("city", name);
   prefs.remove("cityRaw");
   xSemaphoreTake(mtx, portMAX_DELAY);
-  sh.cityName = name;
-  sh.weatherVersion++;
+  wx.cityName = name;
+  wx.weatherVersion++;
   xSemaphoreGive(mtx);
   setStatus("Local salvo: " + name);
   Log.println("Cidade encontrada (geocodificação ok)");   // no name/coordinates in the log (privacy)

@@ -11,9 +11,10 @@ bool tlsMemoryAvailable(const char *tag) {
   return false;
 }
 
-int httpsFetch(WiFiClientSecure &client, const char *url, PsramBuffer &body,
-               uint32_t timeoutMs, bool reuse, const char *postBody, const char *contentType,
-               const HttpsFetchOptions &options) {
+// One request on `client` (already connected = keep-alive reuse, or a new connection).
+static int fetchOnce(WiFiClientSecure &client, const char *url, PsramBuffer &body,
+                     uint32_t timeoutMs, bool reuse, const char *postBody, const char *contentType,
+                     const HttpsFetchOptions &options) {
   body.clear();
   if (!client.connected() && !tlsMemoryAvailable(url)) return HTTPC_ERROR_TOO_LESS_RAM;
   HTTPClient http;
@@ -42,6 +43,8 @@ int httpsFetch(WiFiClientSecure &client, const char *url, PsramBuffer &body,
   if (status == HTTP_CODE_OK || status == HTTP_CODE_NOT_FOUND) {
     const int size = http.getSize();
     if (size > 0) body.reserve((size_t)size);
+    // (Tried: reading in 8 KB blocks instead of writeToStream's ~1.4 KB. A 421 KB map took
+    // the same time: the limit is Wi-Fi + TLS decryption on the ESP32, not the copy.)
     const int written = http.writeToStream(&body);
     if (written < 0 || body.overflowed()) {
       status = written < 0 ? written : HTTPC_ERROR_STREAM_WRITE;
@@ -52,4 +55,22 @@ int httpsFetch(WiFiClientSecure &client, const char *url, PsramBuffer &body,
   // Never keep a broken/one-shot session, nor one with an unread error body.
   if (status <= 0 || !reuse || (status != HTTP_CODE_OK && status != HTTP_CODE_NOT_FOUND)) client.stop();
   return status;
+}
+
+int httpsFetch(WiFiClientSecure &client, const char *url, PsramBuffer &body,
+               uint32_t timeoutMs, bool reuse, const char *postBody, const char *contentType,
+               const HttpsFetchOptions &options) {
+  // A kept-alive session may have been closed by the server while idle (ADSB.lol does
+  // it between radar polls): the request then hangs until the timeout (seen: 2 s -> 11 s).
+  // So a reused session gets a short timeout, and on a transport error the request is
+  // repeated once on a new connection.
+  const bool reused = reuse && client.connected();
+  if (!reused) return fetchOnce(client, url, body, timeoutMs, reuse, postBody, contentType, options);
+  const uint32_t t0 = millis();
+  const int status = fetchOnce(client, url, body, timeoutMs < REUSED_TIMEOUT_MS ? timeoutMs : REUSED_TIMEOUT_MS,
+                               reuse, postBody, contentType, options);
+  if (status > 0) return status;
+  client.stop();
+  LogV.printf("[http] keep-alive expirada (%d em %lums); nova conex\xC3\xA3o\n", status, (unsigned long)(millis() - t0));
+  return fetchOnce(client, url, body, timeoutMs, reuse, postBody, contentType, options);
 }

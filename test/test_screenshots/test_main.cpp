@@ -43,7 +43,7 @@ static void capture(const char *name) {
 
 static void hideRealLocation() {
   xSemaphoreTake(mtx, portMAX_DELAY);
-  sh.cityName = "Minha cidade";
+  wx.cityName = "Minha cidade";
   xSemaphoreGive(mtx);
   cfg.lat = -23.5505f; cfg.lon = -46.6333f;   // public city centre, not the real address
 }

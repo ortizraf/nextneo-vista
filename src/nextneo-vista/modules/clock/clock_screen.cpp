@@ -66,8 +66,8 @@ static lv_obj_t *shape(lv_obj_t *p, int w, int h, uint32_t color, lv_opa_t opa, 
   lv_obj_set_style_bg_opa(o, opa, 0);
   lv_obj_set_style_border_width(o, 0, 0);
   lv_obj_set_style_pad_all(o, 0, 0);
-  lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_clickable(o, false);
+  lv_obj_set_scrollable(o, false);
   return o;
 }
 static lv_obj_t *group(lv_obj_t *p, int w, int h) {
@@ -75,8 +75,8 @@ static lv_obj_t *group(lv_obj_t *p, int w, int h) {
   return o;
 }
 static void show(lv_obj_t *o, bool on) {
-  if (on == !lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) return;
-  if (on) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+  if (on == !lv_obj_is_hidden(o)) return;
+  if (on) lv_obj_set_hidden(o, false); else lv_obj_set_hidden(o, true);
 }
 static uint32_t mixHex(uint32_t a, uint32_t b, float t) {
   t = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -235,7 +235,7 @@ static void animCb(lv_timer_t *) {
   if (dt > 0.2f) dt = 0.05f;
   if (minimal) return;
 
-  if (rainLvl && !lv_obj_has_flag(drop[0], LV_OBJ_FLAG_HIDDEN)) {
+  if (rainLvl && !lv_obj_is_hidden(drop[0])) {
     const int nDrops = kRainDrops[rainLvl];
     const float spd = kRainSpeedK[rainLvl];
     for (int i = 0; i < nDrops; ++i) {
@@ -263,7 +263,7 @@ static void animCb(lv_timer_t *) {
       show(splash[k], true);
     }
   }
-  if (!lv_obj_has_flag(fog[0], LV_OBJ_FLAG_HIDDEN)) {
+  if (!lv_obj_is_hidden(fog[0])) {
     for (int i = 0; i < FOG; ++i) {
       fogX[i] += (5 + i * 3) * dt * ((i & 1) ? -1 : 1);
       if (fogX[i] > 0) fogX[i] = -80;
@@ -271,7 +271,7 @@ static void animCb(lv_timer_t *) {
       lv_obj_set_x(fog[i], (int)fogX[i]);
     }
   }
-  if (!lv_obj_has_flag(star[0], LV_OBJ_FLAG_HIDDEN)) {
+  if (!lv_obj_is_hidden(star[0])) {
     for (int k = 0; k < 4; ++k) {                                   // twinkle
       const int i = esp_random() % STARS;
       starPhase[i] = (starPhase[i] + 25) % 200;
@@ -289,7 +289,7 @@ static void animCb(lv_timer_t *) {
       if (e >= 1) { shootStartMs = 0; show(shoot, false); nextShootMs = now + 12000 + esp_random() % 20000; }
     }
   }
-  if (isStorm(wxCode) && !minimal && !lv_obj_has_flag(sky, LV_OBJ_FLAG_HIDDEN)) {                                // lightning: double flicker
+  if (isStorm(wxCode) && !minimal && !lv_obj_is_hidden(sky)) {                                // lightning: double flicker
     if (!nextFlashMs) nextFlashMs = now + 4000;
     if (!flashStartMs && (int32_t)(now - nextFlashMs) >= 0) { flashStartMs = now; show(flash, true); }
     if (flashStartMs) {
@@ -325,7 +325,7 @@ static void setExpanded(bool on) {
   if (on) lv_anim_set_completed_cb(&a, [](lv_anim_t *) { show(hoursRow, true); });
   lv_anim_start(&a);
 }
-static void toggleCard(lv_event_t *) { if (!lv_obj_has_flag(chev, LV_OBJ_FLAG_HIDDEN)) setExpanded(!expanded); }
+static void toggleCard(lv_event_t *) { if (!lv_obj_is_hidden(chev)) setExpanded(!expanded); }
 
 static void buildClockScreen(lv_obj_t *scr) {
   clockView = lv_obj_create(scr);
@@ -333,13 +333,13 @@ static void buildClockScreen(lv_obj_t *scr) {
   lv_obj_set_style_border_width(clockView, 0, 0); lv_obj_set_style_pad_all(clockView, 0, 0);
   lv_obj_set_style_radius(clockView, 0, 0);
   lv_obj_set_style_bg_color(clockView, lv_color_hex(0x000000), 0); lv_obj_set_style_bg_opa(clockView, LV_OPA_COVER, 0);
-  lv_obj_remove_flag(clockView, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_flag(clockView, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_scrollable(clockView, false);
+  lv_obj_set_hidden(clockView, true);
   lv_obj_add_event_cb(clockView, tapToggle, LV_EVENT_CLICKED, NULL);
 
   sky = lv_image_create(clockView);           // photo-like background (see sky_images.c)
   lv_obj_set_pos(sky, 0, 0); lv_obj_set_size(sky, SCR_W, SCR_H);
-  lv_obj_remove_flag(sky, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(sky, false);
 
   for (int i = 0; i < STARS; ++i) {               // a few twinkling stars over the baked star field
     star[i] = shape(clockView, 3, 3, 0xFFFFFF, LV_OPA_70);
@@ -366,7 +366,7 @@ static void buildClockScreen(lv_obj_t *scr) {
     lv_obj_set_style_line_color(drop[i], lv_color_hex(0xDDEBFF), 0);
     lv_obj_set_style_line_opa(drop[i], kStreakOpa[L], 0);
     lv_obj_set_style_line_rounded(drop[i], true, 0);
-    lv_obj_remove_flag(drop[i], LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(drop[i], false);
     dropX[i] = frand(0, SCR_W + 80); dropY[i] = frand(-SCR_H, SCR_H);
     dropSpeed[i] = frand(kStreakSpeed[L][0], kStreakSpeed[L][1]);
   }
@@ -397,7 +397,7 @@ static void buildClockScreen(lv_obj_t *scr) {
   lv_obj_set_style_border_color(card, lv_color_hex(0xFFFFFF), 0);
   lv_obj_set_style_border_opa(card, LV_OPA_20, 0);
   lv_obj_align(card, LV_ALIGN_BOTTOM_MID, 0, -12);
-  lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(card, true);
   lv_obj_add_event_cb(card, toggleCard, LV_EVENT_CLICKED, NULL);
 
   nowIcon = group(card, 40, 30); lv_obj_set_pos(nowIcon, 14, 11);
@@ -465,20 +465,20 @@ static void clockOnExit() {
 static void clockRender() {
   struct tm ti;
   if (!localNow(&ti)) { show(textBox, false); showCard(false); renderedMinute = -1; return; }   // wait quietly for NTP
-  if (lv_obj_has_flag(textBox, LV_OBJ_FLAG_HIDDEN)) { show(textBox, true); lv_obj_fade_in(textBox, 350, 0); }
+  if (lv_obj_is_hidden(textBox)) { show(textBox, true); lv_obj_fade_in(textBox, 350, 0); }
   char b[96];
   strftime(b, sizeof b, cfg.h24 ? "%H:%M" : "%I:%M", &ti);
   setLabelIfChanged(clkTime, b); setLabelIfChanged(clkTimeSh, b);
   if (expanded && lv_tick_elaps(expandedAtMs) > 15000) setExpanded(false);   // auto-collapse
 
   xSemaphoreTake(mtx, portMAX_DELAY);
-  const bool have = sh.haveWeather;
-  const int code = sh.code, rain = sh.dayRain[0], hcount = sh.hourCount;
-  const float temp = sh.temp, tmax = sh.tmax[0], tmin = sh.tmin[0];
+  const bool have = wx.haveWeather;
+  const int code = wx.code, rain = wx.dayRain[0], hcount = wx.hourCount;
+  const float temp = wx.temp, tmax = wx.tmax[0], tmin = wx.tmin[0];
   char hl[HOURS][6]; float ht[HOURS]; int hc[HOURS]; bool hd[HOURS];
-  for (int i = 0; i < HOURS; ++i) { memcpy(hl[i], sh.hourLabel[i], 6); ht[i] = sh.hourTemp[i]; hc[i] = sh.hourCode[i]; hd[i] = sh.hourIsDay[i]; }
-  const bool liveDay = sh.isDay;
-  const uint32_t wv = sh.weatherVersion;
+  for (int i = 0; i < HOURS; ++i) { memcpy(hl[i], wx.hourLabel[i], 6); ht[i] = wx.hourTemp[i]; hc[i] = wx.hourCode[i]; hd[i] = wx.hourIsDay[i]; }
+  const bool liveDay = wx.isDay;
+  const uint32_t wv = wx.weatherVersion;
   xSemaphoreGive(mtx);
   WxCache wc = {};
   bool cached = false;
@@ -528,7 +528,7 @@ static void clockRender() {
   }
 }
 
-static const NetJobDef kClockJobs[] = {{CMD_WEATHER, "weather", weatherFetch, true}};
+static const NetJobDef kClockJobs[] = {{"weather", weatherFetch, true, true}};
 const ScreenLifecycle kClockScreen = {
   SCREEN_CLOCK, "clock", &clockView, buildClockScreen, clockOnEnter, clockOnExit, clockRender,
   nullptr, WEATHER_UPDATE_INTERVAL_MS, WEATHER_RETRY_INTERVAL_MS, kClockJobs, 1, nullptr,
