@@ -90,7 +90,7 @@ static void panelSendTask(void *) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     const uint32_t t = micros();
     panel->draw16bitRGBBitmap(0, 0, sendBuf, PANEL_W, PANEL_H);
-    perfPanelUs += micros() - t; perfPanelN++;
+    perfPanelUs += micros() - t; perfPanelN = perfPanelN + 1;
     xSemaphoreGive(sendIdle);
   }
 }
@@ -164,7 +164,7 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *a, uint8_t *px) {
                  perfScreenName(), (unsigned long)(perfFrames * 1000 / (el ? el : 1)), (unsigned long)(frame / 1000),
                  (unsigned long)(render / 1000), (unsigned long)(copy / 1000), (unsigned long)(send / 1000),
                  (unsigned long)panelMs, (unsigned long)(qspiHz / 1000000), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-      perfFrames = perfFlushUs = perfCopyUs = perfFrameUs = 0; perfPanelUs = perfPanelN = 0; perfLastLog = millis();
+      perfFrames = perfFlushUs = perfCopyUs = perfFrameUs = 0; perfPanelUs = 0; perfPanelN = 0; perfLastLog = millis();
     }
   }
   lv_display_flush_ready(disp);

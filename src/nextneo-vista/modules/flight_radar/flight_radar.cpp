@@ -239,8 +239,8 @@ lv_obj_t *makeBox(lv_obj_t *parent, int w, int h, uint32_t bg, lv_opa_t opa, int
   lv_obj_set_style_radius(o, radius, 0);
   lv_obj_set_style_pad_all(o, 0, 0);
   lv_obj_set_style_shadow_width(o, 0, 0);
-  lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_scrollable(o, false);
+  lv_obj_set_clickable(o, false);
   return o;
 }
 
@@ -251,7 +251,7 @@ lv_obj_t *makePill(lv_obj_t *parent, int x, int y, int w, lv_event_cb_t cb) {
   lv_obj_set_style_border_width(pill, 1, 0);
   lv_obj_set_style_border_opa(pill, LV_OPA_60, 0);
   if (cb) {
-    lv_obj_add_flag(pill, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(pill, true);
     lv_obj_set_ext_click_area(pill, 6);
     lv_obj_add_event_cb(pill, cb, LV_EVENT_CLICKED, nullptr);
     lv_obj_set_style_bg_color(pill, lv_color_hex(0x16484A), LV_STATE_PRESSED);
@@ -261,7 +261,7 @@ lv_obj_t *makePill(lv_obj_t *parent, int x, int y, int w, lv_event_cb_t cb) {
 
 lv_obj_t *makeText(lv_obj_t *parent, const char *text, const lv_font_t *font, uint32_t color) {
   lv_obj_t *label = makeLabel(parent, text, font, color);
-  lv_obj_remove_flag(label, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(label, false);
   return label;
 }
 
@@ -357,7 +357,7 @@ void placeTrail(const FlightRadarSnapshot &data, int selected, int headX, int he
   if (selected >= 0)
     for (uint8_t j = 0; j < FLIGHT_RADAR_MAX_AIRCRAFT; ++j)
       if (!strcmp(trails[j].hex, selectedHex)) { t = &trails[j]; break; }
-  if (!t || t->n < 1) { lv_obj_add_flag(trailLine, LV_OBJ_FLAG_HIDDEN); return; }
+  if (!t || t->n < 1) { lv_obj_set_hidden(trailLine, true); return; }
   uint8_t n = 0;
   for (uint8_t k = 0; k < t->n; ++k) {
     int x, y;
@@ -370,7 +370,7 @@ void placeTrail(const FlightRadarSnapshot &data, int selected, int headX, int he
   trailPoints[n].y = headY;
   ++n;
   lv_line_set_points(trailLine, trailPoints, n);
-  lv_obj_remove_flag(trailLine, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(trailLine, false);
 }
 
 // Moves every marker to its dead-reckoned position. Cheap: called each UI tick.
@@ -381,15 +381,15 @@ void placeAircraft(const FlightRadarSnapshot &data) {
   for (uint8_t i = 0; i < FLIGHT_RADAR_MAX_AIRCRAFT; ++i) {
     lv_obj_t *img = planeImg[i];
     visible[i] = false;
-    if (i >= data.count) { lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN); continue; }
+    if (i >= data.count) { lv_obj_set_hidden(img, true); continue; }
     double lat, lon;
     extrapolate(data.aircraft[i], data.lastSuccessMs, lat, lon);
     int x, y;
     project(lat, lon, data, x, y);
-    if (!insideScope(x, y, 4)) { lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN); continue; }
+    if (!insideScope(x, y, 4)) { lv_obj_set_hidden(img, true); continue; }
     visible[i] = true;
     px[i] = x; py[i] = y;
-    lv_obj_remove_flag(img, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(img, false);
     lv_obj_set_pos(img, x - ICON_PX / 2, y - ICON_PX / 2);
   }
 
@@ -421,19 +421,19 @@ void placeAircraft(const FlightRadarSnapshot &data) {
       lv_obj_set_style_text_color(tag, lv_color_hex(isSel ? C_SELECT : C_TEXT), 0);
       lv_obj_set_style_border_color(tag, lv_color_hex(isSel ? C_SELECT : altitudeColor(a)), 0);
       lv_obj_set_pos(tag, r.x1, r.y1);
-      lv_obj_remove_flag(tag, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_hidden(tag, false);
       placed[tags++] = r;
     }
   }
-  for (uint8_t t = tags; t < TAG_COUNT; ++t) lv_obj_add_flag(tagLabel[t], LV_OBJ_FLAG_HIDDEN);
+  for (uint8_t t = tags; t < TAG_COUNT; ++t) lv_obj_set_hidden(tagLabel[t], true);
 
   if (selected >= 0 && visible[selected]) {
     lv_obj_set_pos(selRing, px[selected] - 19, py[selected] - 19);
-    lv_obj_remove_flag(selRing, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(selRing, false);
     placeTrail(data, selected, px[selected], py[selected]);
   } else {
-    lv_obj_add_flag(selRing, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(trailLine, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(selRing, true);
+    lv_obj_set_hidden(trailLine, true);
   }
 }
 
@@ -452,12 +452,12 @@ void styleMarkers(const FlightRadarSnapshot &data) {
 
 void renderList(const FlightRadarSnapshot &data) {
   const bool showList = data.count > 0;
-  lv_obj_add_flag(detailView, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_remove_flag(listView, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(detailView, true);
+  lv_obj_set_hidden(listView, false);
   for (uint8_t r = 0; r < LIST_ROWS; ++r) {
-    if (!showList || r >= data.count) { lv_obj_add_flag(listRow[r], LV_OBJ_FLAG_HIDDEN); continue; }
+    if (!showList || r >= data.count) { lv_obj_set_hidden(listRow[r], true); continue; }
     const Aircraft &a = data.aircraft[r];
-    lv_obj_remove_flag(listRow[r], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(listRow[r], false);
     lv_obj_set_style_bg_color(listDot[r], lv_color_hex(altitudeColor(a)), 0);
     setLabelIfChanged(listCall[r], a.callsign[0] ? a.callsign : (a.registration[0] ? a.registration : a.icao24));
     char alt[12], km[12], sub[40];
@@ -467,10 +467,10 @@ void renderList(const FlightRadarSnapshot &data) {
     setLabelIfChanged(listSub[r], sub);
   }
   if (showList) {
-    lv_obj_add_flag(listEmpty, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(listEmpty, true);
     setLabelIfChanged(listTitle, "MAIS PRÓXIMOS");
   } else {
-    lv_obj_remove_flag(listEmpty, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(listEmpty, false);
     setLabelIfChanged(listTitle, "RADAR");
     char msg[96];
     if (data.status == FlightRadarStatus::LOADING) snprintf(msg, sizeof msg, "Buscando aeronaves perto de %s...", data.airportCode);
@@ -481,8 +481,8 @@ void renderList(const FlightRadarSnapshot &data) {
 }
 
 void renderDetails(const Aircraft &a) {
-  lv_obj_add_flag(listView, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_remove_flag(detailView, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(listView, true);
+  lv_obj_set_hidden(detailView, false);
   setLabelIfChanged(dTitle, a.callsign[0] ? a.callsign : (a.registration[0] ? a.registration : a.icao24));
 
   AircraftDetails details;
@@ -548,17 +548,17 @@ void renderMap() {
   if (version == renderedMapVersion) return;
   renderedMapVersion = version;
   if (!mapAreaValid || front < 0 || !mapBuffer[front]) {
-    lv_obj_add_flag(mapImg, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(attribution, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(mapImg, true);
+    lv_obj_set_hidden(attribution, true);
     mapShownByUi = -1;
     return;
   }
   // Same descriptor may be reused with new pixels: force a redraw.
   lv_image_set_src(mapImg, &mapDsc[front]);
   lv_obj_invalidate(mapImg);
-  lv_obj_remove_flag(mapImg, LV_OBJ_FLAG_HIDDEN);
-  if (mapFrontStreets) lv_obj_remove_flag(attribution, LV_OBJ_FLAG_HIDDEN);
-  else lv_obj_add_flag(attribution, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(mapImg, false);
+  if (mapFrontStreets) lv_obj_set_hidden(attribution, false);
+  else lv_obj_set_hidden(attribution, true);
   mapShownByUi = front;
 }
 
@@ -634,7 +634,7 @@ void mapClickEvent(lv_event_t *) {
   renderedMapVersion = UINT32_MAX;
   xSemaphoreTake(mtx, portMAX_DELAY);
   mapRetryAfterMs = 0;
-  ++mapVersion;
+  mapVersion = mapVersion + 1;
   xSemaphoreGive(mtx);
   renderMap();
   if (requestRefresh) requestRefresh();   // network task rebuilds the image (with/without streets)
@@ -685,8 +685,8 @@ void placeHome(const FlightRadarSnapshot &data) {
   }
   if (inside != homeVisible) {
     homeVisible = inside;
-    if (inside) { lv_obj_remove_flag(homeDot, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(homeHalo, LV_OBJ_FLAG_HIDDEN); }
-    else { lv_obj_add_flag(homeDot, LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(homeHalo, LV_OBJ_FLAG_HIDDEN); }
+    if (inside) { lv_obj_set_hidden(homeDot, false); lv_obj_set_hidden(homeHalo, false); }
+    else { lv_obj_set_hidden(homeDot, true); lv_obj_set_hidden(homeHalo, true); }
   }
   if (inside && (x != homeX || y != homeY)) {
     homeX = x; homeY = y;
@@ -701,7 +701,7 @@ void buildScope(lv_obj_t *screen) {
   lv_obj_set_pos(scopeFill, SCOPE_CX - SCOPE_R, SCOPE_CY - SCOPE_R);
   lv_obj_set_style_bg_grad_color(scopeFill, lv_color_hex(0x0C2B2A), 0);
   lv_obj_set_style_bg_grad_dir(scopeFill, LV_GRAD_DIR_VER, 0);
-  lv_obj_add_flag(scopeFill, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(scopeFill, true);
   lv_obj_add_event_cb(scopeFill, scopeClickEvent, LV_EVENT_CLICKED, nullptr);
 
   for (int i = 0; i < 2; ++i) {
@@ -716,8 +716,8 @@ void buildScope(lv_obj_t *screen) {
   mapImg = lv_image_create(screen);
   lv_obj_set_pos(mapImg, SCOPE_CX - SCOPE_R, SCOPE_CY - SCOPE_R);
   lv_obj_set_size(mapImg, MAP_SIZE, MAP_SIZE);
-  lv_obj_remove_flag(mapImg, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_flag(mapImg, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_clickable(mapImg, false);
+  lv_obj_set_hidden(mapImg, true);
 
   // Sweep: three fading wedges + a bright leading edge.
   static const lv_opa_t sweepOpa[3] = {LV_OPA_40, LV_OPA_20, LV_OPA_10};
@@ -736,9 +736,9 @@ void buildScope(lv_obj_t *screen) {
     lv_obj_set_style_arc_opa(arc, sweepOpa[k], LV_PART_INDICATOR);
     lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_KNOB);
     lv_obj_set_style_pad_all(arc, 0, LV_PART_KNOB);
-    lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(arc, false);
     lv_arc_set_angles(arc, 0, 1);
-    if (!SWEEP_ENABLED) lv_obj_add_flag(arc, LV_OBJ_FLAG_HIDDEN);
+    if (!SWEEP_ENABLED) lv_obj_set_hidden(arc, true);
     sweepArc[k] = arc;
   }
   sweepPoints[0].x = SCOPE_CX;
@@ -749,9 +749,9 @@ void buildScope(lv_obj_t *screen) {
   lv_obj_set_style_line_color(sweepLine, lv_color_hex(0x9FFFEA), 0);
   lv_obj_set_style_line_width(sweepLine, 2, 0);
   lv_obj_set_style_line_opa(sweepLine, LV_OPA_80, 0);
-  lv_obj_remove_flag(sweepLine, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(sweepLine, false);
   lv_line_set_points(sweepLine, sweepPoints, 2);
-  if (!SWEEP_ENABLED) lv_obj_add_flag(sweepLine, LV_OBJ_FLAG_HIDDEN);
+  if (!SWEEP_ENABLED) lv_obj_set_hidden(sweepLine, true);
 
   // Range rings + crosshair.
   for (int n = 1; n <= 3; ++n) {
@@ -773,7 +773,7 @@ void buildScope(lv_obj_t *screen) {
     lv_obj_set_style_line_color(line, lv_color_hex(C_RING), 0);
     lv_obj_set_style_line_opa(line, LV_OPA_40, 0);
     lv_obj_set_style_line_width(line, 1, 0);
-    lv_obj_remove_flag(line, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(line, false);
   }
 
   // Compass bezel: tick every 10 deg, cardinal letters.
@@ -801,7 +801,7 @@ void buildScope(lv_obj_t *screen) {
   lv_obj_set_style_line_color(scale, lv_color_hex(C_ACCENT), LV_PART_INDICATOR);
   lv_obj_set_style_text_font(scale, &lv_font_weather_14, LV_PART_INDICATOR);
   lv_obj_set_style_text_color(scale, lv_color_hex(C_TEXT), LV_PART_INDICATOR);
-  lv_obj_remove_flag(scale, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(scale, false);
 
   // Airport marker.
   lv_obj_t *center = makeBox(screen, 8, 8, C_SELECT, LV_OPA_COVER, 2);
@@ -815,9 +815,9 @@ void buildScope(lv_obj_t *screen) {
   lv_obj_set_style_border_color(homeHalo, lv_color_hex(C_HOME), 0);
   lv_obj_set_style_border_width(homeHalo, 2, 0);
   lv_obj_set_style_border_opa(homeHalo, LV_OPA_TRANSP, 0);
-  lv_obj_add_flag(homeHalo, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(homeHalo, true);
   homeDot = makeBox(screen, 8, 8, C_HOME, LV_OPA_COVER, LV_RADIUS_CIRCLE);
-  lv_obj_add_flag(homeDot, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(homeDot, true);
 
   // Selected aircraft trail + highlight ring.
   trailLine = lv_line_create(screen);
@@ -826,12 +826,12 @@ void buildScope(lv_obj_t *screen) {
   lv_obj_set_style_line_width(trailLine, 2, 0);
   lv_obj_set_style_line_opa(trailLine, LV_OPA_70, 0);
   lv_obj_set_style_line_rounded(trailLine, true, 0);
-  lv_obj_remove_flag(trailLine, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_flag(trailLine, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_clickable(trailLine, false);
+  lv_obj_set_hidden(trailLine, true);
   selRing = makeBox(screen, 38, 38, 0, LV_OPA_TRANSP, LV_RADIUS_CIRCLE);
   lv_obj_set_style_border_color(selRing, lv_color_hex(C_SELECT), 0);
   lv_obj_set_style_border_width(selRing, 2, 0);
-  lv_obj_add_flag(selRing, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(selRing, true);
 
   // Aircraft marker pool (one image each, recoloured + rotated by LVGL).
   for (uint8_t i = 0; i < FLIGHT_RADAR_MAX_AIRCRAFT; ++i) {
@@ -841,10 +841,10 @@ void buildScope(lv_obj_t *screen) {
     lv_image_set_pivot(img, ICON_PX / 2, ICON_PX / 2);
     lv_image_set_antialias(img, true);
     lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
-    lv_obj_add_flag(img, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(img, true);
     lv_obj_set_ext_click_area(img, 8);
     lv_obj_add_event_cb(img, planeClickEvent, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-    lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(img, true);
     planeImg[i] = img;
   }
   for (uint8_t t = 0; t < TAG_COUNT; ++t) {
@@ -855,7 +855,7 @@ void buildScope(lv_obj_t *screen) {
     lv_obj_set_style_radius(tag, 4, 0);
     lv_obj_set_style_pad_hor(tag, 4, 0);
     lv_obj_set_style_pad_ver(tag, 1, 0);
-    lv_obj_add_flag(tag, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(tag, true);
     tagLabel[t] = tag;
   }
 
@@ -873,7 +873,7 @@ void buildScope(lv_obj_t *screen) {
   lv_obj_center(mapText);
   attribution = makeText(screen, "Esri", &lv_font_weather_14, C_MUTED);
   lv_obj_set_pos(attribution, 214, 296);
-  lv_obj_add_flag(attribution, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(attribution, true);
 }
 
 void buildPanel(lv_obj_t *screen) {
@@ -907,7 +907,7 @@ void buildPanel(lv_obj_t *screen) {
   for (uint8_t r = 0; r < LIST_ROWS; ++r) {
     lv_obj_t *row = makeBox(listView, inner, 38, 0x12302F, LV_OPA_TRANSP, 8);
     lv_obj_set_pos(row, 0, 22 + r * 40);
-    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(row, true);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_add_event_cb(row, rowClickEvent, LV_EVENT_CLICKED, (void *)(intptr_t)r);
     listDot[r] = makeBox(row, 8, 8, C_ACCENT, LV_OPA_COVER, LV_RADIUS_CIRCLE);
@@ -918,14 +918,14 @@ void buildPanel(lv_obj_t *screen) {
     lv_obj_set_pos(listSub[r], 16, 19);
     lv_obj_set_width(listSub[r], inner - 18);
     lv_label_set_long_mode(listSub[r], LV_LABEL_LONG_DOT);
-    lv_obj_add_flag(row, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(row, true);
     listRow[r] = row;
   }
 
   // ---- selected aircraft
   detailView = makeBox(card, inner, 222, 0, LV_OPA_TRANSP, 0);
   lv_obj_set_pos(detailView, 8, 8);
-  lv_obj_add_flag(detailView, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(detailView, true);
   dTitle = makeText(detailView, "", &lv_font_weather_20, C_SELECT);
   lv_obj_set_pos(dTitle, 0, 0);
   lv_obj_t *close = makePill(detailView, inner - 28, 0, 28, closeDetailsEvent);
@@ -1034,7 +1034,7 @@ static void maybeFetchMap(double lat, double lon, float radiusKm, const char *co
   mapFrontStreets = streets;
   // Only valid if the user didn't switch airport/radius while downloading.
   mapAreaValid = snapshot->centerLat == lat && snapshot->centerLon == lon && snapshot->radiusKm == radiusKm;
-  ++mapVersion;
+  mapVersion = mapVersion + 1;
   xSemaphoreGive(mtx);
 }
 
@@ -1170,7 +1170,7 @@ bool setFlightRadarAirportCode(const char *input) {
   ++snapshot->version;
   mapRetryAfterMs = 0;
   mapAreaValid = false;   // hide the old basemap until the new one is decoded
-  ++mapVersion;
+  mapVersion = mapVersion + 1;
   xSemaphoreGive(mtx);
   prefs.putString("radarAirport", code);
   if (radarActive && requestRefresh) requestRefresh();
@@ -1188,7 +1188,7 @@ bool setFlightRadarRadiusKm(uint8_t radiusKm) {
   ++snapshot->version;
   mapRetryAfterMs = 0;
   mapAreaValid = false;   // hide the old basemap until the new one is decoded
-  ++mapVersion;
+  mapVersion = mapVersion + 1;
   xSemaphoreGive(mtx);
   prefs.putUChar("radarRadiusKm", radiusKm);
   if (radarActive && requestRefresh) requestRefresh();
@@ -1232,7 +1232,7 @@ static void buildFlightRadarScreen(lv_obj_t *parent) {
   lv_obj_set_style_border_width(screen, 0, 0);
   lv_obj_set_style_radius(screen, 0, 0);
   lv_obj_set_style_pad_all(screen, 0, 0);
-  lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(screen, false);
   buildScope(screen);
   buildPanel(screen);
   addBackButton(screen);   // last: always on top

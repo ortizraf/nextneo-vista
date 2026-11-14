@@ -84,8 +84,8 @@ static void buildCard(int i) {
   lv_obj_set_style_border_color(c, lv_color_hex(0x45484D), 0);
   // no blurred shadow: it cost 150-700 ms per frame while scrolling (see [perf]); a lighter top edge keeps the depth
   lv_obj_set_style_shadow_width(c, 0, 0);
-  lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_scrollable(c, false);
+  lv_obj_set_clickable(c, true);
   // tap = refresh this quote (as before); hold = detail screen
   lv_obj_add_event_cb(c, refreshQuoteEvent, LV_EVENT_SHORT_CLICKED, (void *)(intptr_t)i);
   lv_obj_add_event_cb(c, [](lv_event_t *e) { openDetail((int)(intptr_t)lv_event_get_user_data(e)); },
@@ -104,8 +104,8 @@ static void buildCard(int i) {
   financePlot[i] = lv_obj_create(c);
   lv_obj_set_size(financePlot[i], 164, 56); lv_obj_set_pos(financePlot[i], 14, 62);
   lv_obj_set_style_bg_opa(financePlot[i], LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(financePlot[i], 0, 0);
-  lv_obj_set_style_pad_all(financePlot[i], 0, 0); lv_obj_remove_flag(financePlot[i], LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_remove_flag(financePlot[i], LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_pad_all(financePlot[i], 0, 0); lv_obj_set_scrollable(financePlot[i], false);
+  lv_obj_set_clickable(financePlot[i], false);
   if (!financeFillBuf[i]) financeFillBuf[i] = (uint16_t *)psramMalloc(PLOT_W * PLOT_H * 2);
   financeFillImg[i] = nullptr;
   if (financeFillBuf[i]) {
@@ -125,7 +125,7 @@ static void buildCard(int i) {
   lv_obj_set_style_line_dash_width(financeBase[i], 4, 0); lv_obj_set_style_line_dash_gap(financeBase[i], 4, 0);
   lv_obj_set_style_line_color(financeBase[i], lv_color_hex(0x8A909C), 0);
   lv_obj_set_style_line_opa(financeBase[i], LV_OPA_60, 0);
-  lv_obj_add_flag(financeBase[i], LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(financeBase[i], true);
   financeLine[i] = lv_line_create(financePlot[i]);
   lv_obj_set_size(financeLine[i], 164, 56); lv_obj_set_pos(financeLine[i], 0, 0);
   lv_obj_set_style_line_width(financeLine[i], 2, 0); lv_obj_set_style_line_rounded(financeLine[i], true, 0);
@@ -133,8 +133,8 @@ static void buildCard(int i) {
   financeDot[i] = lv_obj_create(financePlot[i]);             // last point
   lv_obj_set_size(financeDot[i], 7, 7); lv_obj_set_style_radius(financeDot[i], LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_border_width(financeDot[i], 0, 0); lv_obj_set_style_pad_all(financeDot[i], 0, 0);
-  lv_obj_remove_flag(financeDot[i], LV_OBJ_FLAG_CLICKABLE); lv_obj_remove_flag(financeDot[i], LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_flag(financeDot[i], LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_clickable(financeDot[i], false); lv_obj_set_scrollable(financeDot[i], false);
+  lv_obj_set_hidden(financeDot[i], true);
   financeDelta[i] = makeLabel(c, "", &lv_font_weather_14, 0x30C875);
   lv_obj_set_pos(financeDelta[i], 14, 128);
   financeValue[i] = makeLabel(c, "", &lv_font_montserrat_48, 0xEEEEEE);
@@ -158,10 +158,10 @@ static void rebuildFinanceCards() {
   char currency[FINANCE_MAX_ASSETS][4];
   uint8_t count;
   xSemaphoreTake(mtx, portMAX_DELAY);
-  count = sh.financeAssetCount;
-  memcpy(assets, sh.financeAssets, sizeof assets);
-  memcpy(currency, sh.financeCurrency, sizeof currency);
-  builtConfigVersion = sh.financeConfigVersion;
+  count = fin.assetCount;
+  memcpy(assets, fin.assets, sizeof assets);
+  memcpy(currency, fin.currency, sizeof currency);
+  builtConfigVersion = fin.configVersion;
   xSemaphoreGive(mtx);
   lv_obj_clean(financeStrip);
   for (int i = 0; i < FINANCE_MAX_ASSETS; ++i) financeCard[i] = nullptr;
@@ -173,8 +173,8 @@ static void rebuildFinanceCards() {
 
 static void buildFinanceScreen(lv_obj_t *scr) {
   financeView=lv_obj_create(scr); lv_obj_set_size(financeView,SCR_W,SCR_H); lv_obj_set_pos(financeView,0,0);
-  lv_obj_add_flag(financeView, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_set_style_bg_color(financeView,lv_color_hex(0x050E24),0); lv_obj_set_style_bg_grad_color(financeView,lv_color_hex(0x0B2A6B),0); lv_obj_set_style_bg_grad_dir(financeView,LV_GRAD_DIR_VER,0); lv_obj_set_style_bg_opa(financeView,LV_OPA_COVER,0); lv_obj_set_style_border_width(financeView,0,0); lv_obj_set_style_pad_all(financeView,0,0); lv_obj_remove_flag(financeView,LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_hidden(financeView, true);
+  lv_obj_set_style_bg_color(financeView,lv_color_hex(0x050E24),0); lv_obj_set_style_bg_grad_color(financeView,lv_color_hex(0x0B2A6B),0); lv_obj_set_style_bg_grad_dir(financeView,LV_GRAD_DIR_VER,0); lv_obj_set_style_bg_opa(financeView,LV_OPA_COVER,0); lv_obj_set_style_border_width(financeView,0,0); lv_obj_set_style_pad_all(financeView,0,0); lv_obj_set_scrollable(financeView, false);
   financeStrip=lv_obj_create(financeView);lv_obj_set_size(financeStrip,SCR_W,266);lv_obj_set_pos(financeStrip,0,54);lv_obj_set_style_bg_opa(financeStrip,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(financeStrip,0,0);lv_obj_set_style_pad_all(financeStrip,0,0);lv_obj_set_style_pad_column(financeStrip,16,0);lv_obj_set_scroll_dir(financeStrip,LV_DIR_HOR);lv_obj_set_flex_flow(financeStrip,LV_FLEX_FLOW_ROW);lv_obj_set_flex_align(financeStrip,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
   // Keep the 240px cards inside the scroll viewport so the colored top border never gets clipped.
   lv_obj_set_style_pad_bottom(financeStrip,14,0);
@@ -203,26 +203,26 @@ static void updateFinanceScreen() {
   bool financeRefreshing;
   uint32_t financeLastSuccessMs, financeVersion, configVersion;
   xSemaphoreTake(mtx, portMAX_DELAY);
-  configVersion = sh.financeConfigVersion;
+  configVersion = fin.configVersion;
   xSemaphoreGive(mtx);
   if (configVersion != builtConfigVersion) rebuildFinanceCards();
 
   xSemaphoreTake(mtx, portMAX_DELAY);
-  count = sh.financeAssetCount;
-  memcpy(assets, sh.financeAssets, sizeof assets);
-  memcpy(currency, sh.financeCurrency, sizeof currency);
-  memcpy(fx, sh.finance, sizeof fx);
-  memcpy(fxok, sh.haveFinance, sizeof fxok);
-  memcpy(delta, sh.financeChange, sizeof delta);
-  memcpy(deltaOk, sh.haveChange, sizeof deltaOk);
-  memcpy(hist, sh.history, sizeof hist);
-  memcpy(histN, sh.historyCount, sizeof histN);
-  memcpy(prevClose, sh.previousFinance, sizeof prevClose);
-  financeRefreshing = sh.financeRefreshing;
-  financeSuccessCount = sh.financeSuccessCount;
-  financeLastSuccessMs = sh.financeLastSuccessMs;
-  financeVersion = sh.financeVersion;
-  memcpy(financeQuoteEpoch, sh.financeQuoteEpoch, sizeof financeQuoteEpoch);
+  count = fin.assetCount;
+  memcpy(assets, fin.assets, sizeof assets);
+  memcpy(currency, fin.currency, sizeof currency);
+  memcpy(fx, fin.price, sizeof fx);
+  memcpy(fxok, fin.havePrice, sizeof fxok);
+  memcpy(delta, fin.changePct, sizeof delta);
+  memcpy(deltaOk, fin.haveChange, sizeof deltaOk);
+  memcpy(hist, fin.history, sizeof hist);
+  memcpy(histN, fin.historyCount, sizeof histN);
+  memcpy(prevClose, fin.previousClose, sizeof prevClose);
+  financeRefreshing = fin.refreshing;
+  financeSuccessCount = fin.successCount;
+  financeLastSuccessMs = fin.lastSuccessMs;
+  financeVersion = fin.version;
+  memcpy(financeQuoteEpoch, fin.quoteEpoch, sizeof financeQuoteEpoch);
   xSemaphoreGive(mtx);
   if (count > builtCount) count = builtCount;
 
@@ -269,20 +269,20 @@ static void updateFinanceScreen() {
           const int by = 52 - (int)((prevClose[i] - lo) * 44 / (hi - lo));
           financeBasePts[i][0] = {0, by}; financeBasePts[i][1] = {PLOT_W - 1, by};
           lv_line_set_points(financeBase[i], financeBasePts[i], 2);
-          lv_obj_remove_flag(financeBase[i], LV_OBJ_FLAG_HIDDEN);
-        } else lv_obj_add_flag(financeBase[i], LV_OBJ_FLAG_HIDDEN);
+          lv_obj_set_hidden(financeBase[i], false);
+        } else lv_obj_set_hidden(financeBase[i], true);
         const lv_point_precise_t &last = financeLinePoints[i][histN[i] - 1];
         lv_obj_set_style_bg_color(financeDot[i], lv_color_hex(lineHex), 0);
         lv_obj_set_pos(financeDot[i], (int)last.x - 3, (int)last.y - 3);
-        lv_obj_remove_flag(financeDot[i], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(financeDot[i], false);
         if (financeFillImg[i]) {
           drawAreaFill(financeFillBuf[i], PLOT_W, PLOT_H, financeLinePoints[i], histN[i], CARD_BG, lineHex, 70);
           lv_obj_invalidate(financeFillImg[i]);
         }
       } else {
         lv_line_set_points(financeLine[i],NULL,0);
-        lv_obj_add_flag(financeBase[i], LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(financeDot[i], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(financeBase[i], true);
+        lv_obj_set_hidden(financeDot[i], true);
         if (financeFillImg[i]) { drawAreaFill(financeFillBuf[i], PLOT_W, PLOT_H, nullptr, 0, CARD_BG, lineHex, 0); lv_obj_invalidate(financeFillImg[i]); }
       }
     }
@@ -345,23 +345,23 @@ static FinanceDetail dData;                                   // UI copy
 static const char *const kStatCaption[8] = {"Fech. anterior", "Abertura", "M\xC3\xA1x. do dia", "M\xC3\xADn. do dia",
                                             "M\xC3\xA1x. per\xC3\xADodo", "M\xC3\xADn. per\xC3\xADodo", "M\xC3\xA1x. 52 sem.", "M\xC3\xADn. 52 sem."};
 
-static bool detailOpen() { return dPanel && !lv_obj_has_flag(dPanel, LV_OBJ_FLAG_HIDDEN); }
+static bool detailOpen() { return dPanel && !lv_obj_is_hidden(dPanel); }
 
 static void closeDetail() {
   if (!dPanel) return;
-  lv_obj_add_flag(dPanel, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(dPanel, true);
   dIndex = -1;
 }
 
 static void requestDetail() {
   if (dIndex < 0) return;
   xSemaphoreTake(mtx, portMAX_DELAY);
-  snprintf(financeDetailWant.symbol, sizeof financeDetailWant.symbol, "%s", sh.financeAssets[dIndex].symbol);
+  snprintf(financeDetailWant.symbol, sizeof financeDetailWant.symbol, "%s", fin.assets[dIndex].symbol);
   financeDetailWant.range = dRange;
   xSemaphoreGive(mtx);
   dRequestedMs = millis();
   lv_label_set_text(dLoading, "carregando...");
-  lv_obj_remove_flag(dLoading, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(dLoading, false);
   postScreenJob(CMD_FINANCE_DETAIL);       // deduplicated; detailRender re-posts if the answer is for an older request
 }
 
@@ -398,13 +398,13 @@ static void drawDetailChart(uint32_t lineHex) {
     const int32_t by = yOf(ref);
     dBasePts[0] = {0, by}; dBasePts[1] = {DCH_W - 1, by};
     lv_line_set_points(dBase, dBasePts, 2);
-    lv_obj_remove_flag(dBase, LV_OBJ_FLAG_HIDDEN);
-  } else lv_obj_add_flag(dBase, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(dBase, false);
+  } else lv_obj_set_hidden(dBase, true);
   if (n > 1) {
     lv_obj_set_style_bg_color(dDot, lv_color_hex(lineHex), 0);
     lv_obj_set_pos(dDot, lv_obj_get_x(dChartImg) + (int)dPts[n - 1].x - 4, lv_obj_get_y(dChartImg) + (int)dPts[n - 1].y - 4);
-    lv_obj_remove_flag(dDot, LV_OBJ_FLAG_HIDDEN);
-  } else lv_obj_add_flag(dDot, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(dDot, false);
+  } else lv_obj_set_hidden(dDot, true);
 }
 
 // Header (name, price, day change) from the card data: always current, even before the chart arrives.
@@ -412,10 +412,10 @@ static void detailHeader() {
   if (dIndex < 0) return;
   char name[24], sub[48], b[48];
   xSemaphoreTake(mtx, portMAX_DELAY);
-  const FinanceAsset a = sh.financeAssets[dIndex];
-  const float price = sh.finance[dIndex], prev = sh.previousFinance[dIndex], pct = sh.financeChange[dIndex];
-  const bool have = sh.haveFinance[dIndex], haveCh = sh.haveChange[dIndex];
-  char cur[4]; memcpy(cur, sh.financeCurrency[dIndex], sizeof cur);
+  const FinanceAsset a = fin.assets[dIndex];
+  const float price = fin.price[dIndex], prev = fin.previousClose[dIndex], pct = fin.changePct[dIndex];
+  const bool have = fin.havePrice[dIndex], haveCh = fin.haveChange[dIndex];
+  char cur[4]; memcpy(cur, fin.currency[dIndex], sizeof cur);
   xSemaphoreGive(mtx);
   dPrev = prev > 0 ? prev : NAN;
   financeDisplayName(a.symbol, name, sizeof name);
@@ -444,7 +444,7 @@ static void detailFill() {
   setLabelIfChanged(dState, kState[ms]);
   lv_obj_set_style_text_color(dState, lv_color_hex(kStateCol[ms]), 0);
   lv_obj_set_style_border_color(dState, lv_color_hex(kStateCol[ms]), 0);
-  if (ms == FIN_MKT_UNKNOWN) lv_obj_add_flag(dState, LV_OBJ_FLAG_HIDDEN); else lv_obj_remove_flag(dState, LV_OBJ_FLAG_HIDDEN);
+  if (ms == FIN_MKT_UNKNOWN) lv_obj_set_hidden(dState, true); else lv_obj_set_hidden(dState, false);
   fmtTime(dData.ok ? dData.t0 : 0, dData.range, b, sizeof b); setLabelIfChanged(dT0, b);
   fmtTime(dData.ok ? dData.t1 : 0, dData.range, b, sizeof b); setLabelIfChanged(dT1, b);
   // change over the period (vs. the close before it)
@@ -463,8 +463,8 @@ static void detailFill() {
     else formatPrice(vals[k], b, sizeof b);
     setLabelIfChanged(dStatVal[k], b);
   }
-  if (dData.ok) lv_obj_add_flag(dLoading, LV_OBJ_FLAG_HIDDEN);
-  else { lv_label_set_text(dLoading, "sem dados para este per\xC3\xADodo"); lv_obj_remove_flag(dLoading, LV_OBJ_FLAG_HIDDEN); }
+  if (dData.ok) lv_obj_set_hidden(dLoading, true);
+  else { lv_label_set_text(dLoading, "sem dados para este per\xC3\xADodo"); lv_obj_set_hidden(dLoading, false); }
 }
 
 // 500 ms UI tick (from updateFinanceScreen) while the detail is open.
@@ -492,12 +492,12 @@ static void openDetail(int index) {
   lv_buttonmatrix_set_button_ctrl(dTabs, 0, LV_BUTTONMATRIX_CTRL_CHECKED);
   dData = FinanceDetail();
   dShownVersion = UINT32_MAX;
-  lv_obj_add_flag(dState, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(dState, true);
   setLabelIfChanged(dT0, ""); setLabelIfChanged(dT1, ""); setLabelIfChanged(dPeriod, "");
   drawDetailChart(0x35D879);
   for (int k = 0; k < 8; ++k) setLabelIfChanged(dStatVal[k], "-");
   detailHeader();
-  lv_obj_remove_flag(dPanel, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(dPanel, false);
   lv_obj_move_foreground(dPanel);
   xSemaphoreTake(mtx, portMAX_DELAY); dShownVersion = financeDetail.version; xSemaphoreGive(mtx);   // ignore older answers
   requestDetail();
@@ -515,8 +515,8 @@ static void buildDetailPanel() {
   lv_obj_set_size(dPanel, SCR_W, SCR_H); lv_obj_set_pos(dPanel, 0, 0);
   lv_obj_set_style_bg_color(dPanel, lv_color_hex(DETAIL_BG), 0); lv_obj_set_style_bg_opa(dPanel, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(dPanel, 0, 0); lv_obj_set_style_radius(dPanel, 0, 0); lv_obj_set_style_pad_all(dPanel, 0, 0);
-  lv_obj_remove_flag(dPanel, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_flag(dPanel, LV_OBJ_FLAG_CLICKABLE);                       // swallow taps behind it
+  lv_obj_set_scrollable(dPanel, false);
+  lv_obj_set_clickable(dPanel, true);                       // swallow taps behind it
 
   // back: same size, place and glass look as the app's back button (main.cpp), but it
   // closes the detail and stays on Finance
@@ -575,14 +575,14 @@ static void buildDetailPanel() {
   lv_obj_set_style_line_width(dBase, 1, 0);
   lv_obj_set_style_line_dash_width(dBase, 5, 0); lv_obj_set_style_line_dash_gap(dBase, 4, 0);
   lv_obj_set_style_line_color(dBase, lv_color_hex(0x8A909C), 0); lv_obj_set_style_line_opa(dBase, LV_OPA_70, 0);
-  lv_obj_add_flag(dBase, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(dBase, true);
   dLine = lv_line_create(dPanel);
   lv_obj_set_pos(dLine, 14, 136); lv_obj_set_size(dLine, DCH_W, DCH_H);
   lv_obj_set_style_line_width(dLine, 2, 0); lv_obj_set_style_line_rounded(dLine, true, 0);
   dDot = lv_obj_create(dPanel);
   lv_obj_set_size(dDot, 9, 9); lv_obj_set_style_radius(dDot, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_border_width(dDot, 0, 0); lv_obj_set_style_pad_all(dDot, 0, 0);
-  lv_obj_remove_flag(dDot, LV_OBJ_FLAG_CLICKABLE); lv_obj_add_flag(dDot, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_clickable(dDot, false); lv_obj_set_hidden(dDot, true);
   dLoading = makeLabel(dPanel, "", &lv_font_weather_14, 0x8FA3C4);
   lv_obj_set_style_text_align(dLoading, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_width(dLoading, DCH_W); lv_obj_set_pos(dLoading, 14, 136 + DCH_H / 2 - 9);
@@ -601,7 +601,7 @@ static void buildDetailPanel() {
     lv_obj_set_width(dStatVal[k], 146); lv_obj_set_style_text_align(dStatVal[k], LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_pos(dStatVal[k], 328, y);
   }
-  lv_obj_add_flag(dPanel, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(dPanel, true);
 }
 
 // ================================================================ showcase

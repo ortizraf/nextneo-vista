@@ -48,37 +48,37 @@ String serialize(const FinanceAsset *assets, uint8_t count) {
 // new ones start empty.
 void apply(const FinanceAsset *assets, uint8_t count) {
   xSemaphoreTake(mtx, portMAX_DELAY);
-  static Shared old;  // static: keeps the ~3 KB copy off the loop task stack
-  old = sh;
+  static FinanceData old;  // static: keeps the ~3 KB copy off the loop task stack
+  old = fin;
   for (uint8_t i = 0; i < FINANCE_MAX_ASSETS; ++i) {
     int from = -1;
     if (i < count)
-      for (uint8_t j = 0; j < old.financeAssetCount; ++j)
-        if (!strcmp(old.financeAssets[j].symbol, assets[i].symbol)) { from = j; break; }
-    sh.financeAssets[i] = i < count ? assets[i] : FinanceAsset();
+      for (uint8_t j = 0; j < old.assetCount; ++j)
+        if (!strcmp(old.assets[j].symbol, assets[i].symbol)) { from = j; break; }
+    fin.assets[i] = i < count ? assets[i] : FinanceAsset();
     if (from >= 0) {
-      memcpy(sh.financeCurrency[i], old.financeCurrency[from], sizeof sh.financeCurrency[i]);
-      sh.finance[i] = old.finance[from];
-      sh.previousFinance[i] = old.previousFinance[from];
-      sh.financeChange[i] = old.financeChange[from];
-      sh.haveChange[i] = old.haveChange[from];
-      memcpy(sh.history[i], old.history[from], sizeof sh.history[i]);
-      sh.historyCount[i] = old.historyCount[from];
-      sh.haveFinance[i] = old.haveFinance[from];
-      sh.financeApiKnown[i] = old.financeApiKnown[from];
-      sh.financeApiOk[i] = old.financeApiOk[from];
-      sh.financeQuoteEpoch[i] = old.financeQuoteEpoch[from];
+      memcpy(fin.currency[i], old.currency[from], sizeof fin.currency[i]);
+      fin.price[i] = old.price[from];
+      fin.previousClose[i] = old.previousClose[from];
+      fin.changePct[i] = old.changePct[from];
+      fin.haveChange[i] = old.haveChange[from];
+      memcpy(fin.history[i], old.history[from], sizeof fin.history[i]);
+      fin.historyCount[i] = old.historyCount[from];
+      fin.havePrice[i] = old.havePrice[from];
+      fin.apiKnown[i] = old.apiKnown[from];
+      fin.apiOk[i] = old.apiOk[from];
+      fin.quoteEpoch[i] = old.quoteEpoch[from];
     } else {
-      sh.financeCurrency[i][0] = 0;
-      sh.finance[i] = sh.previousFinance[i] = sh.financeChange[i] = 0;
-      sh.haveChange[i] = sh.haveFinance[i] = sh.financeApiKnown[i] = sh.financeApiOk[i] = false;
-      sh.historyCount[i] = 0;
-      sh.financeQuoteEpoch[i] = 0;
+      fin.currency[i][0] = 0;
+      fin.price[i] = fin.previousClose[i] = fin.changePct[i] = 0;
+      fin.haveChange[i] = fin.havePrice[i] = fin.apiKnown[i] = fin.apiOk[i] = false;
+      fin.historyCount[i] = 0;
+      fin.quoteEpoch[i] = 0;
     }
   }
-  sh.financeAssetCount = count;
-  ++sh.financeConfigVersion;
-  ++sh.financeVersion;
+  fin.assetCount = count;
+  ++fin.configVersion;
+  ++fin.version;
   xSemaphoreGive(mtx);
 }
 }  // namespace

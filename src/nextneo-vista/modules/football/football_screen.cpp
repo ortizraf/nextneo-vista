@@ -16,11 +16,9 @@ static void footballRender();
 #include "modules/football/football_internal.h"
 #include "modules/photos/photos.h"
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <time.h>
-#include "services/https_fetch.h"
 #include "services/psram_alloc.h"
 #include "services/app_log.h"
 
@@ -117,9 +115,9 @@ static const lv_image_dsc_t *crestFor(uint32_t id, uint32_t logoVersion) {
 static void plain(lv_obj_t *o) {
   lv_obj_set_style_bg_opa(o, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(o, 0, 0);
   lv_obj_set_style_pad_all(o, 0, 0); lv_obj_set_style_radius(o, 0, 0);
-  lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE); lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_scrollable(o, false); lv_obj_set_clickable(o, false);
 }
-static void show(lv_obj_t *o, bool on) { if (on) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN); }
+static void show(lv_obj_t *o, bool on) { if (on) lv_obj_set_hidden(o, false); else lv_obj_set_hidden(o, true); }
 
 // crest = ESPN logo once downloaded; until then a disc in the team colours with the abbreviation
 static void makeCrest(lv_obj_t *parent, lv_obj_t **box, lv_obj_t **img, lv_obj_t **txt) {
@@ -158,8 +156,8 @@ static void buildCard(int i) {
   lv_obj_set_style_border_color(c.card, lv_color_hex(CARD_EDGE), 0);
   lv_obj_set_style_shadow_width(c.card, 0, 0);
   lv_obj_set_style_pad_all(c.card, 0, 0);
-  lv_obj_remove_flag(c.card, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_remove_flag(c.card, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_scrollable(c.card, false);
+  lv_obj_set_clickable(c.card, false);
   // row 1: competition logo (ESPN) - or its short name until the logo arrives - + phase
   c.lgImg = lv_image_create(c.card);
   lv_image_set_scale(c.lgImg, 256 * 22 / LEAGUE_LOGO);          // 30 px logo shown at ~22 px
@@ -385,7 +383,7 @@ static void buildFootballScreen(lv_obj_t *scr) {
   lv_obj_set_style_bg_opa(footballView, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(footballView, 0, 0); lv_obj_set_style_pad_all(footballView, 0, 0);
   lv_obj_set_style_radius(footballView, 0, 0);
-  lv_obj_remove_flag(footballView, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(footballView, false);
 
   lv_obj_t *title = makeLabel(footballView, "Futebol", &lv_font_weather_20, 0xFFFFFF);
   lv_obj_set_pos(title, 56, 10);
@@ -405,8 +403,8 @@ static void buildFootballScreen(lv_obj_t *scr) {
   // carousel: drag sideways to reach INT / SUL / UEL (horizontal only, no scrollbar, no chaining to the list)
   lv_obj_set_scroll_dir(tabBar, LV_DIR_HOR);
   lv_obj_set_scrollbar_mode(tabBar, LV_SCROLLBAR_MODE_OFF);
-  lv_obj_remove_flag(tabBar, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
-  lv_obj_remove_flag(tabBar, LV_OBJ_FLAG_SCROLL_ELASTIC);
+  lv_obj_set_scroll_chain_hor(tabBar, false);
+  lv_obj_set_scroll_elastic(tabBar, false);
   static const char *const kTabTxt[NTAB] = {"Ao vivo", "UCL", "LIB", "MUN", "COPA", "SUL", "UEL"};   // until the logos arrive
   for (int i = 0; i < NTAB; ++i) {
     lv_obj_t *b = tabBtn[i] = lv_button_create(tabBar);
@@ -420,13 +418,13 @@ static void buildFootballScreen(lv_obj_t *scr) {
     lv_obj_align(tabTxt[i], LV_ALIGN_CENTER, i == 0 ? 7 : 0, 0);
     tabImg[i] = lv_image_create(b);
     lv_obj_center(tabImg[i]);
-    lv_obj_remove_flag(tabImg[i], LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(tabImg[i], false);
     show(tabImg[i], false);
   }
   lv_obj_t *dot = lv_obj_create(tabBtn[0]);                  // red "live" dot
   lv_obj_set_size(dot, 9, 9); lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(dot, lv_color_hex(0xFF5050), 0); lv_obj_set_style_border_width(dot, 0, 0);
-  lv_obj_remove_flag(dot, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(dot, false);
   lv_obj_align(dot, LV_ALIGN_LEFT_MID, 16, 0);
   styleTabs();
   lv_obj_update_layout(tabBar);
@@ -449,7 +447,7 @@ static void buildFootballScreen(lv_obj_t *scr) {
   for (int i = 0; i < NCARDS; ++i) buildCard(i);
 
   lv_obj_move_foreground(addBackButton(footballView));     // standard back button (main.cpp)
-  lv_obj_add_flag(footballView, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(footballView, true);
 }
 
 static void footballOnEnter() {
@@ -473,7 +471,7 @@ static void footballOnExit() {                                  // give the cres
 
 // UI tick (500 ms while shown)
 static void footballRender() {
-  if (!ui || !shared || !footballView || lv_obj_has_flag(footballView, LV_OBJ_FLAG_HIDDEN)) return;
+  if (!ui || !shared || !footballView || lv_obj_is_hidden(footballView)) return;
   if (xSemaphoreTake(lock, 0) == pdTRUE) {
     if (shared->version != ui->version) memcpy(ui, shared, sizeof *ui);
     xSemaphoreGive(lock);

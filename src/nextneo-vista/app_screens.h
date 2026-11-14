@@ -20,60 +20,14 @@ LV_FONT_DECLARE(lv_font_weather_20);
 #define SCR_W 480
 #define SCR_H 320
 
-// One asset on the Finance screen: Yahoo Finance symbol + optional caption.
-// Examples: USDBRL=X (dólar), EURBRL=X, BTC-USD, AAPL, PETR4.SA, ^BVSP (Ibovespa).
-static constexpr uint8_t FINANCE_MAX_ASSETS = 8;
-static constexpr uint8_t FINANCE_HISTORY = 48;     // card sparkline: whole trading day downsampled
-struct FinanceAsset {
-  char symbol[16] = {};
-  char label[32] = {};
-};
-
-// State written by the network task and read by the UI thread (always under mtx).
+// App-wide state (Wi-Fi, status line, network scan) written by the network task and read
+// by the UI thread, always under mtx. Screen data lives in its module (wx in weather.h, fin in finance.h).
 struct Shared {
   String status = "Not connected";
   String ssidList;
   uint32_t scanVersion = 0;
   bool wifiUp = false;
-  bool haveWeather = false;
-  String cityName = "São Paulo";
-  float temp = 0;
-  int code = 0;
-  int hourCount = 0;
-  char hourLabel[8][6] = {{0}};
-  float hourTemp[8] = {0};
-  int hourCode[8] = {0};
-  bool isDay = true;                  // Open-Meteo is_day for "now"
-  bool hourIsDay[8] = {true, true, true, true, true, true, true, true};
-  int hourRain[8] = {0};
-  int humidity = 0;
-  float wind = 0;
-  float feels = 0;                 // apparent temperature
-  float uv = -1;                   // UV index (-1 = unknown)
-  char dayName[7][6] = {{0}};
-  float tmax[7] = {0}, tmin[7] = {0};
-  int dayRain[7] = {0};               // daily precipitation_probability_max (%)
-  int dcode[7] = {0};
-  // ---- Finance (configurable list of Yahoo Finance symbols, see modules/finance)
-  FinanceAsset financeAssets[FINANCE_MAX_ASSETS];
-  uint8_t financeAssetCount = 0;
-  uint32_t financeConfigVersion = 0;     // bumped when the asset list changes
-  char financeCurrency[FINANCE_MAX_ASSETS][4] = {};
-  float finance[FINANCE_MAX_ASSETS] = {};
-  float previousFinance[FINANCE_MAX_ASSETS] = {}, financeChange[FINANCE_MAX_ASSETS] = {};
-  bool haveChange[FINANCE_MAX_ASSETS] = {};
-  float history[FINANCE_MAX_ASSETS][FINANCE_HISTORY] = {};
-  uint8_t historyCount[FINANCE_MAX_ASSETS] = {};
-  bool haveFinance[FINANCE_MAX_ASSETS] = {};
-  bool financeRefreshing = false;
-  uint8_t financeSuccessCount = 0;
-  bool financeApiKnown[FINANCE_MAX_ASSETS] = {};
-  bool financeApiOk[FINANCE_MAX_ASSETS] = {};
-  uint32_t financeLastSuccessMs = 0;
-  uint32_t financeVersion = 0;
-  uint32_t financeQuoteEpoch[FINANCE_MAX_ASSETS] = {};
-  uint32_t weatherVersion = 0;
-  String pendingSsid, pendingPass, pendingCity;
+  String pendingSsid, pendingPass, pendingCity;   // Settings / web page -> network task
 };
 
 struct Config {

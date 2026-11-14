@@ -13,6 +13,8 @@
 #include "services/psram_alloc.h"
 #include "services/app_log.h"
 
+FinanceData fin;  // owned by this module; read by the Finance screen / web page (under mtx)
+
 static uint32_t financeRetryAfterMs[FINANCE_MAX_ASSETS] = {};
 volatile int8_t financeSingleIndex = -1;
 static uint32_t financeBlockedUntilMs = 0;   // honours HTTP 429 Retry-After
@@ -188,10 +190,10 @@ static bool doFinance(int onlyIndex) {
   static FinanceAsset assets[FINANCE_MAX_ASSETS];
   static Quote quotes[FINANCE_MAX_ASSETS];
   xSemaphoreTake(mtx, portMAX_DELAY);
-  const uint8_t count = sh.financeAssetCount;
-  const uint32_t configVersion = sh.financeConfigVersion;
-  memcpy(assets, sh.financeAssets, sizeof assets);
-  sh.financeRefreshing = true;
+  const uint8_t count = fin.assetCount;
+  const uint32_t configVersion = fin.configVersion;
+  memcpy(assets, fin.assets, sizeof assets);
+  fin.refreshing = true;
   xSemaphoreGive(mtx);
   for (uint8_t i = 0; i < FINANCE_MAX_ASSETS; ++i) quotes[i] = Quote();
   if (onlyIndex >= count) onlyIndex = -1;
@@ -206,31 +208,31 @@ static bool doFinance(int onlyIndex) {
   bool anySuccess = false;
   xSemaphoreTake(mtx, portMAX_DELAY);
   // Discard results if the asset list was edited while downloading.
-  if (sh.financeConfigVersion == configVersion) {
+  if (fin.configVersion == configVersion) {
     for (uint8_t i = 0; i < count; ++i) {
       if (onlyIndex >= 0 && i != onlyIndex) continue;
       Quote &q = quotes[i];
-      sh.financeApiKnown[i] = true;
-      sh.financeApiOk[i] = q.ok;
+      fin.apiKnown[i] = true;
+      fin.apiOk[i] = q.ok;
       if (!q.ok) { Log.printf("Finance %s: atualização falhou; mantendo última cotação válida\n", assets[i].symbol); continue; }
       anySuccess = true;
       financeRetryAfterMs[i] = 0;
-      sh.previousFinance[i] = q.previousClose; sh.financeChange[i] = q.changePct;
-      sh.haveChange[i] = fabsf(q.changePct) > 0.0001f;
-      sh.finance[i] = q.price; sh.haveFinance[i] = true;
-      sh.financeQuoteEpoch[i] = q.epoch;
-      if (q.currency[0]) memcpy(sh.financeCurrency[i], q.currency, sizeof sh.financeCurrency[i]);
+      fin.previousClose[i] = q.previousClose; fin.changePct[i] = q.changePct;
+      fin.haveChange[i] = fabsf(q.changePct) > 0.0001f;
+      fin.price[i] = q.price; fin.havePrice[i] = true;
+      fin.quoteEpoch[i] = q.epoch;
+      if (q.currency[0]) memcpy(fin.currency[i], q.currency, sizeof fin.currency[i]);
       // Without intraday candles, keep the graph useful with previous close + quote.
       if (q.count < 2 && q.previousClose > 0) { q.series[0] = q.previousClose; q.series[1] = q.price; q.count = 2; }
-      if (q.count >= 2) { sh.historyCount[i] = q.count; memcpy(sh.history[i], q.series, sizeof q.series); }
+      if (q.count >= 2) { fin.historyCount[i] = q.count; memcpy(fin.history[i], q.series, sizeof q.series); }
     }
   }
-  sh.financeRefreshing = false;
+  fin.refreshing = false;
   uint8_t totalSuccesses = 0;
-  for (uint8_t i = 0; i < sh.financeAssetCount; ++i) if (sh.financeApiKnown[i] && sh.financeApiOk[i]) totalSuccesses++;
-  sh.financeSuccessCount = totalSuccesses;
-  if (anySuccess) sh.financeLastSuccessMs = millis();
-  sh.financeVersion++;
+  for (uint8_t i = 0; i < fin.assetCount; ++i) if (fin.apiKnown[i] && fin.apiOk[i]) totalSuccesses++;
+  fin.successCount = totalSuccesses;
+  if (anySuccess) fin.lastSuccessMs = millis();
+  fin.version++;
   xSemaphoreGive(mtx);
 
   uint32_t retryAfter = 0;

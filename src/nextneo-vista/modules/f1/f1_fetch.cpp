@@ -505,14 +505,14 @@ bool f1Fetch() {
     static uint32_t tracksTriedMs;
     if (!LittleFS.exists(path) && (!tracksTriedMs || millis() - tracksTriedMs > 120000UL)) {
       tracksTriedMs = millis();
-      if (fetchTracks(body)) ++mapVersion; else ok = false;
+      if (fetchTracks(body)) mapVersion = mapVersion + 1; else ok = false;
     }
     // street map picture (only for the "Ruas" style; "Pista" is the track alone on black)
     char tp[40]; pathFor(tp, sizeof tp, 't', cid);
     const uint8_t style = mapStyle;
     char ip[40]; imagePath(ip, sizeof ip, style, cid);
     if (style == ST_STREET && LittleFS.exists(tp) && !LittleFS.exists(ip) && screenJobStillCurrent()) {
-      if (fetchImage(cid, style, body)) ++mapVersion; else ok = false;
+      if (fetchImage(cid, style, body)) mapVersion = mapVersion + 1; else ok = false;
     }
   }
   return ok;

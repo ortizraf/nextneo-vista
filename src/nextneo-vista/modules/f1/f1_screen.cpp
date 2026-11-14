@@ -21,8 +21,6 @@
 static void f1Render();
 #include "modules/photos/photos.h"
 #include "services/app_log.h"
-#include "services/https_fetch.h"
-#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <esp_heap_caps.h>
@@ -727,7 +725,7 @@ static bool resultsMode(time_t now) {
 static void setPage(int p) {
   f1Page = p;
   for (int i = 0; i < 3; ++i) {
-    if (i == p) lv_obj_remove_flag(pages[i], LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
+    if (i == p) lv_obj_set_hidden(pages[i], false); else lv_obj_set_hidden(pages[i], true);
     lv_obj_set_style_bg_opa(tabBtn[i], i == p ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     lv_obj_set_style_text_color(lv_obj_get_child(tabBtn[i], 0), lv_color_hex(i == p ? 0xFFFFFF : C_DIM), 0);
   }
@@ -743,8 +741,8 @@ static void fillStandings(int which, time_t now) {
   lv_obj_t *list = lists[which];
   lv_obj_clean(list);
   auto row = [&](int h) { lv_obj_t *r = lv_obj_create(list); lv_obj_set_size(r, 456, h); lv_obj_set_style_bg_opa(r, LV_OPA_TRANSP, 0);
-                          lv_obj_set_style_border_width(r, 0, 0); lv_obj_set_style_pad_all(r, 0, 0); lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
-                          lv_obj_add_flag(r, LV_OBJ_FLAG_GESTURE_BUBBLE); return r; };
+                          lv_obj_set_style_border_width(r, 0, 0); lv_obj_set_style_pad_all(r, 0, 0); lv_obj_set_scrollable(r, false);
+                          lv_obj_set_gesture_bubble(r, true); return r; };
   // banner: podium after the chequered flag, champions at the end of the season
   const bool over = ui->nRaces && !displayRace(now);
   if ((resultsMode(now) || over) && (which == 0 ? ui->nDrivers : ui->nTeams)) {
@@ -812,7 +810,7 @@ static const char *shortSky(int c, bool night) {       // short sky text for the
   if (c >= 95) return "Trovoada";
   return "";
 }
-static void closeProg() { lv_obj_add_flag(progPanel, LV_OBJ_FLAG_HIDDEN); lv_timer_pause(progTimer); }
+static void closeProg() { lv_obj_set_hidden(progPanel, true); lv_timer_pause(progTimer); }
 // Fills the programme overlay from `ui`. Called when it opens and again by f1Render()
 // while it is open whenever new data arrives (the race forecast is fetched after the
 // calendar, so it often lands a few seconds after the panel was opened).
@@ -845,10 +843,10 @@ static bool fillProg() {
     if (next && live) snprintf(b, sizeof b, "AO VIVO"); else snprintf(b, sizeof b, "%02d:%02d", t.tm_hour, t.tm_min);
     lv_label_set_text(progTime[k], b);
     for (lv_obj_t *o : {progRow[k], progDay[k], progTime[k]}) lv_obj_set_style_text_color(o, lv_color_hex(next ? 0xFFFFFF : txt), 0);
-    lv_obj_remove_flag(progBox[k], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(progBox[k], false);
     ++k;
   }
-  for (; k < S_COUNT; ++k) lv_obj_add_flag(progBox[k], LV_OBJ_FLAG_HIDDEN);
+  for (; k < S_COUNT; ++k) lv_obj_set_hidden(progBox[k], true);
   // forecast only for the race of the coming GP (not in the preview of other circuits)
   if (previewIdx < 0 && ui->wxHave[S_RACE] && !strcmp(ui->wxCid, r->cid)) {
     static char w[96];
@@ -856,8 +854,8 @@ static bool fillProg() {
     snprintf(w, sizeof w, "Previs\xC3\xA3o p/ a corrida:  m\xC3\xADn %.0f\xC2\xB0  \xC2\xB7  m\xC3\xA1x %.0f\xC2\xB0  \xC2\xB7  %s",
              ui->wxMin[S_RACE], ui->wxMax[S_RACE],
              shortSky(ui->wxCode[S_RACE], ui->wxNight[S_RACE]));
-    lv_label_set_text(progRaceWx, w); lv_obj_remove_flag(progRaceWx, LV_OBJ_FLAG_HIDDEN);
-  } else lv_obj_add_flag(progRaceWx, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(progRaceWx, w); lv_obj_set_hidden(progRaceWx, false);
+  } else lv_obj_set_hidden(progRaceWx, true);
   static char foot[96];
   char len[16] = "";
   TrackHdr h;
@@ -868,7 +866,7 @@ static bool fillProg() {
 }
 static void openProg(lv_event_t *) {
   if (!fillProg()) return;
-  lv_obj_remove_flag(progPanel, LV_OBJ_FLAG_HIDDEN); lv_obj_move_foreground(progPanel);
+  lv_obj_set_hidden(progPanel, false); lv_obj_move_foreground(progPanel);
   lv_timer_reset(progTimer); lv_timer_resume(progTimer);
 }
 static void mapTap(lv_event_t *) { showCorners = !showCorners; }
@@ -888,7 +886,7 @@ static const char *kStyleName[ST_COUNT] = {"ruas", "pista"};
 static void mapLong(lv_event_t *) {                         // style button: streets -> drawing -> satellite
   mapStyle = (mapStyle + 1) % ST_COUNT;
   for (int i = 0; i < 2; ++i) {
-    if (i == mapStyle) lv_obj_remove_flag(styleIcon[i], LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(styleIcon[i], LV_OBJ_FLAG_HIDDEN);
+    if (i == mapStyle) lv_obj_set_hidden(styleIcon[i], false); else lv_obj_set_hidden(styleIcon[i], true);
   }
   LogV.printf("F1: mapa em modo %s\n", kStyleName[mapStyle]);
   strcpy(shownMapCid, "?");                                 // redraw now (with or without the picture)
@@ -900,7 +898,7 @@ static lv_obj_t *plainBox(lv_obj_t *parent, int x, int y, int w, int h) {
   lv_obj_set_pos(o, x, y); lv_obj_set_size(o, w, h);
   lv_obj_set_style_bg_opa(o, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(o, 0, 0);
   lv_obj_set_style_pad_all(o, 0, 0); lv_obj_set_style_radius(o, 0, 0);
-  lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE); lv_obj_add_flag(o, LV_OBJ_FLAG_GESTURE_BUBBLE);
+  lv_obj_set_scrollable(o, false); lv_obj_set_gesture_bubble(o, true);
   return o;
 }
 
@@ -910,8 +908,8 @@ static void buildF1Screen(lv_obj_t *scr) {
   lv_obj_set_size(f1View, SCR_W, SCR_H); lv_obj_set_pos(f1View, 0, 0);
   lv_obj_set_style_radius(f1View, 0, 0); lv_obj_set_style_border_width(f1View, 0, 0); lv_obj_set_style_pad_all(f1View, 0, 0);
   lv_obj_set_style_bg_color(f1View, lv_color_hex(C_BG), 0); lv_obj_set_style_bg_opa(f1View, LV_OPA_COVER, 0);
-  lv_obj_remove_flag(f1View, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_flag(f1View, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_scrollable(f1View, false);
+  lv_obj_set_hidden(f1View, true);
   lv_obj_add_event_cb(f1View, gestureEvent, LV_EVENT_GESTURE, NULL);
   // header: red slash + "FÓRMULA 1" + chequered strip
   lv_obj_t *slash = lv_obj_create(f1View); lv_obj_set_size(slash, 6, 22); lv_obj_set_pos(slash, 52, 10);
@@ -935,7 +933,7 @@ static void buildF1Screen(lv_obj_t *scr) {
   // f1Page 0: next session + circuit
   lv_obj_t *p = pages[0];
   lv_obj_t *left = plainBox(p, 0, 0, 192, SCR_H - 44);
-  lv_obj_add_flag(left, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(left, true);
   lv_obj_add_event_cb(left, openProg, LV_EVENT_CLICKED, NULL);
   lblGp = makeLabel(left, "", &lv_font_weather_20, C_TXT); lv_obj_set_pos(lblGp, 12, 8);
   lv_obj_set_width(lblGp, 180); lv_label_set_long_mode(lblGp, LV_LABEL_LONG_DOT);
@@ -947,10 +945,10 @@ static void buildF1Screen(lv_obj_t *scr) {
   lblTime = makeLabel(left, "", &lv_font_montserrat_48, 0xFFFFFF); lv_obj_set_pos(lblTime, 8, 130);
   lblCount = makeLabel(left, "", &lv_font_weather_14, 0xFFD54A); lv_obj_set_pos(lblCount, 12, 188);
   lblHint = makeLabel(left, "toque: programa\xC3\xA7\xC3\xA3o >", &lv_font_weather_14, 0x4E5A6C); lv_obj_set_pos(lblHint, 12, 248);
-  for (lv_obj_t *o : {lblGp, lblPlace, lblRound, lblNextKind, f1LblDate, lblTime, lblCount, lblHint}) lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
+  for (lv_obj_t *o : {lblGp, lblPlace, lblRound, lblNextKind, f1LblDate, lblTime, lblCount, lblHint}) lv_obj_set_clickable(o, false);
   mapCanvas = lv_canvas_create(p);
   lv_obj_set_pos(mapCanvas, SCR_W - MAP_W - 2, 0);
-  lv_obj_add_flag(mapCanvas, LV_OBJ_FLAG_CLICKABLE); lv_obj_add_flag(mapCanvas, LV_OBJ_FLAG_GESTURE_BUBBLE);
+  lv_obj_set_clickable(mapCanvas, true); lv_obj_set_gesture_bubble(mapCanvas, true);
   lv_obj_add_event_cb(mapCanvas, mapTap, LV_EVENT_CLICKED, NULL);
   // map style button (top-right corner of the map): one tap = next style
   styleBtn = lv_button_create(p);
@@ -969,7 +967,7 @@ static void buildF1Screen(lv_obj_t *scr) {
     lv_obj_set_size(styleIcon[i], 20, 20); lv_obj_center(styleIcon[i]);
     lv_obj_set_style_bg_opa(styleIcon[i], LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(styleIcon[i], 0, 0);
     lv_obj_set_style_pad_all(styleIcon[i], 0, 0);
-    lv_obj_remove_flag(styleIcon[i], LV_OBJ_FLAG_CLICKABLE); lv_obj_remove_flag(styleIcon[i], LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_clickable(styleIcon[i], false); lv_obj_set_scrollable(styleIcon[i], false);
   }
   for (const auto &g : kGrid) {
     lv_obj_t *l = lv_line_create(styleIcon[0]); lv_line_set_points(l, g, 2);
@@ -981,7 +979,7 @@ static void buildF1Screen(lv_obj_t *scr) {
     lv_obj_set_style_line_rounded(l, true, 0);
     lv_obj_t *f = lv_obj_create(styleIcon[1]); lv_obj_set_size(f, 4, 4); lv_obj_set_pos(f, 2, 9);   // red start mark
     lv_obj_set_style_bg_color(f, lv_color_hex(C_RED), 0); lv_obj_set_style_border_width(f, 0, 0); lv_obj_set_style_radius(f, 1, 0); }
-  lv_obj_add_flag(styleIcon[1], LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(styleIcon[1], true);
   lv_obj_add_event_cb(styleBtn, mapLong, LV_EVENT_CLICKED, NULL);
   for (int i = 0; i < 2; ++i) {                           // browse circuits: < (bottom-left of the map)  > (bottom-right)
     lv_obj_t *b = lv_button_create(p);
@@ -1005,7 +1003,7 @@ static void buildF1Screen(lv_obj_t *scr) {
     lv_obj_set_flex_flow(lists[i], LV_FLEX_FLOW_COLUMN);
     lv_obj_set_scroll_dir(lists[i], LV_DIR_VER);
     lv_obj_set_scrollbar_mode(lists[i], LV_SCROLLBAR_MODE_OFF);
-    lv_obj_add_flag(lists[i], LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_set_gesture_bubble(lists[i], true);
   }
   // weekend programme overlay
   progPanel = lv_obj_create(f1View);
@@ -1013,8 +1011,8 @@ static void buildF1Screen(lv_obj_t *scr) {
   lv_obj_set_style_bg_color(progPanel, lv_color_hex(0x10151F), 0); lv_obj_set_style_bg_opa(progPanel, LV_OPA_COVER, 0);
   lv_obj_set_style_border_color(progPanel, lv_color_hex(0x2C3850), 0); lv_obj_set_style_border_width(progPanel, 1, 0);
   lv_obj_set_style_radius(progPanel, 16, 0); lv_obj_set_style_pad_all(progPanel, 0, 0);
-  lv_obj_remove_flag(progPanel, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_flag(progPanel, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_scrollable(progPanel, false);
+  lv_obj_set_clickable(progPanel, true);
   lv_obj_add_event_cb(progPanel, [](lv_event_t *) { closeProg(); }, LV_EVENT_CLICKED, NULL);
   { lv_obj_t *bar = lv_obj_create(progPanel);              // red accent on the left of the title
     lv_obj_set_size(bar, 4, 20); lv_obj_set_pos(bar, 16, 12);
@@ -1029,7 +1027,7 @@ static void buildF1Screen(lv_obj_t *scr) {
     progBox[i] = lv_obj_create(progPanel);
     lv_obj_set_size(progBox[i], 440, 26); lv_obj_set_pos(progBox[i], 12, 62 + i * 27);
     lv_obj_set_style_radius(progBox[i], 6, 0); lv_obj_set_style_border_width(progBox[i], 0, 0); lv_obj_set_style_pad_all(progBox[i], 0, 0);
-    lv_obj_remove_flag(progBox[i], LV_OBJ_FLAG_SCROLLABLE); lv_obj_remove_flag(progBox[i], LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_scrollable(progBox[i], false); lv_obj_set_clickable(progBox[i], false);
     progDot[i] = lv_obj_create(progBox[i]);
     lv_obj_set_size(progDot[i], 10, 10); lv_obj_set_pos(progDot[i], 10, 8);
     lv_obj_set_style_radius(progDot[i], LV_RADIUS_CIRCLE, 0); lv_obj_set_style_border_width(progDot[i], 0, 0);
@@ -1040,7 +1038,7 @@ static void buildF1Screen(lv_obj_t *scr) {
   }
   progRaceWx = makeLabel(progPanel, "", &lv_font_weather_14, 0xFFD54A); lv_obj_set_pos(progRaceWx, 26, 256);
   progFoot = makeLabel(progPanel, "", &lv_font_weather_14, C_DIM); lv_obj_set_pos(progFoot, 26, 280);
-  lv_obj_add_flag(progPanel, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(progPanel, true);
   progTimer = lv_timer_create([](lv_timer_t *) { closeProg(); }, 20000, NULL);
   lv_timer_pause(progTimer);
   addBackButton(f1View);
@@ -1069,7 +1067,7 @@ static void countdown(char *b, size_t n, long s) {
 
 // UI tick (500 ms while shown)
 static void f1Render() {
-  if (!ui || !shared || !f1View || lv_obj_has_flag(f1View, LV_OBJ_FLAG_HIDDEN)) return;
+  if (!ui || !shared || !f1View || lv_obj_is_hidden(f1View)) return;
   if (xSemaphoreTake(lock, 0) == pdTRUE) {
     if (shared->version != ui->version) memcpy(ui, shared, sizeof *ui);
     xSemaphoreGive(lock);
@@ -1086,7 +1084,7 @@ static void f1Render() {
     setPage(resultsMode(now) || (ui->nRaces && !displayRace(now)) ? 1 : 0);
   }
   // programme open while new data (e.g. the race forecast) arrived: refresh it in place
-  if (progPanel && !lv_obj_has_flag(progPanel, LV_OBJ_FLAG_HIDDEN) && ui->version != progVersion) fillProg();
+  if (progPanel && !lv_obj_is_hidden(progPanel) && ui->version != progVersion) fillProg();
   if (previewIdx >= 0 && millis() - previewMs > 120000UL) previewIdx = -1;   // back to the real next race
   const Race *r = displayRace(now);
   const Race *mapRace = r ? r : lastRace(now);

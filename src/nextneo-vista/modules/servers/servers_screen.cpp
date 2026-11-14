@@ -76,8 +76,8 @@ static float niceMax(float v) {
 static lv_obj_t *plainBox(lv_obj_t *p) {
   lv_obj_t *o = lv_obj_create(p);
   lv_obj_set_style_bg_opa(o, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(o, 0, 0);
-  lv_obj_set_style_pad_all(o, 0, 0); lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_pad_all(o, 0, 0); lv_obj_set_scrollable(o, false);
+  lv_obj_set_clickable(o, false);
   return o;
 }
 static lv_obj_t *cardBox(lv_obj_t *p, int x, int y, int w, int h) {
@@ -86,7 +86,7 @@ static lv_obj_t *cardBox(lv_obj_t *p, int x, int y, int w, int h) {
   lv_obj_set_style_bg_color(c, lv_color_hex(C_CARD), 0); lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
   lv_obj_set_style_radius(c, 16, 0); lv_obj_set_style_border_width(c, 1, 0);
   lv_obj_set_style_border_color(c, lv_color_hex(C_LINE), 0);
-  lv_obj_set_style_pad_all(c, 0, 0); lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_pad_all(c, 0, 0); lv_obj_set_scrollable(c, false);
   return c;
 }
 static lv_obj_t *makeChart(lv_obj_t *p, int w, int h, int hDiv) {
@@ -102,7 +102,7 @@ static lv_obj_t *makeChart(lv_obj_t *p, int w, int h, int hDiv) {
   lv_obj_set_style_line_dash_width(ch, 2, LV_PART_MAIN); lv_obj_set_style_line_dash_gap(ch, 3, LV_PART_MAIN);
   lv_obj_set_style_width(ch, 0, LV_PART_INDICATOR); lv_obj_set_style_height(ch, 0, LV_PART_INDICATOR);
   lv_obj_set_style_line_width(ch, 2, LV_PART_ITEMS);
-  lv_obj_remove_flag(ch, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(ch, false);
   return ch;
 }
 static void fillSeries(lv_obj_t *ch, lv_chart_series_t *s, const float *v, int n, float scale = 1) {
@@ -114,14 +114,14 @@ static void fillSeries(lv_obj_t *ch, lv_chart_series_t *s, const float *v, int n
 
 static void openDetail(lv_event_t *e) {
   detailIndex = (int8_t)(intptr_t)lv_event_get_user_data(e);
-  lv_obj_add_flag(overview, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_remove_flag(detailBox, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(overview, true);
+  lv_obj_set_hidden(detailBox, false);
   renderedVersion = UINT32_MAX;
 }
 static void closeDetail(lv_event_t *) {
   detailIndex = -1;
-  lv_obj_add_flag(detailBox, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_remove_flag(overview, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(detailBox, true);
+  lv_obj_set_hidden(overview, false);
   renderedVersion = UINT32_MAX;
 }
 
@@ -130,14 +130,14 @@ static void buildCard(int i, int x) {
   CardUi &u = cards[i];
   lv_obj_t *c = u.card = cardBox(overview, x, 0, 228, 268);
   lv_obj_set_style_radius(c, 18, 0);
-  lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(c, true);
   lv_obj_set_style_bg_color(c, lv_color_hex(0x18202A), LV_STATE_PRESSED);
   lv_obj_add_event_cb(c, openDetail, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
   u.dot = lv_obj_create(c);
   lv_obj_set_size(u.dot, 9, 9); lv_obj_set_pos(u.dot, 14, 19);
   lv_obj_set_style_radius(u.dot, LV_RADIUS_CIRCLE, 0); lv_obj_set_style_border_width(u.dot, 0, 0);
-  lv_obj_set_style_bg_color(u.dot, lv_color_hex(0x6B7685), 0); lv_obj_remove_flag(u.dot, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_bg_color(u.dot, lv_color_hex(0x6B7685), 0); lv_obj_set_clickable(u.dot, false);
   u.name = makeLabel(c, gCfg[i].label, &lv_font_weather_20, 0xFFFFFF);
   lv_obj_set_pos(u.name, 30, 10); lv_obj_set_width(u.name, 186); lv_label_set_long_mode(u.name, LV_LABEL_LONG_DOT);
   u.role = makeLabel(c, DEF_ROLE[i], &lv_font_weather_14, C_MUTED); lv_obj_set_pos(u.role, 30, 36);
@@ -150,7 +150,7 @@ static void buildCard(int i, int x) {
     lv_obj_t *a = u.arc[k] = lv_arc_create(c);
     lv_obj_set_size(a, 64, 64); lv_obj_set_pos(a, 12 + k * 70, 62);
     lv_arc_set_rotation(a, 135); lv_arc_set_bg_angles(a, 0, 270); lv_arc_set_range(a, 0, 100); lv_arc_set_value(a, 0);
-    lv_obj_remove_style(a, NULL, LV_PART_KNOB); lv_obj_remove_flag(a, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_style(a, NULL, LV_PART_KNOB); lv_obj_set_clickable(a, false);
     lv_obj_set_style_arc_width(a, 7, LV_PART_MAIN); lv_obj_set_style_arc_width(a, 7, LV_PART_INDICATOR);
     lv_obj_set_style_arc_rounded(a, true, LV_PART_INDICATOR);
     lv_obj_set_style_arc_color(a, lv_color_hex(0x232B36), LV_PART_MAIN);
@@ -173,7 +173,7 @@ static void buildCard(int i, int x) {
   lv_obj_t *sep = lv_obj_create(c);
   lv_obj_set_size(sep, 200, 1); lv_obj_set_pos(sep, 14, 214);
   lv_obj_set_style_bg_color(sep, lv_color_hex(C_LINE), 0); lv_obj_set_style_border_width(sep, 0, 0);
-  lv_obj_remove_flag(sep, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(sep, false);
   static const char *fcap[3] = {"TEMP", "REDE", "UPTIME"};
   static const int fx[3] = {14, 70, 150}, fw[3] = {54, 78, 66};
   for (int k = 0; k < 3; ++k) {
@@ -213,10 +213,10 @@ static void buildMini(int k, int x, int y, const char *title, uint32_t color) {
 static void buildServersScreen(lv_obj_t *scr) {
   serversView = lv_obj_create(scr);
   lv_obj_set_size(serversView, SCR_W, SCR_H); lv_obj_set_pos(serversView, 0, 0);
-  lv_obj_add_flag(serversView, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(serversView, true);
   lv_obj_set_style_bg_color(serversView, lv_color_hex(C_BG), 0); lv_obj_set_style_bg_opa(serversView, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(serversView, 0, 0); lv_obj_set_style_pad_all(serversView, 0, 0);
-  lv_obj_remove_flag(serversView, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(serversView, false);
   addBackButton(serversView);
   lv_obj_t *t = makeLabel(serversView, "Servidores", &lv_font_weather_20, 0xFFFFFF); lv_obj_align(t, LV_ALIGN_TOP_LEFT, 52, 6);
   statusLbl = makeLabel(serversView, "conectando...", &lv_font_weather_14, C_MUTED);
@@ -227,7 +227,7 @@ static void buildServersScreen(lv_obj_t *scr) {
   buildCard(0, 8); buildCard(1, 244);
 
   detailBox = plainBox(serversView); lv_obj_set_size(detailBox, SCR_W, 280); lv_obj_set_pos(detailBox, 0, 38);
-  lv_obj_add_flag(detailBox, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(detailBox, true);
   dTitle = makeLabel(detailBox, "", &lv_font_weather_20, 0xFFFFFF); lv_obj_set_pos(dTitle, 10, 0);
   lv_obj_set_width(dTitle, 220); lv_label_set_long_mode(dTitle, LV_LABEL_LONG_DOT);
   dSub = makeLabel(detailBox, "", &lv_font_weather_14, C_MUTED); lv_obj_set_pos(dSub, 10, 26);

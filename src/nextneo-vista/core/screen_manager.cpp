@@ -138,8 +138,8 @@ void switchScreen(ScreenID id) {
   // ---- Swap the visible container.
   for (const ScreenLifecycle *screen : kScreens) {
     if (!screen->view || !*screen->view) continue;
-    if (screen->id == id) lv_obj_remove_flag(*screen->view, LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_add_flag(*screen->view, LV_OBJ_FLAG_HIDDEN);
+    if (screen->id == id) lv_obj_set_hidden(*screen->view, false);
+    else lv_obj_set_hidden(*screen->view, true);
   }
 
   // ---- On-Enter: paint cached data now, request fresh data after the debounce.
@@ -169,7 +169,7 @@ void screenManagerBegin(lv_obj_t *root) {
     if (kScreens[i]->id != i) Log.printf("ERRO: kScreens[%d] é a tela %s (ordem errada)\n", i, kScreens[i]->name);
   for (const ScreenLifecycle *screen : kScreens) if (screen->build) screen->build(root);
   for (const ScreenLifecycle *screen : kScreens)
-    if (screen->view && *screen->view) lv_obj_add_flag(*screen->view, LV_OBJ_FLAG_HIDDEN);
+    if (screen->view && *screen->view) lv_obj_set_hidden(*screen->view, true);
   contextTimer = lv_timer_create(contextTimerCb, SCREEN_ENTER_DEBOUNCE_MS, NULL);
   lv_timer_pause(contextTimer);
   lv_timer_create(uiTick, 500, NULL);

@@ -10,6 +10,7 @@
 #include "core/web_config.h"
 #include "modules/finance/finance.h"
 #include "modules/servers/servers.h"
+#include "modules/weather/weather.h"
 #include "services/app_log.h"
 
 // LVGL renders on the Arduino loop task. Deep widget trees (Weather tabs over the
@@ -23,10 +24,10 @@ static void loadConfig() {
   cfg.utcOffset = prefs.getInt("tz", cfg.utcOffset);
   cfg.h24 = prefs.getBool("h24", true);
   cfg.bright = prefs.getInt("bl", 100);
-  sh.cityName = prefs.getString("city", "São Paulo");
-  if (sh.cityName == "Sao Paulo") {
-    sh.cityName = "São Paulo";
-    prefs.putString("city", sh.cityName);
+  wx.cityName = prefs.getString("city", "São Paulo");
+  if (wx.cityName == "Sao Paulo") {
+    wx.cityName = "São Paulo";
+    prefs.putString("city", wx.cityName);
   }
   gLogVerbose = prefs.getBool("logVerbose", false);   // off by default
   loadFinanceAssets();   // Finance symbols (editable on the web page)

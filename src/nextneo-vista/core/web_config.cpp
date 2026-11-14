@@ -81,19 +81,19 @@ static String htmlEscape(const String &value) {
 
 static String configPage(const String &notice = "") {
   xSemaphoreTake(mtx, portMAX_DELAY);
-  String city = sh.cityName;
+  String city = wx.cityName;
   String status = sh.status;
-  const uint8_t assetCount = sh.financeAssetCount;
+  const uint8_t assetCount = fin.assetCount;
   static FinanceAsset assets[FINANCE_MAX_ASSETS];
   static float price[FINANCE_MAX_ASSETS];
   static bool havePrice[FINANCE_MAX_ASSETS], apiKnown[FINANCE_MAX_ASSETS], apiOk[FINANCE_MAX_ASSETS];
   static char currency[FINANCE_MAX_ASSETS][4];
-  memcpy(assets, sh.financeAssets, sizeof assets);
-  memcpy(price, sh.finance, sizeof price);
-  memcpy(havePrice, sh.haveFinance, sizeof havePrice);
-  memcpy(apiKnown, sh.financeApiKnown, sizeof apiKnown);
-  memcpy(apiOk, sh.financeApiOk, sizeof apiOk);
-  memcpy(currency, sh.financeCurrency, sizeof currency);
+  memcpy(assets, fin.assets, sizeof assets);
+  memcpy(price, fin.price, sizeof price);
+  memcpy(havePrice, fin.havePrice, sizeof havePrice);
+  memcpy(apiKnown, fin.apiKnown, sizeof apiKnown);
+  memcpy(apiOk, fin.apiOk, sizeof apiOk);
+  memcpy(currency, fin.currency, sizeof currency);
   xSemaphoreGive(mtx);
   char airportCode[8], airportName[32];
   uint8_t radius = 10;
