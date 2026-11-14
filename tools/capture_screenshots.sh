@@ -5,11 +5,10 @@
 # no fim, grava o app de volta com o deploy normal (com testes).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-PIO="$(command -v pio || echo "$HOME/.platformio/penv/bin/pio")"
-PY="$HOME/.platformio/penv/bin/python"
-PORT="${1:-}"
-if [[ -z "$PORT" ]]; then for c in /dev/cu.usbmodem*; do [[ -e "$c" ]] && PORT="$c"; done; fi
-[[ -n "$PORT" ]] || { echo "Erro: placa não encontrada." >&2; exit 1; }
+source tools/lib_port.sh
+PIO="$(find_pio)"
+PY="$(find_pio_python)"
+PORT="$(detect_port "${1:-}")"
 mkdir -p logs
 echo "== Gravando o firmware de captura"
 "$PIO" test -e nextneo-vista-docs --without-testing --upload-port "$PORT" > logs/screenshots-build.log 2>&1 \

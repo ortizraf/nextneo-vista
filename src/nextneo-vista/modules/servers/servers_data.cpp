@@ -6,6 +6,7 @@
 // Network work runs on the worker task (serversFetch); everything else on the LVGL thread.
 #include "app_screens.h"
 #include "modules/servers/servers_internal.h"
+#include "modules/servers/servers_retry.h"
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
@@ -21,7 +22,8 @@ static char gUser[64] = "", gPass[64] = "";
 static String gToken[SERVERS_MAX];
 uint32_t gDataVersion = 0;
 static uint32_t gCfgVersion = 0;
-static uint32_t gFailedAtMs[SERVERS_MAX] = {};      // 0 = last attempt was ok
+static constexpr uint32_t SERVER_RETRY_MS = 60000;   // a failed server is retried this often
+static ServerRetry gRetry(SERVERS_MAX, SERVER_RETRY_MS);
 
 const char *const DEF_ROLE[SERVERS_MAX]  = {"homelab", "proxy"};
 
@@ -48,22 +50,6 @@ void loadServersConfig() {
 }
 
 // Accepts "http://host:8090/system/<id>" (link copied from Beszel) or just a base URL.
-bool serversParseLink(const char *link, char *url, size_t urlSize, char *id, size_t idSize) {
-  String s = link; s.trim();
-  if (s.isEmpty()) return false;
-  if (!s.startsWith("http://") && !s.startsWith("https://")) s = "http://" + s;
-  int p = s.indexOf("/system/");
-  if (p > 0) {
-    String sid = s.substring(p + 8);
-    int q = sid.indexOf('/'); if (q >= 0) sid = sid.substring(0, q);
-    q = sid.indexOf('?'); if (q >= 0) sid = sid.substring(0, q);
-    if (id && sid.length()) snprintf(id, idSize, "%s", sid.c_str());
-    s = s.substring(0, p);
-  }
-  while (s.endsWith("/")) s.remove(s.length() - 1);
-  snprintf(url, urlSize, "%s", s.c_str());
-  return true;
-}
 
 void serversSetServer(uint8_t i, const char *label, const char *url, const char *id) {
   if (i >= SERVERS_MAX) return;
@@ -72,7 +58,7 @@ void serversSetServer(uint8_t i, const char *label, const char *url, const char 
   if (label && *label) { snprintf(gCfg[i].label, sizeof gCfg[i].label, "%s", label); snprintf(k, sizeof k, "bzLbl%d", i); prefs.putString(k, gCfg[i].label); }
   if (url && *url)     { snprintf(gCfg[i].url, sizeof gCfg[i].url, "%s", url);       snprintf(k, sizeof k, "bzUrl%d", i); prefs.putString(k, gCfg[i].url); }
   if (id && *id)       { snprintf(gCfg[i].id, sizeof gCfg[i].id, "%s", id);          snprintf(k, sizeof k, "bzId%d", i);  prefs.putString(k, gCfg[i].id); }
-  gToken[i] = ""; gData[i] = ServerData(); gFailedAtMs[i] = 0; gCfgVersion++; gDataVersion++;
+  gToken[i] = ""; gData[i] = ServerData(); gRetry.reset(i); gCfgVersion++; gDataVersion++;
   xSemaphoreGive(mtx);
 }
 
@@ -119,8 +105,9 @@ static MdnsCache gMdns[SERVERS_MAX + 1];
 // One server must never hold the others up (one offline machine used to block the
 // whole cycle for ~15 s, so the other server showed nothing):
 //  - short timeouts, and an unresolvable .local name fails at once;
-//  - a server that failed is retried only every SERVER_RETRY_MS, after the healthy ones.
-static constexpr uint32_t SERVER_RETRY_MS = 60000;
+//  - a server that failed is retried only every SERVER_RETRY_MS, after the healthy ones
+//    (ServerRetry, servers_retry.cpp).
+
 static constexpr uint16_t CONNECT_TIMEOUT_MS = 2500;
 
 static void forgetMdns(const char *base) {          // only this server's host
@@ -282,23 +269,20 @@ bool serversFetch() {
   xSemaphoreGive(mtx);
   bool any = false;
   static ServerData tmp, prev;
-  // Healthy servers first; a failed one only every SERVER_RETRY_MS, at the end.
-  for (int pass2 = 0; pass2 < 2; ++pass2) {
-    for (uint8_t i = 0; i < SERVERS_MAX; ++i) {
-      const bool failed = gFailedAtMs[i] != 0;
-      if (failed != (pass2 == 1)) continue;
-      if (failed && millis() - gFailedAtMs[i] < SERVER_RETRY_MS) continue;
-      if (!screenJobStillCurrent()) return any;
-      xSemaphoreTake(mtx, portMAX_DELAY); prev = gData[i]; xSemaphoreGive(mtx);
-      const uint32_t t0 = millis();
-      const bool ok = fetchOne(i, cfgCopy[i], user, pass, tmp, prev);
-      if (!ok) Log.printf("Servers %s: %s (%lums)\n", cfgCopy[i].label, tmp.error, (unsigned long)(millis() - t0));
-      gFailedAtMs[i] = ok ? 0 : (millis() | 1);
-      any |= ok;
-      xSemaphoreTake(mtx, portMAX_DELAY);
-      if (ver == gCfgVersion) { gData[i] = tmp; gDataVersion++; }
-      xSemaphoreGive(mtx);
-    }
+  uint8_t order[SERVERS_MAX];
+  const uint8_t n = gRetry.plan(millis(), order);     // healthy first; failed ones every 60 s
+  for (uint8_t k = 0; k < n; ++k) {
+    const uint8_t i = order[k];
+    if (!screenJobStillCurrent()) return any;
+    xSemaphoreTake(mtx, portMAX_DELAY); prev = gData[i]; xSemaphoreGive(mtx);
+    const uint32_t t0 = millis();
+    const bool ok = fetchOne(i, cfgCopy[i], user, pass, tmp, prev);
+    if (!ok) Log.printf("Servers %s: %s (%lums)\n", cfgCopy[i].label, tmp.error, (unsigned long)(millis() - t0));
+    gRetry.record(i, ok, millis());
+    any |= ok;
+    xSemaphoreTake(mtx, portMAX_DELAY);
+    if (ver == gCfgVersion) { gData[i] = tmp; gDataVersion++; }
+    xSemaphoreGive(mtx);
   }
   return any;
 }

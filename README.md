@@ -20,8 +20,7 @@ O app principal fica em `src/nextneo-vista/` (ambiente PlatformIO `nextneo-vista
 7. [Estrutura do código e arquitetura](#7-estrutura-do-código-e-arquitetura)
 8. [Hardware](#8-hardware)
 9. [Exemplos e hub de jogos](#9-exemplos-e-hub-de-jogos)
-10. [Histórico desta placa](#10-histórico-desta-placa)
-11. [Testes automáticos (na placa)](#11-testes-automáticos-na-placa)
+10. [Testes automáticos](#10-testes-automáticos)
 
 ---
 
@@ -56,7 +55,7 @@ Pense num `.jar` executável que **é** o computador inteiro: não existe "insta
 | **PSRAM x RAM interna** | heap grande x heap pequeno | Não há *garbage collector*. Memória é escassa; veja a seção 6. |
 | **`String` (Arduino)** | `String` | Parecida, mas mutável e cara em memória. |
 | **Unity** | JUnit | Biblioteca de testes. `TEST_ASSERT_EQUAL(...)` ≈ `assertEquals(...)`. |
-| **`pio test`** | `mvn test` | Compila os testes, grava na placa e mostra o resultado. Veja a seção 11. |
+| **`pio test`** | `mvn test` | Compila os testes, grava na placa e mostra o resultado. Veja a seção 10. |
 
 Três diferenças que pegam quem vem do Java:
 
@@ -68,14 +67,27 @@ Três diferenças que pegam quem vem do Java:
 
 1. Instale o **VS Code** e, dentro dele, a extensão **PlatformIO IDE** (menu Extensions, busque "PlatformIO"). Ela instala o `pio` e o Python que ele usa.
    - Alternativa só com terminal: instale o [PlatformIO Core](https://platformio.org/install/cli).
-2. Conecte a placa ao Mac com um cabo USB-C **de dados** (alguns cabos só carregam).
-3. Confira se o Mac enxerga a placa:
+2. Conecte a placa ao computador com um cabo USB-C **de dados** (alguns cabos só carregam).
+3. Confira se o computador enxerga a placa:
 
-   ```sh
-   ls /dev/cu.usbmodem*
-   ```
+   | Sistema | Comando | Aparece algo como |
+   |---|---|---|
+   | macOS | `ls /dev/cu.usbmodem*` | `/dev/cu.usbmodem1201` |
+   | Linux | `ls /dev/ttyACM*` | `/dev/ttyACM0` |
 
-   Se aparecer algo como `/dev/cu.usbmodem1201`, está tudo certo. Não precisa instalar driver.
+   Não precisa instalar driver: a placa usa o USB nativo do ESP32-S3. Os scripts do projeto acham a porta sozinhos nos dois sistemas.
+
+#### Só no Linux (uma vez)
+
+```sh
+sudo apt install python3-pip pipx build-essential git        # Debian/Ubuntu (Fedora: dnf install ...)
+pipx install platformio                                       # ou: pip install --user platformio
+sudo usermod -aG dialout $USER                                # permissão na porta serial (Arch: grupo uucp)
+curl -fsSL https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/system/99-platformio-udev.rules | sudo tee /etc/udev/rules.d/99-platformio-udev.rules
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Depois **saia e entre de novo** na sessão, para o grupo `dialout` valer. O `build-essential` traz o compilador `g++`, usado pelos testes que rodam no computador (seção 10.7). No macOS esse compilador vem com as *Command Line Tools* (`xcode-select --install`).
 
 ### 0.4 O ciclo de trabalho do dia a dia
 
@@ -83,10 +95,10 @@ Três diferenças que pegam quem vem do Java:
 editar código (.cpp/.h)  →  testar na placa  →  gravar o app  →  olhar o log
 ```
 
-Na prática é um comando só, dentro da pasta do projeto (`guition-jc3248w535c`):
+Na prática é um comando só, dentro da pasta do projeto (a pasta onde você clonou o repositório, com o `platformio.ini`):
 
 ```sh
-cd ~/Documents/ChatGPT/"placa esp32"/guition-jc3248w535c
+cd caminho/para/nextneo-vista     # a pasta onde você clonou o repositório
 ./tools/deploy_nextneo_vista.sh
 ```
 
@@ -94,7 +106,7 @@ cd ~/Documents/ChatGPT/"placa esp32"/guition-jc3248w535c
 
 ### 0.5 Onde fica o código de verdade
 
-O projeto que é compilado fica em **`guition-jc3248w535c/src/nextneo-vista/`**. Existe também uma pasta `src/` na raiz de `placa esp32` com uma **cópia antiga**; ela não entra no build. Edite sempre dentro de `guition-jc3248w535c/`.
+O código que é compilado fica em **`src/nextneo-vista/`**, dentro da pasta do projeto. As pastas `examples/` (jogos e demos) não entram no build do app.
 
 ### 0.6 Primeira configuração do aparelho
 
@@ -126,12 +138,12 @@ Dicas:
 
 ## 1. Compilar e gravar (início rápido)
 
-**Pré-requisitos:** macOS com [PlatformIO Core](https://platformio.org/install/cli) (`pio`) e a placa conectada por USB. A placa usa o USB nativo do ESP32-S3 e aparece como `/dev/cu.usbmodem*`; não precisa de driver.
+**Pré-requisitos:** macOS ou Linux com [PlatformIO Core](https://platformio.org/install/cli) (`pio`) e a placa conectada por USB (seção 0.3). A placa aparece como `/dev/cu.usbmodem*` no macOS e `/dev/ttyACM*` no Linux; não precisa de driver.
 
 Abra o Terminal na pasta do projeto:
 
 ```sh
-cd ~/Documents/ChatGPT/"placa esp32"/guition-jc3248w535c
+cd caminho/para/nextneo-vista     # a pasta onde você clonou o repositório
 ```
 
 ### Opção A: deploy com testes (padrão)
@@ -141,16 +153,18 @@ chmod +x tools/deploy_nextneo_vista.sh     # só na primeira vez
 ./tools/deploy_nextneo_vista.sh
 ```
 
-O script faz três coisas, nesta ordem, e **para no primeiro erro**:
+O script faz quatro coisas, nesta ordem, e **para no primeiro erro**:
 
-1. **Testa:** roda os testes automáticos na placa (`pio test`, seção 11). Se algum falhar, o app **não** é gravado e a placa fica com o firmware de teste. A saída completa vai para `logs/test.log`.
+0. **Testa a lógica no computador** (`pio test -e native`, ~10 s, seção 10.7). Se falhar, nada é gravado.
+1. **Testa na placa:** roda os testes automáticos na placa (`pio test`, seção 10). Se algum falhar, o app **não** é gravado e a placa fica com o firmware de teste. A saída completa vai para `logs/test.log`.
 2. **Compila** o app `nextneo-vista` e confere se ele cabe na partição de 3264 KB.
 3. **Grava somente o app** em `0x10000` e confere o `Hash of data verified`. Bootloader, partições e Wi-Fi salvo ficam intactos.
 
-Leva uns 6 minutos (5 dos testes). Variações:
+Leva uns 7 minutos (quase tudo nos testes da placa). Variações:
 
 ```sh
-./tools/deploy_nextneo_vista.sh /dev/cu.usbmodem1201        # informar a porta manualmente
+./tools/deploy_nextneo_vista.sh /dev/cu.usbmodem1201        # informar a porta (macOS)
+./tools/deploy_nextneo_vista.sh /dev/ttyACM0                # informar a porta (Linux)
 SUITES="test_screens" ./tools/deploy_nextneo_vista.sh       # testar só uma suíte (mais rápido)
 CLEAN=1 ./tools/deploy_nextneo_vista.sh                     # limpar o build antes
 MONITOR=1 ./tools/deploy_nextneo_vista.sh                   # abrir o monitor serial no final
@@ -166,7 +180,7 @@ pio run -e nextneo-vista -t clean
 # 2) Compilar
 pio run -e nextneo-vista
 
-# 3) Descobrir a porta da placa
+# 3) Descobrir a porta da placa (Linux: ls /dev/ttyACM*)
 ls /dev/cu.usbmodem*
 
 # 4) Gravar SOMENTE o app no offset 0x10000 (troque a porta se for diferente)
@@ -194,7 +208,7 @@ A gravação deu certo se aparecer `Hash of data verified`. Para sair do monitor
 | **Deploy (testes + gravar app)** | `./tools/deploy_nextneo_vista.sh [porta]` |
 | Só rodar os testes na placa | `pio test -e nextneo-vista` |
 | Monitor serial | `pio device monitor -b 115200` |
-| Listar portas | `ls /dev/cu.usbmodem*` ou `pio device list` |
+| Listar portas | `pio device list` (ou `ls /dev/cu.usbmodem*` no macOS, `ls /dev/ttyACM*` no Linux) |
 | Tamanho do app | `ls -l .pio/build/nextneo-vista/nextneo-vista.bin` (limite: 3 342 336 bytes) |
 | Hash do app gravado | `shasum -a 256 .pio/build/nextneo-vista/nextneo-vista.bin` |
 | Apagar cache de build | `rm -rf .pio/build` (é recriado no próximo build) |
@@ -238,7 +252,8 @@ Para conferir a tabela gravada na placa (só leitura):
 
 | Sintoma | O que fazer |
 |---|---|
-| `placa não encontrada` | Troque o cabo (alguns só carregam, sem dados) e confira `ls /dev/cu.usbmodem*`. |
+| `placa não encontrada` | Troque o cabo (alguns só carregam, sem dados) e confira `pio device list`. |
+| `sem permissão na porta` (Linux) | Rode `sudo usermod -aG dialout $USER`, saia e entre de novo na sessão (seção 0.3). |
 | Gravação não inicia ou fica em `Connecting...` | Segure **BOOT**, toque em **RESET**, solte **BOOT** e rode de novo. |
 | `Resource busy` na porta | Feche o monitor serial (Ctrl+C) ou outro programa usando a porta. |
 | Erro de compilação após atualizar o código | Rode `pio run -e nextneo-vista -t clean` e compile de novo. |
@@ -288,6 +303,18 @@ Dados do Open-Meteo (sem chave), com abas **Agora / Horas / Dias**. Atualiza a c
 - **Condição "Agora" conferida:** o `weather_code` atual do Open-Meteo vem do modelo e às vezes diz "garoa" com sol (segue a chance de chuva das próximas horas). Para garoa/chuva (51–67), a placa só mostra chuva se a cobertura de nuvens for ≥ 60 % **e** estiver chovendo ≥ 0,2 mm; senão mostra o céu pela cobertura (limpo / poucas nuvens / parcialmente nublado / nublado) e registra no log. Previsão por hora e por dia não é alterada.
 - O local vem do campo **Cidade** (nome ou `Nome @ lat,lon`). Veja a seção 0.7.
 
+**APIs consultadas** (só enquanto esta tela está aberta):
+
+```text
+GET https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}
+    &current=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m,
+             apparent_temperature,uv_index,precipitation,cloud_cover,is_day
+    &hourly=temperature_2m,weather_code,precipitation_probability,is_day
+    &daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,
+           precipitation_sum,precipitation_hours,cloud_cover_mean
+    &timezone=auto&forecast_days=7&forecast_hours=24          (a cada 10 min)
+```
+
 ### Finanças
 Mostra até **8 ativos** configuráveis: moedas, cripto, ações e índices, todos pelo símbolo do Yahoo Finance. O padrão é USD/BRL, EUR/BRL e BTC/USD.
 
@@ -307,6 +334,17 @@ Mostra até **8 ativos** configuráveis: moedas, cripto, ações e índices, tod
 - **Atualização:** uma única chamada *spark* traz todos os ativos, a cada 2 min enquanto a tela está aberta. O *chart* serve de fallback por ativo, e tocar num cartão atualiza só aquele ativo. Há uma sessão TLS keep-alive por visita, e o `Retry-After` (HTTP 429) é respeitado com backoff de até 16 min.
 - **Onde fica salvo:** Preferences, chave `finAssets`, uma linha `SÍMBOLO|Legenda` por ativo. Código em `finance_assets.cpp`.
 
+**APIs consultadas** (só enquanto esta tela está aberta):
+
+```text
+GET https://query1.finance.yahoo.com/v7/finance/spark?range=1d&interval=5m&symbols={S1},{S2},...
+    todos os ativos numa chamada (a cada 2 min)
+GET https://query1.finance.yahoo.com/v8/finance/chart/{símbolo}?range=1d&interval=5m&nocache={ms}
+    só para um ativo que faltou no spark, ou ao tocar num card
+GET https://query1.finance.yahoo.com/v8/finance/chart/{símbolo}?range={1d|5d|1mo|6mo|1y}
+    &interval={5m|15m|1d}&includePrePost=false&nocache={ms}   (detalhe: toque longo num card)
+```
+
 ### Radar aéreo
 Tráfego ao vivo do [ADSB.lol](https://api.adsb.lol) num escopo circular, com o painel de informações à direita.
 
@@ -325,11 +363,39 @@ Tráfego ao vivo do [ADSB.lol](https://api.adsb.lol) num escopo circular, com o 
 - **Sua localização:** ponto vermelho pulsando, na posição configurada no campo Cidade (`Nome @ lat,lon`). Só aparece se estiver dentro do raio. O pulso usa o mesmo timer da varredura, então só uma área de ~24 px é redesenhada. Código: `placeHome()` e `sweepTimerCb()` em `flight_radar.cpp`.
 - **Configuração:** aeroporto (IATA/ICAO, ex.: `CGH`, `GRU`, `SBGR`) e raio em **Ajustes**. A varredura pode ser desligada com `SWEEP_ENABLED` em `modules/flight_radar/flight_radar.cpp`.
 
+**APIs consultadas** (só enquanto esta tela está aberta):
+
+```text
+GET https://api.adsb.lol/v2/point/{lat}/{lon}/{raio_nm}                  aviões (a cada 12 s)
+GET https://opendata.adsb.fi/api/v2/lat/{lat}/lon/{lon}/dist/{raio_nm}   aviões (alternativa, se o ADSB.lol falhar)
+GET https://api.adsbdb.com/v0/aircraft/{icao24}?callsign={callsign}      avião tocado: modelo e rota
+GET https://api.adsbdb.com/v0/callsign/{callsign}                        rota, se o avião não estiver no banco
+GET https://server.arcgisonline.com/arcgis/rest/services/World_Street_Map/MapServer/export
+    ?bbox={x1},{y1},{x2},{y2}&bboxSR=3857&imageSR=3857&size={n},{n}&format=jpg&f=image   (mapa de fundo)
+POST https://overpass-api.de/api/interpreter   (pistas do aeroporto; ver Aeroporto)
+```
+
 ### Relógio ("Céu vivo")
 Relógio grande sobre um céu animado que muda com a hora do dia e o clima (chuva, raios, neblina, estrelas). Usa os mesmos dados do Clima, pedidos só enquanto esta tela está aberta. Tocar alterna para um modo preto minimalista.
 
+**APIs consultadas** (só enquanto esta tela está aberta):
+
+```text
+GET https://api.open-meteo.com/v1/forecast?...   a mesma chamada da tela Clima (a cada 10 min)
+```
+
 ### Servidores
 Estado dos servidores de casa (CPU, memória, disco etc.) lido do Beszel. Atualiza a cada 10 s enquanto a tela está aberta. Login e sistemas são configurados na página web.
+
+**APIs consultadas** (só enquanto esta tela está aberta):
+
+```text
+POST {hub}/api/collections/users/auth-with-password                    login (token)
+GET  {hub}/api/collections/systems/records/{id}                        status e uso atual (a cada 10 s)
+GET  {hub}/api/collections/system_stats/records?perPage=60&sort=-created&skipTotal=1
+     &fields=stats&filter=system='{id}'&&type='1m'                     gráfico da última hora (a cada 55 s)
+{hub} = endereço do Beszel configurado em Ajustes / página web (ex.: http://meu-servidor.local:8090)
+```
 
 ### Aeroporto
 Mapa do aeroporto com os aviões no solo e em pouso/decolagem (até ~200 m de altura).
@@ -340,11 +406,80 @@ Mapa do aeroporto com os aviões no solo e em pouso/decolagem (até ~200 m de al
 - **Toque num avião:** abre os detalhes; o toque usa a posição em que o ícone está desenhado.
 - **Detalhes:** rota, companhia e modelo (adsbdb) são buscados só para o avião tocado, uma vez por avião enquanto a tela está aberta. O painel aparece por 5 s e fecha sozinho; tocar de novo reabre na hora (dados guardados). Uma tarefa paralela foi testada, mas a RAM interna nunca teve espaço para uma 2ª conexão TLS.
 
+**APIs consultadas** (só enquanto esta tela está aberta):
+
+```text
+POST https://overpass-api.de/api/interpreter                            pistas, taxiways, pátios e terminais (OSM)
+     espelhos: https://overpass.private.coffee/api/interpreter, https://maps.mail.ru/osm/tools/overpass/api/interpreter
+     (uma vez por aeroporto; fica guardado na placa)
+GET  https://opendata.adsb.fi/api/v2/lat/{lat}/lon/{lon}/dist/{raio_nm}  aviões (principal, ~a cada 3 s)
+GET  https://api.adsb.lol/v2/point/{lat}/{lon}/{raio_nm}                 aviões (alternativa)
+GET  https://api.adsbdb.com/v0/aircraft/{icao24}?callsign={callsign}     avião tocado
+GET  https://www.aenabrasil.com.br/pt/aeroportos/aeroporto-de-congonhas/informacoes-de-voos.html
+     (?type=CHEGADAS&airportA=SBSP)                                      painel de voos, só em Congonhas
+```
+
 ### Fotos
 Porta-retratos com até 8 fotos enviadas pela página web; cada uma fica 30 s. Não usa internet.
 
+Sem chamadas de API: as fotos ficam na memória da placa (LittleFS) e chegam pela página web (`/photos`).
+
 ### Ajustes (no aparelho)
 Wi-Fi (buscar, escolher rede, senha, conectar), cidade do clima (aceita `Nome @ lat,lon`; toque em Enter no teclado para aplicar), formato 12/24 h, brilho, aeroporto e raio do radar. Os campos do radar acompanham mudanças feitas pela pílula de km ou pela página web.
+
+**APIs consultadas** (ao salvar uma cidade, aqui ou na página web):
+
+```text
+GET https://geocoding-api.open-meteo.com/v1/search?count=1&name={cidade}[&countryCode={país}]
+    não é chamada quando o local é digitado como "Nome @ lat,lon"
+```
+
+### Calendário e Arte
+
+Sem chamadas de API: tudo é calculado na placa.
+
+### Céu
+
+**APIs consultadas** (só enquanto esta tela está aberta):
+
+```text
+GET https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle
+GET https://celestrak.org/NORAD/elements/gp.php?GROUP=visual&FORMAT=tle
+GET https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=tle
+    satélites (no máximo a cada 6 h). Sol, Lua e planetas são calculados na placa.
+```
+
+### Fórmula 1
+
+**APIs consultadas** (só enquanto esta tela está aberta):
+
+```text
+GET  https://api.jolpi.ca/ergast/f1/current.json?limit=40                       calendário e sessões
+GET  https://api.jolpi.ca/ergast/f1/current/last/results.json?limit=3           pódio da última corrida
+GET  https://api.jolpi.ca/ergast/f1/current/driverStandings.json?limit=30       pilotos
+GET  https://api.jolpi.ca/ergast/f1/current/constructorStandings.json?limit=20  equipes
+GET  https://raw.githubusercontent.com/bacinger/f1-circuits/master/f1-circuits.geojson   traçados (uma vez)
+POST https://overpass.private.coffee/api/interpreter                           entorno do circuito (OSM, uma vez)
+     espelhos: https://maps.mail.ru/osm/tools/overpass/api/interpreter, https://overpass-api.de/api/interpreter
+GET  https://server.arcgisonline.com/arcgis/rest/services/World_Street_Map/MapServer/export?bbox=...&format=jpg&f=image
+GET  https://api.open-meteo.com/v1/forecast?latitude={lat_circuito}&longitude={lon_circuito}
+     &hourly=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min
+     &timezone=auto&forecast_days=16                                         previsão para as sessões
+O que já foi baixado e ainda é recente não é pedido de novo (a cada 15 min a tela verifica).
+```
+
+### Futebol
+
+**APIs consultadas** (só enquanto esta tela está aberta):
+
+```text
+GET https://site.api.espn.com/apis/site/v2/sports/soccer/{liga}/scoreboard
+    {liga} = uefa.champions, conmebol.libertadores, fifa.cwc, fifa.world,
+             conmebol.sudamericana, uefa.europa, fifa.intercontinental_cup
+    ligas com jogo ao vivo a cada ~40 s, as outras a cada 10 min
+GET https://a.espncdn.com/combiner/i?img={logo}&w={n}&h={n}     escudos e logos (guardados na placa)
+GET https://a.espncdn.com{logo}                                 alternativa, se o redimensionado falhar
+```
 
 ### Página web de configuração
 Com o celular ou computador na mesma rede, abra `http://IP-DO-APARELHO`. O IP aparece em Ajustes e no último cartão do Finance. As seções da página:
@@ -361,7 +496,7 @@ Com o celular ou computador na mesma rede, abra `http://IP-DO-APARELHO`. O IP ap
 Credenciais de Wi-Fi só são digitadas no próprio aparelho.
 
 ### Regras gerais de rede
-Só a tela ativa faz chamadas de API, em uma tarefa de rede dedicada (núcleo 0) que nunca mexe na interface. Ao trocar de tela, pedidos pendentes da tela anterior são descartados e conexões keep-alive são fechadas. O Wi-Fi é verificado a cada minuto, com reconexão automática.
+As URLs exatas de cada tela estão nos blocos **APIs consultadas** acima; `{lat}`/`{lon}` são as coordenadas configuradas em Ajustes. Nenhuma dessas APIs exige chave ou cadastro. Só a tela ativa faz chamadas de API, em uma tarefa de rede dedicada (núcleo 0) que nunca mexe na interface. Ao trocar de tela, pedidos pendentes da tela anterior são descartados e conexões keep-alive são fechadas. O Wi-Fi é verificado a cada minuto, com reconexão automática.
 
 ---
 
@@ -396,10 +531,10 @@ Além disso:
 ### 7.1 Pastas
 
 ```text
-guition-jc3248w535c/
+nextneo-vista/                     # pasta do projeto (o nome é o que você escolher ao clonar)
 ├── platformio.ini                 # ambientes; flags do LVGL (inclui alocador PSRAM)
-├── tools/                         # deploy_nextneo_vista.sh (testes + gravação), flash_hub.sh, pio_progname.py
-├── test/                          # testes automáticos que rodam na placa (seção 11)
+├── tools/                         # deploy_nextneo_vista.sh (testes + gravação), capture_screenshots.sh, lib_port.sh (porta macOS/Linux)
+├── test/                          # testes automáticos que rodam na placa (seção 10)
 └── src/nextneo-vista/
     ├── main.cpp                   # só a inicialização (appSetup) e o laço (appLoop)
     ├── app_screens.h              # "contrato" do app: estado compartilhado, IDs de tela, ScreenLifecycle
@@ -458,7 +593,7 @@ guition-jc3248w535c/
    ```
 3. Declare `extern const ScreenLifecycle kNovaScreen;` em `core/screen_registry.h` e coloque `&kNovaScreen` na lista `kScreens` de `core/screen_manager.cpp`, **na mesma posição do enum**.
 4. Ponha o ícone no menu (`modules/menu/menu.cpp`, função `buildMenuScreen`) chamando `switchScreen(SCREEN_NOVA)`.
-5. Inclua a tela nos testes (seção 11.6) e rode `pio test`. O teste `test_registry_lists_every_screen_in_order` avisa se a ordem estiver errada.
+5. Inclua a tela nos testes (seção 10.6) e rode `pio test`. O teste `test_registry_lists_every_screen_in_order` avisa se a ordem estiver errada.
 
 **Stack:** PlatformIO Core 6.x, plataforma pioarduino (Arduino-ESP32 3.x), LVGL 9.x, GFX Library for Arduino, ArduinoJson 7, JPEGDEC. A configuração do LVGL vem por flags (`-DLV_CONF_SKIP`), sem `lv_conf.h`.
 
@@ -515,42 +650,11 @@ Vídeo para o media player: `ffmpeg -i in.mp4 -vf "scale=480:320" -q:v 6 -r 20 o
 
 ---
 
-## 10. Histórico desta placa
-
-- **Firmware de fábrica:** substituído no app0 com aprovação do usuário. A leitura completa de 16 MB falhou (erros de CRC). Só existe um dump **parcial** em `../backups/esp32s3-flash-0-1MiB-partial-2026-10-28.bin`, que **não serve como backup restaurável**. O app1 (`0x210000`) estava vazio. Partições, NVS, OTA e FAT foram preservados.
-- **2026-10-28:** primeira versão do app de clima (~1,68 MB). Tela preta corrigida mantendo o painel em retrato e girando o canvas.
-- **2026-11-01:** fontes Montserrat com acentos (sem compressão). A versão comprimida deixava a tela sem texto. Build de 1 742 064 bytes gravado em `0x10000` com `Hash of data verified`.
-- **2026-11-09:**
-  - Radar aéreo redesenhado: escopo circular, mapa, rota/companhia via adsbdb e movimento suave.
-  - Correção do erro `SSL - Memory allocation failed`: LVGL, JSON e respostas HTTP movidos para a PSRAM.
-  - Finanças com sessão TLS única por visita.
-  - Novo script de gravação (hoje `tools/deploy_nextneo_vista.sh`).
-  - Esta versão ainda precisa ser compilada e conferida na placa.
-
-- **2026-11-11:**
-  - Card **Agora** da lista de horas passou a mostrar a mesma temperatura do bloco principal (antes mostrava a previsão da hora cheia e podia ficar 1–2 °C diferente).
-  - Campo **Cidade** aceita coordenadas no formato `Nome @ lat,lon`, com dica na página web e em Ajustes.
-  - README ganhou a seção 0, para quem vem do Java.
-  - Tela Aeroporto: detalhes só ao tocar, painel fecha sozinho após 5 s.
-  - Clima: "garoa" do Open-Meteo conferida com nuvens e chuva medida antes de aparecer no "Agora".
-  - Tela Aeroporto (CGH): aviões no pátio a partir do painel de voos da Aena.
-  - Radar: adsb.fi como reserva quando o ADSB.lol falha.
-  - Tela Aeroporto: adsb.fi como fonte principal (3,5 s) e ADSB.lol de reserva, com pausa progressiva após 429.
-  - Tela Aeroporto: toque nos aviões corrigido, posição estimada "ao vivo" para aviões em movimento, ADSB.lol a cada ~5 s.
-  - Radar aéreo mostra a localização do aparelho como um ponto vermelho pulsando.
-  - Radar aéreo desenha o aeroporto (pistas, taxiways, pátios) sobre o mapa de ruas; o botão MAPA esconde só as ruas.
-  - Descoberto que a placa já usa a tabela `default_8MB.csv` (app de 3264 KB), não mais a de fábrica. Tabela fixada no `platformio.ini`, limite do script corrigido e seção 3 reescrita.
-  - Esta versão ainda precisa ser compilada e conferida na placa.
-
-Um backup completo de verdade exige ler os `0x1000000` bytes sem erros de CRC.
-
----
-
-## 11. Testes automáticos (na placa)
+## 10. Testes automáticos
 
 Os testes conferem, sozinhos, que o **menu** e as **13 telas** abrem e funcionam. Rode-os depois de mexer no código e antes de fazer commit. Assim você não precisa abrir tela por tela com o dedo.
 
-### 11.1 Como funciona, comparando com o Java
+### 10.1 Como funciona, comparando com o Java
 
 No Java, o `mvn test` roda os testes **no seu computador**. Aqui não dá: as telas precisam da tela, do touch, do Wi-Fi e da memória da placa. Por isso os testes **rodam dentro da placa**:
 
@@ -572,7 +676,7 @@ pio test  →  compila um firmware de teste  →  grava na placa  →  a placa r
 
 > Cada suíte é gravada e roda **separada**: a placa reinicia entre uma e outra. É como se cada classe de teste rodasse numa JVM nova, então uma suíte não atrapalha a outra.
 
-### 11.2 As suítes
+### 10.2 As suítes
 
 | Suíte (pasta) | O que verifica | Testes |
 |---|---|---|
@@ -584,7 +688,7 @@ As 13 telas testadas: Clima, Finanças, Calendário, Radar, Ajustes, Servidores,
 
 > A pasta `test/test_screenshots/` **não** é uma suíte de verificação: é a ferramenta que tira as imagens da documentação (seção 5). Ela é ignorada pelo `pio test -e nextneo-vista` e pelo deploy, e roda só pelo `./tools/capture_screenshots.sh` (ambiente `nextneo-vista-docs`).
 
-### 11.3 Passo a passo para rodar
+### 10.3 Passo a passo para rodar
 
 **Antes de começar:**
 
@@ -595,16 +699,17 @@ As 13 telas testadas: Clima, Finanças, Calendário, Radar, Ajustes, Servidores,
 **1. Abra o Terminal na pasta do projeto:**
 
 ```sh
-cd ~/Documents/ChatGPT/"placa esp32"/guition-jc3248w535c
+cd caminho/para/nextneo-vista     # a pasta onde você clonou o repositório
 ```
 
 **2. Descubra a porta da placa:**
 
 ```sh
-ls /dev/cu.usbmodem*
+ls /dev/cu.usbmodem*      # macOS
+ls /dev/ttyACM*           # Linux
 ```
 
-Deve aparecer algo como `/dev/cu.usbmodem1201`. Use esse nome nos comandos abaixo.
+Deve aparecer algo como `/dev/cu.usbmodem1201` (macOS) ou `/dev/ttyACM0` (Linux). Use esse nome nos comandos abaixo.
 
 **3. Rode todos os testes** (leva uns 5 minutos, porque grava 3 firmwares):
 
@@ -629,7 +734,7 @@ nextneo-vista  test_lifecycle  PASSED    00:01:20
 ./tools/deploy_nextneo_vista.sh
 ```
 
-### 11.4 Rodar só uma suíte
+### 10.4 Rodar só uma suíte
 
 Útil quando você mexeu numa coisa só e quer uma resposta rápida (cerca de 2 minutos). O `-f` filtra pelo nome da pasta:
 
@@ -639,7 +744,7 @@ nextneo-vista  test_lifecycle  PASSED    00:01:20
 
 Troque `test_screens` por `test_menu` ou `test_lifecycle`.
 
-### 11.5 Quando um teste falha
+### 10.5 Quando um teste falha
 
 A linha de falha diz **o arquivo, a linha, o teste e o motivo**. Exemplo:
 
@@ -661,7 +766,7 @@ Problemas comuns:
 | `error:` com nome de arquivo `.cpp` | Erro de compilação (como no Java, o código não compila). | Leia a mensagem: ela aponta a linha. |
 | Falha em `does_not_leak` | Uma tela está alocando memória e não libera ao sair. | Veja a mensagem `heap lost ...` e a seção 6. |
 
-### 11.6 Criar uma tela nova? Crie o teste junto
+### 10.6 Criar uma tela nova? Crie o teste junto
 
 Se você adicionar uma tela ao `enum ScreenID`, **os testes deixam de compilar** de propósito (há uma checagem `static_assert` em `test/support/ui_harness.h`). Para corrigir:
 
@@ -672,4 +777,30 @@ Se você adicionar uma tela ao `enum ScreenID`, **os testes deixam de compilar**
 > Detalhes técnicos:
 > - Para os testes conseguirem ligar o app de verdade, o `main.cpp` tem `appSetup()`/`appLoop()`. No firmware normal, `setup()` só chama `appSetup()`. Nos testes, quem chama é a suíte (via `ui::bootApp()`).
 > - Depois do boot, os testes desligam a cópia do log do app na serial (`gLogSerialEcho = false`) e voltam a esperar a USB (`Serial.setTxTimeoutMs(500)`). Sem isso, as linhas do log e as do Unity se misturavam, e o PlatformIO contava resultados a menos. O log continua sendo gravado na página `/log`.
+
+### 10.7 Testes no computador (sem placa)
+
+Além dos testes na placa, há testes que rodam **no próprio computador**, em segundos e sem cabo. Eles testam a lógica pura, ou seja, o código que não depende de tela, Wi-Fi nem hardware, como um teste JUnit comum:
+
+```sh
+pio test -e native
+```
+
+| Suíte (pasta) | O que verifica | Testes |
+|---|---|---|
+| `test/test_native_weather/` | Códigos de clima → texto ("Garoa", "Céu limpo" à noite) e nível de chuva. | 5 |
+| `test/test_native_finance/` | Símbolos da Yahoo (`" petr4.sa "` → `PETR4.SA`), nomes curtos (`USDBRL=X` → `USD/BRL`) e moedas (`BRL` → `R$`). | 4 |
+| `test/test_native_servers/` | Link do Beszel (URL + ID) e a regra de "servidor fora do ar não atrasa o outro": servidores saudáveis primeiro, o que falhou só a cada 60 s, inclusive quando o relógio interno dá a volta (~49 dias). | 10 |
+| `test/test_native_radar/` | Distância entre coordenadas, filtro dos aviões mais próximos, projeção na tela e leitura do JSON do ADSB.lol. | 6 |
+| `test/test_native_text/` | Troca de caracteres que as fontes não têm (travessão, aspas curvas, emoji). | 5 |
+
+**Como isso funciona:** o ambiente `[env:native]` do `platformio.ini` compila só os arquivos `.cpp` puros (sem `Arduino.h` nem LVGL) com o compilador do computador (`g++`/`clang`). Por isso essas funções ficam em arquivos próprios, como `servers_retry.cpp` e `finance_symbols.cpp`, e o resto do app só as chama.
+
+**Para testar uma função nova assim:**
+
+1. Coloque a função num `.cpp` que **não** inclua `Arduino.h`, `lvgl.h` nem `app_screens.h` (só bibliotecas C/C++ padrão; ArduinoJson pode).
+2. Acrescente o arquivo em `build_src_filter` do `[env:native]`.
+3. Crie `test/test_native_<assunto>/test_main.cpp` com um `main()` que chame `UNITY_BEGIN()`, os `RUN_TEST(...)` e `return UNITY_END();` (no computador é `main()`, não `setup()`).
+
+O deploy (seção 1) roda esses testes **antes** dos testes da placa: um erro de lógica aparece em ~10 s em vez de 7 minutos.
 

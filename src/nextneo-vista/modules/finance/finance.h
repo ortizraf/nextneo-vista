@@ -1,13 +1,11 @@
 #pragma once
 // Finance module: Yahoo Finance quotes for a configurable list of assets.
 #include "app_screens.h"
+#include "modules/finance/finance_symbols.h"
 
 // ---- asset list (finance_assets.cpp). UI thread / web handler.
 void loadFinanceAssets();
 bool setFinanceAssets(const FinanceAsset *assets, uint8_t count);
-bool normalizeFinanceSymbol(const char *in, char *out, size_t outSize);
-void financeDisplayName(const char *symbol, char *out, size_t outSize);
-const char *currencySymbol(const char *currency);
 
 // ---- detail chart (long press on a card). UI writes financeDetailWant, the network
 // task answers in financeDetail (both under mtx). Only fetched while Finance is active.

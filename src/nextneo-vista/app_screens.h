@@ -10,6 +10,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
+#include "core/text_utils.h"
 
 LV_FONT_DECLARE(lv_font_weather_14);
 LV_FONT_DECLARE(lv_font_weather_20);
@@ -201,6 +202,5 @@ void applyTime();                      // (re)configure NTP with cfg.utcOffset
 lv_obj_t *makeLabel(lv_obj_t *parent, const char *txt, const lv_font_t *font, uint32_t color);
 lv_obj_t *makeCard(lv_obj_t *parent, int w, int h);
 lv_obj_t *addBackButton(lv_obj_t *parent);     // the app's one back button (goes to the menu)
-const char *uiSafeText(const char *in, char *out, size_t n);   // replaces glyphs our fonts lack
 void setLabelIfChanged(lv_obj_t *label, const char *text);
 void renderWifiIndicator(lv_obj_t *icon, bool up);
