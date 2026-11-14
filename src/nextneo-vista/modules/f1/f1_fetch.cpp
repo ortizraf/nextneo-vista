@@ -74,15 +74,28 @@ time_t parseUtc(const char *date, const char *tm) {    // "2026-03-08", "04:00:0
 
 // ============================================================== network task
 char netMsg[72];                                   // last network problem, shown while nothing is loaded
+// Jolpica gets up to 4 requests in a row per job: one keep-alive session for all of
+// them (one TLS handshake instead of four; measured 8.2 s -> 4.3 s per job). The client
+// exists only while f1Fetch() runs (no TLS context kept in internal RAM between jobs).
+// Other hosts use a one-shot connection.
+static WiFiClientSecure *jolpica = nullptr;
+static void releaseJolpica() { if (jolpica) jolpica->stop(); }
+
 static int fetchJson(const char *url, JsonDocument &doc, PsramBuffer &body, const char *postBody = nullptr) {
-  if (!tlsMemoryAvailable("f1")) { snprintf(netMsg, sizeof netMsg, "mem\xC3\xB3ria baixa p/ conex\xC3\xA3o, tentando de novo"); return -1; }
+  const bool toJolpica = jolpica && !strncmp(url, "https://api.jolpi.ca/", 21);
+  if (!toJolpica) releaseJolpica();                   // one TLS context at a time
+  if (!(toJolpica && jolpica->connected()) && !tlsMemoryAvailable("f1")) {
+    snprintf(netMsg, sizeof netMsg, "mem\xC3\xB3ria baixa p/ conex\xC3\xA3o, tentando de novo"); return -1;
+  }
   body.clear();
-  WiFiClientSecure client; client.setInsecure(); client.setHandshakeTimeout(10);
+  WiFiClientSecure oneShot;
+  WiFiClientSecure &client = toJolpica ? *jolpica : oneShot;
+  client.setInsecure(); client.setHandshakeTimeout(10);
   HttpsFetchOptions opt; opt.userAgent = "NextNeoVista/1.0 (ESP32-S3 F1 display)";
   const uint32_t t0 = millis();
-  const int st = httpsFetch(client, url, body, 25000, false, postBody,
+  const int st = httpsFetch(client, url, body, 25000, toJolpica, postBody,
                             postBody ? "application/x-www-form-urlencoded" : "application/json", opt);
-  client.stop();
+  if (!toJolpica) client.stop();
   LogV.printf("F1: %.60s -> HTTP %d, %u bytes, %lums\n", url + 8, st, (unsigned)body.length(), (unsigned long)(millis() - t0));
   if (st != 200 || body.overflowed()) { snprintf(netMsg, sizeof netMsg, "servidor respondeu %d, tentando de novo", st); return st == 200 ? -2 : st; }
   if (deserializeJson(doc, body.c_str(), body.length())) { snprintf(netMsg, sizeof netMsg, "resposta inv\xC3\xA1lida, tentando de novo"); return -3; }
@@ -192,6 +205,7 @@ static bool fetchTracks(PsramBuffer &body) {      // one download (~120 KB) -> e
   filter["features"][0]["geometry"]["coordinates"] = true;
   if (!tlsMemoryAvailable("f1-tracks")) return false;
   body.clear();
+  releaseJolpica();
   WiFiClientSecure client; client.setInsecure(); client.setHandshakeTimeout(10);
   const int st = httpsFetch(client, "https://raw.githubusercontent.com/bacinger/f1-circuits/master/f1-circuits.geojson", body, 25000, false);
   client.stop();
@@ -314,6 +328,7 @@ static bool fetchSurroundings(const char *cid, PsramBuffer &body) {
   for (int k = 0; k < 3 && !got; ++k) {
     if (!tlsMemoryAvailable("f1-osm") || !screenJobStillCurrent()) return false;
     body.clear();
+    releaseJolpica();
     WiFiClientSecure client; client.setInsecure(); client.setHandshakeTimeout(15);
     HttpsFetchOptions opt; opt.userAgent = "NextNeoVista/1.0 (ESP32-S3 F1 circuit map)";
     const uint32_t t0 = millis();
@@ -458,6 +473,9 @@ static bool fetchRaceWeather(F1Data &d, const Race &r, PsramBuffer &body) {
 
 // Network task (F1 screen job). Decides what is stale; quick no-op when everything is fresh.
 bool f1Fetch() {
+  WiFiClientSecure session;                             // this job's Jolpica session
+  jolpica = &session;
+  struct EndSession { ~EndSession() { releaseJolpica(); jolpica = nullptr; } } endSession;
   if (!lock || !shared) return false;                   // screen not entered yet
   if (!net) {
     net = (F1Data *)heap_caps_calloc(1, sizeof(F1Data), MALLOC_CAP_SPIRAM);

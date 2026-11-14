@@ -24,20 +24,21 @@ bool skyFetch() {
   if (!list) { satFetching = false; return false; }
   static PsramBuffer body(600 * 1024);
   int n = 0, okCount = 0;
+  // The 3 lists come from the same host: one keep-alive session (one TLS handshake).
+  WiFiClientSecure client; client.setInsecure(); client.setHandshakeTimeout(8);
   for (int k = 0; k < 3; ++k) {
     if (!screenJobStillCurrent()) break;
-    if (!tlsMemoryAvailable("celestrak")) continue;
+    if (!client.connected() && !tlsMemoryAvailable("celestrak")) continue;
     body.clear();
-    WiFiClientSecure client; client.setInsecure(); client.setHandshakeTimeout(8);
     const uint32_t t0 = millis();
-    const int status = httpsFetch(client, kUrl[k], body, 15000, false);
-    client.stop();
+    const int status = httpsFetch(client, kUrl[k], body, 15000, true);
     const int before = n;
     if (status == 200 && !body.overflowed()) { n = parseTle(body.c_str(), list, n, MAX_SATS, k); ++okCount; }
     Log.printf("C\xC3\xA9u: CelesTrak %s HTTP %d, %u bytes, +%d sat\xC3\xA9lites (%lums)\n",
                k == 0 ? "stations" : k == 1 ? "visual" : "last-30-days", status, (unsigned)body.length(), n - before,
                (unsigned long)(millis() - t0));
   }
+  client.stop();
   satFetching = false;
   if (!okCount || !n) { heap_caps_free(list); return false; }
   while (satPending) delay(20);                           // UI has not taken the previous list yet

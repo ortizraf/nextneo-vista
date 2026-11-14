@@ -868,6 +868,8 @@ bool airportFetch() {
   if (!fiResting && due(fi, FI_GAP)) {                      // main: adsb.fi
     tried = true; fi.lastMs = millis();
     lolClient.stop();                                       // one TLS context at a time
+    // adsb.fi closes the connection after every answer (measured: always a new one), so a
+    // kept session would only hold a TLS context in internal RAM for nothing.
     if (fetchExtra(fiUrl, SRC_ADSBFI, lat, lon, radiusNm, fetchBuf, fetchSrc, fetchGeom, n)) { okMask |= SRC_ADSBFI; okAgain(fi); }
     else { got429 = lastFetchStatus == 429; rest(fi, "adsb.fi", lastFetchStatus); snprintf(err, sizeof err, "adsb.fi sem resposta"); }
   }
