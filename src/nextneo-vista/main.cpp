@@ -2351,7 +2351,9 @@ static void build_ui() {
 }
 
 // ---------------------------------------------------------------- setup / loop
-void setup() {
+// appSetup/appLoop hold the app; setup()/loop() only call them, so the on-device
+// tests (test/, PIO_UNIT_TESTING) can boot the real app from their own setup().
+void appSetup() {
   Serial.begin(115200);
   // USB serial must never block the app: with the cable plugged in but no monitor reading,
   // every log line waited for the TX timeout (seen as ~2 s gaps between log lines).
@@ -2433,9 +2435,14 @@ void setup() {
   xTaskCreatePinnedToCore(workerTask, "worker", 12288, NULL, 1, NULL, 0);
 }
 
-void loop() {
+void appLoop() {
   if (WiFi.status() == WL_CONNECTED && !configServerStarted) startConfigServer();
   if (configServerStarted) configServer.handleClient();
   const uint32_t idle = lv_timer_handler();      // ms until the next LVGL timer
   delay(idle > 5 ? 5 : idle ? idle : 1);
 }
+
+#ifndef PIO_UNIT_TESTING
+void setup() { appSetup(); }
+void loop() { appLoop(); }
+#endif

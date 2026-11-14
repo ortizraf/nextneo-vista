@@ -168,6 +168,8 @@ void postScreenJob(int cmd);           // API job bound to the active screen
 ScreenID activeScreenId();
 bool screenJobStillCurrent();          // network task: is the running job still in context?
 void switchScreen(ScreenID id);
+void appSetup();                       // whole app boot (setup() calls it; tests too)
+void appLoop();
 void setLabelIfChanged(lv_obj_t *label, const char *text);
 
 extern lv_obj_t *mainMenu, *weatherView, *settingsView, *weatherTabs, *financeView, *calendarView, *flightRadarView;

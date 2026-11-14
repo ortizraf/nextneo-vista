@@ -21,6 +21,7 @@ O app principal fica em `src/nextneo-vista/` (ambiente PlatformIO `weather-clock
 8. [Hardware](#8-hardware)
 9. [Exemplos e hub de jogos](#9-exemplos-e-hub-de-jogos)
 10. [Histórico desta placa](#10-histórico-desta-placa)
+11. [Testes automáticos (na placa)](#11-testes-automáticos-na-placa)
 
 ---
 
@@ -54,6 +55,8 @@ Pense num `.jar` executável que **é** o computador inteiro: não existe "insta
 | **`Preferences`** (NVS) | `java.util.prefs` / arquivo de config | Guarda Wi-Fi, cidade, ativos etc. e sobrevive a reinício. |
 | **PSRAM x RAM interna** | heap grande x heap pequeno | Não há *garbage collector*. Memória é escassa; veja a seção 6. |
 | **`String` (Arduino)** | `String` | Parecida, mas mutável e cara em memória. |
+| **Unity** | JUnit | Biblioteca de testes. `TEST_ASSERT_EQUAL(...)` ≈ `assertEquals(...)`. |
+| **`pio test`** | `mvn test` | Compila os testes, grava na placa e mostra o resultado. Veja a seção 11. |
 
 Três diferenças que pegam quem vem do Java:
 
@@ -382,6 +385,7 @@ guition-jc3248w535c/
 │   ├── flash_weather_clock.sh     # limpar + compilar + gravar app0 + monitor
 │   ├── update_weather.sh          # compilar + gravar app0
 │   └── flash_hub.sh               # hub de jogos (outra tabela de partições)
+├── test/                          # testes automáticos que rodam na placa (seção 11)
 └── src/nextneo-vista/
     ├── main.cpp                   # display/touch, gerenciador de telas, tarefa de rede, clima, finanças
     ├── app_screens.h              # estado compartilhado, IDs de tela, comandos de rede
@@ -488,3 +492,129 @@ Vídeo para o media player: `ffmpeg -i in.mp4 -vf "scale=480:320" -q:v 6 -r 20 o
   - Esta versão ainda precisa ser compilada e conferida na placa.
 
 Um backup completo de verdade exige ler os `0x1000000` bytes sem erros de CRC.
+
+---
+
+## 11. Testes automáticos (na placa)
+
+Os testes conferem, sozinhos, que o **menu** e as **13 telas** abrem e funcionam. Rode-os depois de mexer no código e antes de fazer commit. Assim você não precisa abrir tela por tela com o dedo.
+
+### 11.1 Como funciona, comparando com o Java
+
+No Java, o `mvn test` roda os testes **no seu computador**. Aqui não dá: as telas precisam da tela, do touch, do Wi-Fi e da memória da placa. Por isso os testes **rodam dentro da placa**:
+
+```text
+pio test  →  compila um firmware de teste  →  grava na placa  →  a placa roda os testes
+          →  o resultado volta pelo cabo USB  →  aparece PASSED/FAILED no seu terminal
+```
+
+| Aqui | No Java | O que é |
+|---|---|---|
+| `pio test -e weather-clock` | `mvn test` | Roda todos os testes. |
+| pasta `test/test_menu/` | uma classe `MenuTest` | Uma **suíte**: um grupo de testes sobre um assunto. |
+| `static void test_boot_lands_on_menu()` | método com `@Test` | Um teste. O nome começa com `test_`. |
+| `RUN_TEST(test_boot_lands_on_menu);` | (automático no JUnit) | Em C++ cada teste precisa ser listado no `setup()` da suíte. |
+| `setUp()` / `tearDown()` | `@BeforeEach` / `@AfterEach` | Rodam antes/depois de **cada** teste. Aqui `setUp()` sempre volta ao menu. |
+| `TEST_ASSERT_EQUAL(esperado, atual)` | `assertEquals(esperado, atual)` | Falha o teste se os valores forem diferentes. |
+| `TEST_ASSERT_NOT_NULL(x)` | `assertNotNull(x)` | Falha se `x` for nulo. |
+| `test/support/ui_harness.h` | classe utilitária de teste | Funções comuns a todas as suítes (tocar num botão, achar o botão voltar...). |
+
+> Cada suíte é gravada e roda **separada**: a placa reinicia entre uma e outra. É como se cada classe de teste rodasse numa JVM nova, então uma suíte não atrapalha a outra.
+
+### 11.2 As suítes
+
+| Suíte (pasta) | O que verifica | Testes |
+|---|---|---|
+| `test/test_menu/` | Ao ligar, aparece o menu. Existe um ícone para cada uma das 13 telas. Tocar em cada ícone abre a tela certa, e só ela fica visível. | 16 |
+| `test/test_screens/` | Para cada tela: tem botão voltar; fica aberta 1,5 s (tempo de pedir dados à internet) sem travar nem pular para outra tela; o botão voltar leva ao menu. | 39 |
+| `test/test_lifecycle/` | O "gerenciador de telas" (`switchScreen`): ignora telas inválidas, não faz nada se a tela já está aberta, troca direto de uma tela para outra, e **não vaza memória** depois de abrir todas as telas 5 vezes. | 4 |
+
+As 13 telas testadas: Clima, Finanças, Calendário, Radar, Ajustes, Servidores, Relógio, Aeroporto, Fotos, Céu, F1, Arte e Futebol.
+
+### 11.3 Passo a passo para rodar
+
+**Antes de começar:**
+
+- Siga a seção 0.3 (PlatformIO instalado e placa ligada no USB).
+- A placa precisa estar com o **Wi-Fi já configurado** (seção 0.6). Os testes usam a internet de verdade, como o app.
+- Feche o monitor serial se ele estiver aberto (`Ctrl+C`). Só um programa por vez pode usar o cabo.
+
+**1. Abra o Terminal na pasta do projeto:**
+
+```sh
+cd ~/Documents/ChatGPT/"placa esp32"/guition-jc3248w535c
+```
+
+**2. Descubra a porta da placa:**
+
+```sh
+ls /dev/cu.usbmodem*
+```
+
+Deve aparecer algo como `/dev/cu.usbmodem1201`. Use esse nome nos comandos abaixo.
+
+**3. Rode todos os testes** (leva uns 5 minutos, porque grava 3 firmwares):
+
+```sh
+~/.platformio/penv/bin/pio test -e weather-clock --upload-port /dev/cu.usbmodem1201 --test-port /dev/cu.usbmodem1201
+```
+
+Enquanto roda, a tela da placa fica trocando de tela sozinha. É normal: são os testes "tocando" nos botões.
+
+**4. Leia o resultado.** No final aparece um resumo assim:
+
+```text
+weather-clock  test_menu       PASSED    00:01:54
+weather-clock  test_screens    PASSED    00:01:51
+weather-clock  test_lifecycle  PASSED    00:01:20
+================= 59 test cases: 59 succeeded =================
+```
+
+**5. Grave o app de volta.** Depois dos testes, a placa fica com o firmware **de teste** (a tela para no último teste). Para voltar ao app normal:
+
+```sh
+~/.platformio/penv/bin/pio run -e weather-clock -t upload --upload-port /dev/cu.usbmodem1201
+```
+
+### 11.4 Rodar só uma suíte
+
+Útil quando você mexeu numa coisa só e quer uma resposta rápida (cerca de 2 minutos). O `-f` filtra pelo nome da pasta:
+
+```sh
+~/.platformio/penv/bin/pio test -e weather-clock -f test_screens --upload-port /dev/cu.usbmodem1201 --test-port /dev/cu.usbmodem1201
+```
+
+Troque `test_screens` por `test_menu` ou `test_lifecycle`.
+
+### 11.5 Quando um teste falha
+
+A linha de falha diz **o arquivo, a linha, o teste e o motivo**. Exemplo:
+
+```text
+test/test_screens/test_main.cpp:119:test_back_returns_to_menu_f1:FAIL: Expected 1 Was 12. active screen should be the menu
+```
+
+Como ler:
+
+- `test_back_returns_to_menu_f1`: o teste "o voltar da tela F1 leva ao menu".
+- `Expected 1 Was 12`: esperava a tela de número 1 e encontrou a 12. Os números são a ordem do `enum ScreenID` em `src/nextneo-vista/app_screens.h`: 1 = menu, 2 = Clima, ..., 12 = F1, 13 = Arte, 14 = Futebol. Ou seja: tocou em voltar e continuou na F1.
+
+Problemas comuns:
+
+| Sintoma | Causa provável | O que fazer |
+|---|---|---|
+| `Could not open port` / `Resource busy` | Monitor serial ou outro programa usando o cabo. | Feche o monitor (`Ctrl+C`) e rode de novo. |
+| Fica parado esperando resultado | Placa travou ou reiniciou durante o teste. | Aperte o botão **RST** da placa ou desconecte e reconecte o USB, e rode de novo. |
+| `error:` com nome de arquivo `.cpp` | Erro de compilação (como no Java, o código não compila). | Leia a mensagem: ela aponta a linha. |
+| Falha em `does_not_leak` | Uma tela está alocando memória e não libera ao sair. | Veja a mensagem `heap lost ...` e a seção 6. |
+
+### 11.6 Criar uma tela nova? Crie o teste junto
+
+Se você adicionar uma tela ao `enum ScreenID`, **os testes deixam de compilar** de propósito (há uma checagem `static_assert` em `test/support/ui_harness.h`). Para corrigir:
+
+1. Em `test/support/ui_harness.h`, adicione uma linha na lista `kScreens` com o ID da tela, o texto do ícone no menu e a variável da view. Exemplo: `{SCREEN_NOVA, "Nova", &novaView},`.
+2. No mesmo arquivo, adicione a tela nas duas macros `UI_TEST_PER_SCREEN` e `UI_RUN_PER_SCREEN`, copiando uma linha existente.
+3. Rode os testes. A tela nova ganha automaticamente os testes de menu, de voltar e de memória.
+
+> Detalhe técnico: para os testes conseguirem ligar o app de verdade, o `main.cpp` tem `appSetup()`/`appLoop()` no lugar do conteúdo de `setup()`/`loop()`. No firmware normal, `setup()` só chama `appSetup()`. Nos testes, quem chama é a suíte (via `ui::bootApp()`).
+
