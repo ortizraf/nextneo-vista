@@ -543,7 +543,8 @@ nextneo-vista/                     # pasta do projeto (o nome é o que você esc
     │   ├── screen_registry.h      # lista das telas (cada módulo define a sua)
     │   ├── net_worker.*           # tarefa de rede (núcleo 0): executa os jobs das telas
     │   ├── display_touch.*        # tela AXS15231B, touch e integração com o LVGL
-    │   ├── web_config.*           # página web de configuração e log
+    │   ├── web_config.*           # servidor web: monta a página com os cards dos módulos, log e login
+    │   ├── web_ui.h               # API para um módulo pôr o seu card e as suas rotas na página (WebSection)
     │   ├── ui_kit.cpp             # makeLabel, makeCard, botão voltar, texto seguro
     │   ├── app_state.cpp          # sh (Wi-Fi/status), cfg, mtx, prefs, hora local
     │   └── lv_mem_psram.cpp       # alocador do LVGL em PSRAM
@@ -558,6 +559,7 @@ nextneo-vista/                     # pasta do projeto (o nome é o que você esc
     │   ├── flight_airport/        # airport_screen + airport_data (OSM, tráfego, Aena) + airport_internal.h
     │   ├── sky/                   # sky_screen + sky_fetch (CelesTrak) + sky_orbit (SGP4/TLE, puro)
     │   ├── clock/  calendar/  photos/  settings/  generative_art/
+    │   ├── <tela>/<tela>_web.cpp  # card + rotas da tela na página web (clima, radar, finanças, fotos, servidores, futebol)
     │   └── <tela>/<tela>.h        # o que a tela oferece para OUTROS módulos (quando existe)
     ├── services/                  # HTTPS, alocação em PSRAM, log, provedores de aviões e mapas
     └── assets/fonts/              # fontes Montserrat com acentos
@@ -570,33 +572,36 @@ nextneo-vista/                     # pasta do projeto (o nome é o que você esc
  ┌───────────────────────────────────────────┐          ┌──────────────────────────┐
  │ screen_manager                            │  NetJob  │ net_worker               │
  │  └─ tela ativa: onEnter / render / onExit │ ───────► │  └─ job.run() (HTTP)     │
- │      timer → postScreenJob(CMD_...)       │  (fila)  │      grava resultado em  │
+ │      timer → postScreenJob(JOB_UPDATE)    │  (fila)  │      grava resultado em  │
  │  render() lê os dados do módulo  ◄────────┼──────────┼──── wx, fin... (mutex)   │
  └───────────────────────────────────────────┘          └──────────────────────────┘
 ```
 
-- **`ScreenLifecycle`** (em `app_screens.h`) é como uma *interface* Java que toda tela implementa: `build`, `onEnter`, `onExit`, `render`, os intervalos de atualização, a lista de **jobs de rede** (`NetJobDef`: comando + função `run()`) e `netRelease` (fechar conexões quando a tela sai).
-- Cada módulo **define a sua** no fim do `<tela>_screen.cpp` (ex.: `kWeatherScreen`). O `screen_manager` só tem a lista delas, na ordem do `enum ScreenID`. Não existe mais um `switch` gigante de comandos: a tarefa de rede procura o job na tela que o pediu.
+- **`ScreenLifecycle`** (em `app_screens.h`) é como uma *interface* Java que toda tela implementa: `build`, `onEnter`, `onExit`, `render`, os intervalos de atualização, a lista de **jobs de rede** (`NetJobDef`: nome + função `run()`) e `netRelease` (fechar conexões quando a tela sai).
+- Cada módulo **define a sua** no fim do `<tela>_screen.cpp` (ex.: `kWeatherScreen`). O `screen_manager` só tem a lista delas, na ordem do `enum ScreenID`. Não existe `switch` nem `enum` central de comandos: um job é "o índice `i` na lista de jobs da tela ativa" (`jobs[JOB_UPDATE]` é sempre a atualização periódica). Só os 3 comandos que não pertencem a uma tela (buscar redes, conectar, geocodificar) ficam no `enum GlobalCmd` do core.
 - **Só a tela ativa** busca dados. Cada job leva a tela e a "visita" (epoch) que o pediu; se o usuário saiu, o resultado é descartado. É assim que o app economiza a pouca RAM.
 - **Cada módulo é dono dos próprios dados.** O `sh` global guarda só o que é do app (Wi-Fi, linha de status, busca de redes); o Clima publica em `wx` (`weather.h`) e Finanças em `fin` (`finance.h`). Sempre com o `mtx`.
 - Os **widgets** (`lv_obj_t *`) são `static` dentro do `.cpp` da tela, como campos `private`. Outras telas não conseguem mexer neles.
+- **Página web por módulo.** Cada tela que tem ajustes na página web (`http://nextneovista.local`) tem um `<tela>_web.cpp` com o seu card e as suas rotas, registrado como `WebSection` (`core/web_ui.h`). O `core/web_config.cpp` só monta a página na ordem da lista `kSections` e cuida do log e do login.
 - Telas grandes separam **rede** (`*_fetch.cpp`/`*_data.cpp`) de **tela** (`*_screen.cpp`). O que os dois lados compartilham fica num `*_internal.h` com `namespace` próprio (equivale a classes *package-private*).
 
 ### 7.3 Criar uma tela nova (passo a passo)
 
-1. Acrescente o ID no `enum ScreenID` em `app_screens.h` (antes de `SCREEN_COUNT`). Se ela busca dados na internet, acrescente também um `CMD_...` no `enum Cmd`.
+1. Acrescente o ID no `enum ScreenID` em `app_screens.h` (antes de `SCREEN_COUNT`). Não é preciso criar comando de rede em lugar nenhum: os jobs ficam na própria tela.
 2. Crie `modules/nova/nova_screen.cpp`. Os widgets e as funções ficam `static`, e no fim do arquivo vai o registro:
 
    ```cpp
-   static const NetJobDef kNovaJobs[] = {{CMD_NOVA, "nova", novaFetch, true}};
+   static const NetJobDef kNovaJobs[] = {{"nova", novaFetch, true}};   // jobs[JOB_UPDATE]: atualização periódica
    const ScreenLifecycle kNovaScreen = {
      SCREEN_NOVA, "nova", &novaView, buildNovaScreen, novaOnEnter, novaOnExit, novaRender,
      nullptr, 60000, 10000, kNovaJobs, 1, nullptr,
    };
    ```
 3. Declare `extern const ScreenLifecycle kNovaScreen;` em `core/screen_registry.h` e coloque `&kNovaScreen` na lista `kScreens` de `core/screen_manager.cpp`, **na mesma posição do enum**.
+   Para pedir dados na hora (num toque, por exemplo), a tela chama `postScreenJob(JOB_UPDATE)`. Se tiver mais de um job, dê nomes aos índices com um `enum` local, como `FIN_JOB_DETAIL` em `finance_screen.cpp`.
 4. Ponha o ícone no menu (`modules/menu/menu.cpp`, função `buildMenuScreen`) chamando `switchScreen(SCREEN_NOVA)`.
-5. Inclua a tela nos testes (seção 10.6) e rode `pio test`. O teste `test_registry_lists_every_screen_in_order` avisa se a ordem estiver errada.
+5. Se ela tiver ajustes na página web: crie `modules/nova/nova_web.cpp` com uma função que acrescenta o card (`void novaCard(String &html)`), outra que registra as rotas (`void novaRoutes(WebServer &server)`, começando cada handler com `WEB_REQUIRE_LOGIN(server)`) e `const WebSection kNovaWeb = {"nova", novaCard, novaRoutes};`. Declare-a em `core/web_ui.h` e ponha `&kNovaWeb` em `kSections` (`core/web_config.cpp`), na posição em que o card deve aparecer.
+6. Inclua a tela nos testes (seção 10.6) e rode `pio test`. O teste `test_registry_lists_every_screen_in_order` avisa se a ordem estiver errada.
 
 **Stack:** PlatformIO Core 6.x, plataforma pioarduino (Arduino-ESP32 3.x), LVGL 9.6 (fixado em `~9.6.0`: o app usa a API por flag, `lv_obj_set_hidden`...), GFX Library for Arduino, ArduinoJson 7, JPEGDEC. A configuração do LVGL vem por flags (`-DLV_CONF_SKIP`), sem `lv_conf.h`.
 

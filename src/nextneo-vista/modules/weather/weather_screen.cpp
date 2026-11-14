@@ -627,7 +627,7 @@ static void renderWeather() {
   updateWeatherScreen();
 }
 
-static const NetJobDef kWeatherJobs[] = {{CMD_WEATHER, "weather", weatherFetch, true}};
+static const NetJobDef kWeatherJobs[] = {{"weather", weatherFetch, true, true}};
 const ScreenLifecycle kWeatherScreen = {
   SCREEN_WEATHER, "weather", &weatherView, buildWeatherScreen, weatherOnEnter, nullptr, renderWeather,
   nullptr, WEATHER_UPDATE_INTERVAL_MS, WEATHER_RETRY_INTERVAL_MS, kWeatherJobs, 1, nullptr,

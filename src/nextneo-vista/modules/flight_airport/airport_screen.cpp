@@ -599,7 +599,7 @@ static void canvasEvent(lv_event_t *e) {
       }
     }
     xSemaphoreGive(mtx);
-    if (newSel && det.state == DET_PENDING) postScreenJob(CMD_AIRPORT);   // start it now (positions keep their 2.5 s guard)
+    if (newSel && det.state == DET_PENDING) postScreenJob(JOB_UPDATE);   // start it now (positions keep their 2.5 s guard)
     renderedTrafficVersion = UINT32_MAX;
   }
 }
@@ -867,7 +867,7 @@ static void airportRender() {
   renderInfo(t);
 }
 
-static const NetJobDef kAirportJobs[] = {{CMD_AIRPORT, "airport", airportFetch, true}};
+static const NetJobDef kAirportJobs[] = {{"airport", airportFetch, true}};
 
 // Network task, while the Airport is not the active screen. ADSB.lol's session is
 // shared with the Flight Radar: keep it while the radar is shown.

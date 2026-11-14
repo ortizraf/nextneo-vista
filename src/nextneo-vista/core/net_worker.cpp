@@ -48,15 +48,15 @@ static void doConnect() {
 }
 
 
-// Geocode (Settings / web page). When the active screen shows the forecast
-// (Weather, Clock), refresh it right away as that screen's job.
+// Geocode (Settings / web page). When the active screen shows the forecast (a job
+// with followsLocation: Weather, Clock), refresh it right away as that screen's job.
 static bool runGeocode() {
   const bool ok = weatherGeocodeFetch();
   if (!ok) return false;
   const ScreenLifecycle *s = screenLifecycle(activeScreenId());
   for (uint8_t i = 0; i < s->jobCount; ++i) {
-    if (s->jobs[i].cmd != CMD_WEATHER) continue;
-    jobSetCurrent(jobForActiveScreen(CMD_WEATHER));
+    if (!s->jobs[i].followsLocation) continue;
+    jobSetCurrent(jobForActiveScreen(i));
     jobReportOutcome(s->id, s->jobs[i].run());
     break;
   }
@@ -65,21 +65,17 @@ static bool runGeocode() {
 static bool runScan() { doScan(); return true; }
 static bool runConnect() { doConnect(); return true; }
 
-// Commands not bound to a screen.
-static const NetJobDef kGlobalJobs[] = {
-  {CMD_SCAN, "scan", runScan, false},
-  {CMD_CONNECT, "connect", runConnect, false},
-  {CMD_GEOCODE, "geocode", runGeocode, false},
+// Commands not bound to a screen, in GlobalCmd order.
+static const NetJobDef kGlobalJobs[CMD_GLOBAL_COUNT] = {
+  {"scan", runScan, false},
+  {"connect", runConnect, false},
+  {"geocode", runGeocode, false},
 };
 
 static const NetJobDef *findJob(const NetJob &job) {
-  if (job.screen == SCREEN_NONE) {
-    for (const NetJobDef &d : kGlobalJobs) if (d.cmd == job.cmd) return &d;
-    return nullptr;
-  }
+  if (job.screen == SCREEN_NONE) return job.job < CMD_GLOBAL_COUNT ? &kGlobalJobs[job.job] : nullptr;
   const ScreenLifecycle *s = screenLifecycle(job.screen);
-  for (uint8_t i = 0; i < s->jobCount; ++i) if (s->jobs[i].cmd == job.cmd) return &s->jobs[i];
-  return nullptr;
+  return job.job < s->jobCount ? &s->jobs[job.job] : nullptr;
 }
 
 // Executes one job. Blocking HTTP is fine here: this is the dedicated network
@@ -92,7 +88,7 @@ static void runJob(const NetJob &job) {
   bool ok = false;
   bool ran = false;
   if (!def) {
-    Log.printf("[net] comando %u sem tratador para a tela %s\n", job.cmd, screenLifecycle(job.screen)->name);
+    Log.printf("[net] job %u sem tratador na tela %s\n", job.job, screenLifecycle(job.screen)->name);
   } else if (job.screen == SCREEN_NONE || screenJobStillCurrent()) {
     ok = def->run();       // otherwise: stale request from a screen the user already left
     ran = true;
@@ -111,7 +107,7 @@ static void runJob(const NetJob &job) {
     }
   }
   jobClearCurrent();
-  jobClearPending(job.cmd);
+  jobClearPending(job);
 }
 
 // Network task (core 0). It owns every HTTP/TLS client and only runs jobs that

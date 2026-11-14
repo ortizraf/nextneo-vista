@@ -2,6 +2,8 @@
 #include "core/screen_registry.h"
 #include "modules/finance/finance.h"
 
+enum : uint8_t { FIN_JOB_ALL = JOB_UPDATE, FIN_JOB_ONE, FIN_JOB_DETAIL };   // = kFinanceJobs order
+
 static lv_obj_t *financeView, *financeStrip, *financeStatusLabel, *financeAgeLabel[FINANCE_MAX_ASSETS], *financeValue[FINANCE_MAX_ASSETS], *financeDelta[FINANCE_MAX_ASSETS], *financePlot[FINANCE_MAX_ASSETS], *financeLine[FINANCE_MAX_ASSETS], *financeHeader[FINANCE_MAX_ASSETS], *financeCard[FINANCE_MAX_ASSETS];
 static lv_point_precise_t financeLinePoints[FINANCE_MAX_ASSETS][FINANCE_HISTORY] = {};
 
@@ -66,7 +68,7 @@ static void refreshQuoteEvent(lv_event_t *event) {
   const intptr_t index = (intptr_t)lv_event_get_user_data(event);
   if (index < 0 || index >= builtCount) return;
   financeSingleIndex = (int8_t)index;
-  postScreenJob(CMD_FINANCE_ONE);
+  postScreenJob(FIN_JOB_ONE);
 }
 
 // Price with sensible precision: 106543 | 229.87 | 5.4312
@@ -328,7 +330,7 @@ static void updateFinanceScreen() {
 
 // ================================================================ detail overlay
 // Hold a card: price, change, market state, chart with 1D/5D/1M/6M/1A and key figures.
-// Data: CMD_FINANCE_DETAIL (network task, Finance screen only, on demand, cached per range).
+// Data: FIN_JOB_DETAIL (network task, Finance screen only, on demand, cached per range).
 static constexpr int DCH_W = 300, DCH_H = 140;
 static constexpr uint32_t DETAIL_BG = 0x0A1122;
 static constexpr uint16_t DETAIL_BG565 = 0x0884;                      // DETAIL_BG in RGB565
@@ -362,7 +364,7 @@ static void requestDetail() {
   dRequestedMs = millis();
   lv_label_set_text(dLoading, "carregando...");
   lv_obj_set_hidden(dLoading, false);
-  postScreenJob(CMD_FINANCE_DETAIL);       // deduplicated; detailRender re-posts if the answer is for an older request
+  postScreenJob(FIN_JOB_DETAIL);       // deduplicated; detailRender re-posts if the answer is for an older request
 }
 
 static void fmtTime(uint32_t epoch, uint8_t range, char *out, size_t n) {
@@ -482,7 +484,7 @@ static void detailRender(bool financeChanged) {
   xSemaphoreGive(mtx);
   if (fresh) detailFill();
   // answer still for an older tab (dedup dropped our post while a job ran): ask again, at most every 2 s
-  else if (!answered && millis() - dRequestedMs > 2000) { dRequestedMs = millis(); postScreenJob(CMD_FINANCE_DETAIL); }
+  else if (!answered && millis() - dRequestedMs > 2000) { dRequestedMs = millis(); postScreenJob(FIN_JOB_DETAIL); }
 }
 
 static void openDetail(int index) {
@@ -630,10 +632,11 @@ static void financeOnExit() {
   showcaseLastMs = millis();
 }
 
+// Jobs of this screen, in kFinanceJobs order (postScreenJob takes the index).
 static const NetJobDef kFinanceJobs[] = {
-  {CMD_FINANCE, "finance", financeFetchAll, true},
-  {CMD_FINANCE_ONE, "finance-one", financeFetchOne, true},
-  {CMD_FINANCE_DETAIL, "finance-detail", financeFetchDetail, false},   // on demand: keeps the refresh timer
+  {"finance", financeFetchAll, true},
+  {"finance-one", financeFetchOne, true},
+  {"finance-detail", financeFetchDetail, false},   // on demand: keeps the refresh timer
 };
 const ScreenLifecycle kFinanceScreen = {
   SCREEN_FINANCE, "finance", &financeView, buildFinanceScreen, financeOnEnter, financeOnExit, updateFinanceScreen,

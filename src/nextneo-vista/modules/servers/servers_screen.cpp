@@ -397,7 +397,7 @@ static void serversRender() {
   else for (int i = 0; i < SERVERS_MAX; ++i) renderCard(i, d[i], c[i]);
 }
 
-static const NetJobDef kServersJobs[] = {{CMD_SERVERS, "servers", serversFetch, true}};
+static const NetJobDef kServersJobs[] = {{"servers", serversFetch, true}};
 const ScreenLifecycle kServersScreen = {
   SCREEN_SERVERS, "servers", &serversView, buildServersScreen, serversOnEnter, nullptr, serversRender,
   nullptr, SERVERS_UPDATE_INTERVAL_MS, SERVERS_RETRY_INTERVAL_MS, kServersJobs, 1, nullptr,

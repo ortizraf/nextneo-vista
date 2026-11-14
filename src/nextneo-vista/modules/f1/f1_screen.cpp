@@ -879,7 +879,7 @@ static void previewStep(lv_event_t *e) {                 // < > : show another c
   }
   previewIdx = (previewIdx + step + ui->nRaces) % ui->nRaces;
   previewMs = millis();
-  postScreenJob(CMD_F1);                                  // download that circuit if needed
+  postScreenJob(JOB_UPDATE);                                  // download that circuit if needed
 }
 static lv_obj_t *styleBtn, *styleIcon[2];
 static const char *kStyleName[ST_COUNT] = {"ruas", "pista"};
@@ -890,7 +890,7 @@ static void mapLong(lv_event_t *) {                         // style button: str
   }
   LogV.printf("F1: mapa em modo %s\n", kStyleName[mapStyle]);
   strcpy(shownMapCid, "?");                                 // redraw now (with or without the picture)
-  postScreenJob(CMD_F1);                                    // download the picture for this style if needed
+  postScreenJob(JOB_UPDATE);                                    // download the picture for this style if needed
 }
 
 static lv_obj_t *plainBox(lv_obj_t *parent, int x, int y, int w, int h) {
@@ -1145,7 +1145,7 @@ static void f1Render() {
   }
 }
 
-static const NetJobDef kF1Jobs[] = {{CMD_F1, "f1", f1Fetch, true}};
+static const NetJobDef kF1Jobs[] = {{"f1", f1Fetch, true}};
 const ScreenLifecycle kF1Screen = {
   SCREEN_F1, "f1", &f1View, buildF1Screen, f1OnEnter, f1OnExit, f1Render,
   nullptr, F1_UPDATE_INTERVAL_MS, F1_RETRY_INTERVAL_MS, kF1Jobs, 1, nullptr,

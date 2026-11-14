@@ -65,7 +65,7 @@ struct FinanceDetail {
 };
 extern FinanceDetail financeDetail;
 extern FinanceDetailRequest financeDetailWant;
-extern volatile int8_t financeSingleIndex;   // asset refreshed by CMD_FINANCE_ONE
+extern volatile int8_t financeSingleIndex;   // asset refreshed by the FIN_JOB_ONE job
 
 // ---- network task (finance_fetch.cpp)
 bool financeFetchAll();

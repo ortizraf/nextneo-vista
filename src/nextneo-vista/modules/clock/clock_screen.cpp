@@ -528,7 +528,7 @@ static void clockRender() {
   }
 }
 
-static const NetJobDef kClockJobs[] = {{CMD_WEATHER, "weather", weatherFetch, true}};
+static const NetJobDef kClockJobs[] = {{"weather", weatherFetch, true, true}};
 const ScreenLifecycle kClockScreen = {
   SCREEN_CLOCK, "clock", &clockView, buildClockScreen, clockOnEnter, clockOnExit, clockRender,
   nullptr, WEATHER_UPDATE_INTERVAL_MS, WEATHER_RETRY_INTERVAL_MS, kClockJobs, 1, nullptr,

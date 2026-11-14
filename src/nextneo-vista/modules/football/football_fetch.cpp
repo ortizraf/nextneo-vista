@@ -405,7 +405,7 @@ static bool fetchLeagueLogo(int L) {
   return ok;
 }
 
-// Network task (CMD_FOOTBALL): fetches only what is stale; cheap when everything is fresh.
+// Network task (Futebol screen job): fetches only what is stale; cheap when everything is fresh.
 bool footballFetch() {
   if (!lock || !shared) return false;
   if (WiFi.status() != WL_CONNECTED) return false;

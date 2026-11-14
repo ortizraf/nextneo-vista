@@ -2,7 +2,7 @@
 // Competitions: Champions League, Libertadores, Mundial de Clubes and Copa do Mundo.
 // Tabs: Ao vivo · Champions · Libertadores · Mundial.
 //
-// API rule of the app: ESPN is only called by this screen's job (CMD_FOOTBALL), only while
+// API rule of the app: ESPN is only called by this screen's job (kFootballJobs), only while
 // the screen is active. The job runs every FOOTBALL_UPDATE_INTERVAL_MS and decides itself
 // what is stale: leagues with a live game every ~40 s, the others every 10 min. Team crests are the logos ESPN sends (team.logo); they are downloaded after
 // the scores, a few per job, saved on LittleFS (/fl/<team id>.bin) and never delay scores.
@@ -492,7 +492,7 @@ static void footballRender() {
   renderList();
 }
 
-static const NetJobDef kFootballJobs[] = {{CMD_FOOTBALL, "football", footballFetch, true}};
+static const NetJobDef kFootballJobs[] = {{"football", footballFetch, true}};
 const ScreenLifecycle kFootballScreen = {
   SCREEN_FOOTBALL, "football", &footballView, buildFootballScreen, footballOnEnter, footballOnExit, footballRender,
   nullptr, FOOTBALL_UPDATE_INTERVAL_MS, FOOTBALL_RETRY_INTERVAL_MS, kFootballJobs, 1, footballReleaseConnection,

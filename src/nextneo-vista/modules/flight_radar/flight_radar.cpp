@@ -80,8 +80,9 @@ bool mapStreets = false, mapAirport = false;   // what the loaded image contains
 uint32_t mapRetryAfterMs = 0, airportRetryAfterMs = 0;
 volatile bool radarActive = false;
 static lv_obj_t *flightRadarView;
-static void (*requestRefresh)() = [] { postScreenJob(CMD_FLIGHT_RADAR); };
-static void (*requestDetails)() = [] { postScreenJob(CMD_FLIGHT_DETAILS); };
+enum : uint8_t { RADAR_JOB_UPDATE = JOB_UPDATE, RADAR_JOB_DETAILS };   // = kFlightRadarJobs order
+static void (*requestRefresh)() = [] { postScreenJob(RADAR_JOB_UPDATE); };
+static void (*requestDetails)() = [] { postScreenJob(RADAR_JOB_DETAILS); };
 
 // ---------------------------------------------------------------- UI state
 FlightRadarSnapshot *uiCopy = nullptr;
@@ -1281,8 +1282,8 @@ static void radarNetRelease() {
 }
 
 static const NetJobDef kFlightRadarJobs[] = {
-  {CMD_FLIGHT_RADAR, "flight-radar", updateFlightRadarData, true},
-  {CMD_FLIGHT_DETAILS, "flight-details", updateFlightRadarDetails, true},
+  {"flight-radar", updateFlightRadarData, true},
+  {"flight-details", updateFlightRadarDetails, true},
 };
 const ScreenLifecycle kFlightRadarScreen = {
   SCREEN_FLIGHT_RADAR, "flight-radar", &flightRadarView, buildFlightRadarScreen, flightRadarOnEnter,

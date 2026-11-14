@@ -802,7 +802,7 @@ static void skyRender() {
   }
 }
 
-static const NetJobDef kSkyJobs[] = {{CMD_SKY, "sky", skyFetch, true}};
+static const NetJobDef kSkyJobs[] = {{"sky", skyFetch, true}};
 const ScreenLifecycle kSkyScreen = {
   SCREEN_SKY, "sky", &skyView, buildSkyScreen, skyOnEnter, skyOnExit, skyRender,
   nullptr, SKY_UPDATE_INTERVAL_MS, SKY_RETRY_INTERVAL_MS, kSkyJobs, 1, nullptr,

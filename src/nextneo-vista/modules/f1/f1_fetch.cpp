@@ -456,7 +456,7 @@ static bool fetchRaceWeather(F1Data &d, const Race &r, PsramBuffer &body) {
   return true;
 }
 
-// Network task (CMD_F1). Decides what is stale; quick no-op when everything is fresh.
+// Network task (F1 screen job). Decides what is stale; quick no-op when everything is fresh.
 bool f1Fetch() {
   if (!lock || !shared) return false;                   // screen not entered yet
   if (!net) {
