@@ -768,7 +768,10 @@ static void skyOnEnter() {
     if (buf) lv_canvas_set_buffer(canvas, buf, SCR_W, SCR_H, LV_COLOR_FORMAT_RGB565);
   }
   if (!bg) bg = (uint16_t *)heap_caps_malloc(SCR_W * SCR_H * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  renderedDir = -1;
+  // The picture is kept between visits: redraw only if something it depends on changed
+  // (minute and direction are checked by skyRender; the location here). ~300 ms saved.
+  static float drawnLat = NAN, drawnLon = NAN;
+  if (cfg.lat != drawnLat || cfg.lon != drawnLon) { drawnLat = cfg.lat; drawnLon = cfg.lon; renderedDir = -1; }
   skyRender();
 }
 

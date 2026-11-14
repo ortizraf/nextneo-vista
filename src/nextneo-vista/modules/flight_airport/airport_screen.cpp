@@ -51,6 +51,7 @@ static uint16_t *canvasBuf;
 static constexpr int MAP_Y = 34, MAP_H = 256;          // map area under the header, above the footer
 static float viewX = 0, viewY = 0, scale = 0.1f;       // view centre (m) and px per metre
 static bool mapDrawn = false;
+static bool viewFitted = false;                        // view = fitView() (no pan / zoom since)
 static uint32_t renderedTrafficVersion = UINT32_MAX;
 static char selectedHex[7] = "";
 static lv_point_t dragStart; static float dragViewX, dragViewY; static bool dragging = false;
@@ -210,6 +211,7 @@ static void fitView() {
   const float w = max(200.0f, maxX - minX), h = max(200.0f, maxY - minY);
   viewX = (minX + maxX) / 2; viewY = (minY + maxY) / 2;
   scale = min((SCR_W - 20) / w, (MAP_H - 20) / h) * 1.22f;   // a bit closer: runway ends may touch the edges
+  viewFitted = true;
 }
 
 // ---------------------------------------------------------------- aircraft markers
@@ -495,7 +497,7 @@ static void applyPinch() {
   const float mx = pinchMid.x - SCR_W / 2.0f, my = (pinchMid.y - MAP_Y) - MAP_H / 2.0f;
   viewX = pinchViewX0 + mx / pinchScale0 - mx / newScale;
   viewY = pinchViewY0 - (my / pinchScale0 - my / newScale);
-  scale = newScale;
+  scale = newScale; viewFitted = false;
   drawMap();
   renderedTrafficVersion = UINT32_MAX;                            // aircraft follow every pinch step
   airportRender();
@@ -559,7 +561,7 @@ static void canvasEvent(lv_event_t *e) {
     return;
   }
   if (code == LV_EVENT_RELEASED && dragging) {
-    viewX = dragViewX - (p.x - dragStart.x) / scale; viewY = dragViewY + (p.y - dragStart.y) / scale;
+    viewX = dragViewX - (p.x - dragStart.x) / scale; viewY = dragViewY + (p.y - dragStart.y) / scale; viewFitted = false;
     lv_obj_set_pos(canvas, 0, MAP_Y);
     drawMap(); renderedTrafficVersion = UINT32_MAX; dragging = false;
     airportRender();                                              // re-anchor aircraft in the same frame
@@ -606,7 +608,7 @@ static void canvasEvent(lv_event_t *e) {
 
 static void airportRender();
 static void zoomBy(float f) {
-  scale = constrain(scale * f, MIN_SCALE, MAX_SCALE);
+  scale = constrain(scale * f, MIN_SCALE, MAX_SCALE); viewFitted = false;
   drawMap(); renderedTrafficVersion = UINT32_MAX;
   airportRender();                                                // aircraft follow the zoom at once
 }
@@ -758,13 +760,16 @@ static void airportOnEnter() {
 
   if (!glideTimer) glideTimer = lv_timer_create(glideCb, 60, NULL);    // ~16 fps (same as the radar sweep), only small icons move
   lv_timer_resume(glideTimer);
-  mapDrawn = false;
+  // Each visit starts on the fitted view. The map canvas is kept between visits: redraw it
+  // only if the user had panned / zoomed (~200 ms saved otherwise).
+  if (!viewFitted) mapDrawn = false;
   renderedTrafficVersion = UINT32_MAX;
   selectedHex[0] = 0;
   lv_obj_set_hidden(info, true);
 }
 
 static void airportOnExit() {
+  if (dragging || pinching) viewFitted = false;             // left mid-gesture: redraw next time
   dragging = false; pinching = false;
   lv_obj_set_pos(canvas, 0, MAP_Y);
   if (glideTimer) lv_timer_pause(glideTimer);
