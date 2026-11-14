@@ -8,6 +8,7 @@
 #include <string.h>
 #include <unity.h>
 #include "../../src/nextneo-vista/app_screens.h"
+#include "../../src/nextneo-vista/services/app_log.h"
 
 namespace ui {
 
@@ -16,23 +17,23 @@ namespace ui {
 struct ScreenCase {
   ScreenID id;
   const char *caption;
-  lv_obj_t **view;
+  lv_obj_t *view() const { return screenView(id); }   // container owned by the screen's module
 };
 
 static const ScreenCase kScreens[] = {
-  {SCREEN_WEATHER,      "Clima",              &weatherView},
-  {SCREEN_FINANCE,      "Finanças",           &financeView},
-  {SCREEN_CALENDARIO,   "Calendário",         &calendarView},
-  {SCREEN_FLIGHT_RADAR, "Radar",              &flightRadarView},
-  {SCREEN_SETTINGS,     "Ajustes",            &settingsView},
-  {SCREEN_SERVERS,      "Servidores",         &serversView},
-  {SCREEN_CLOCK,        "Relógio",            &clockView},
-  {SCREEN_AIRPORT,      "Aeroporto",          &airportView},
-  {SCREEN_PHOTOS,       "Fotos",              &photosView},
-  {SCREEN_SKY,          "C\xC3\xA9u",         &skyView},
-  {SCREEN_F1,           "F1",                 &f1View},
-  {SCREEN_ART,          "Arte",               &artView},
-  {SCREEN_FOOTBALL,     "Futebol",            &footballView},
+  {SCREEN_WEATHER,      "Clima"},
+  {SCREEN_FINANCE,      "Finanças"},
+  {SCREEN_CALENDARIO,   "Calendário"},
+  {SCREEN_FLIGHT_RADAR, "Radar"},
+  {SCREEN_SETTINGS,     "Ajustes"},
+  {SCREEN_SERVERS,      "Servidores"},
+  {SCREEN_CLOCK,        "Relógio"},
+  {SCREEN_AIRPORT,      "Aeroporto"},
+  {SCREEN_PHOTOS,       "Fotos"},
+  {SCREEN_SKY,          "C\xC3\xA9u"},
+  {SCREEN_F1,           "F1"},
+  {SCREEN_ART,          "Arte"},
+  {SCREEN_FOOTBALL,     "Futebol"},
 };
 static constexpr int kScreenCount = sizeof(kScreens) / sizeof(kScreens[0]);
 static_assert(kScreenCount == SCREEN_COUNT - 2, "every app screen needs a test case");
@@ -57,6 +58,13 @@ inline void bootApp() {
   delay(2000);           // lets the serial monitor attach before Unity prints
   appSetup();
   pump(500);
+  // From here the serial belongs to Unity: app log lines mixed into its output
+  // break PlatformIO's result parsing. The log is still kept for http://IP/log.
+  Serial.flush();
+  gLogSerialEcho = false;
+  // appSetup() sets a 0 ms USB TX timeout so a full buffer never blocks the app; here
+  // that would drop bytes of Unity's report (merged/missing results). Wait instead.
+  Serial.setTxTimeoutMs(500);
 }
 
 // ---- widget lookup
@@ -81,7 +89,8 @@ inline lv_obj_t *findButtonWithLabel(lv_obj_t *root, const char *text) {
   return nullptr;
 }
 
-inline lv_obj_t *menuTile(const char *caption) { return findButtonWithLabel(mainMenu, caption); }
+inline lv_obj_t *mainMenu() { return screenView(SCREEN_MENU); }
+inline lv_obj_t *menuTile(const char *caption) { return findButtonWithLabel(mainMenu(), caption); }
 // addBackButton(): the app's one back button: 40x34 at (4,4) with the LV_SYMBOL_LEFT
 // arrow. Size matters: some screens (F1 map) have other left-arrow buttons.
 inline bool isBackButton(lv_obj_t *o) {
@@ -116,14 +125,14 @@ inline void goToMenu() {
 }
 
 // ---- assertions
-// Exactly one view is visible: the expected one. `expectedView` may be mainMenu.
+// Exactly one view is visible: the expected one. `expectedView` may be the menu.
 inline void assertOnlyVisible(lv_obj_t *expectedView, const char *name) {
   char msg[96];
   snprintf(msg, sizeof msg, "%s view should be visible", name);
   TEST_ASSERT_TRUE_MESSAGE(isVisible(expectedView), msg);
   lv_obj_t *all[kScreenCount + 1];
-  all[0] = mainMenu;
-  for (int i = 0; i < kScreenCount; ++i) all[i + 1] = *kScreens[i].view;
+  all[0] = mainMenu();
+  for (int i = 0; i < kScreenCount; ++i) all[i + 1] = kScreens[i].view();
   for (lv_obj_t *v : all) {
     if (v == expectedView) continue;
     snprintf(msg, sizeof msg, "another view is visible while on %s", name);
@@ -133,12 +142,12 @@ inline void assertOnlyVisible(lv_obj_t *expectedView, const char *name) {
 
 inline void assertOnMenu() {
   TEST_ASSERT_EQUAL_MESSAGE(SCREEN_MENU, activeScreenId(), "active screen should be the menu");
-  assertOnlyVisible(mainMenu, "menu");
+  assertOnlyVisible(mainMenu(), "menu");
 }
 
 inline void assertOnScreen(const ScreenCase &c) {
   TEST_ASSERT_EQUAL_MESSAGE(c.id, activeScreenId(), c.caption);
-  assertOnlyVisible(*c.view, c.caption);
+  assertOnlyVisible(c.view(), c.caption);
 }
 
 // ---- memory

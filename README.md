@@ -2,7 +2,7 @@
 
 Firmware do sistema **NextNeo Vista** para a placa **Guition JC3248W535C** (ESP32-S3, tela 3,5" touch, usada na horizontal 480×320). O nome identifica o projeto e não aparece na interface do aparelho.
 
-O app principal fica em `src/nextneo-vista/` (ambiente PlatformIO `weather-clock`). Ele tem menu inicial, **Clima**, **Finanças**, **Calendário**, **Radar aéreo** e **Ajustes**. Exemplos e jogos ficam em `examples/`.
+O app principal fica em `src/nextneo-vista/` (ambiente PlatformIO `nextneo-vista`). Ele tem menu inicial, **Clima**, **Finanças**, **Calendário**, **Radar aéreo** e **Ajustes**. Exemplos e jogos ficam em `examples/`.
 
 > Especificação completa do produto: [`docs/index.html`](docs/index.html). É uma página única com hardware, mapa de pinos, catálogo de firmwares e arquitetura do hub.
 
@@ -17,7 +17,7 @@ O app principal fica em `src/nextneo-vista/` (ambiente PlatformIO `weather-clock
 4. [Solução de problemas](#4-solução-de-problemas)
 5. [Telas do app](#5-telas-do-app)
 6. [Memória: PSRAM x RAM interna (TLS)](#6-memória-psram-x-ram-interna-tls)
-7. [Estrutura do código](#7-estrutura-do-código)
+7. [Estrutura do código e arquitetura](#7-estrutura-do-código-e-arquitetura)
 8. [Hardware](#8-hardware)
 9. [Exemplos e hub de jogos](#9-exemplos-e-hub-de-jogos)
 10. [Histórico desta placa](#10-histórico-desta-placa)
@@ -40,12 +40,12 @@ Pense num `.jar` executável que **é** o computador inteiro: não existe "insta
 | Aqui | Equivalente no Java | Observação |
 |---|---|---|
 | **ESP32-S3** | a "máquina" onde roda | Processador da placa: 2 núcleos, Wi-Fi, ~512 KB de RAM interna + 8 MB de PSRAM. |
-| **Firmware** | o `.jar` da aplicação | O arquivo final é `firmware.bin`. |
+| **Firmware** | o `.jar` da aplicação | O arquivo final é `nextneo-vista.bin`. |
 | **PlatformIO** (`pio`) | Maven/Gradle | Baixa dependências, compila e grava. |
-| **`platformio.ini`** | `pom.xml` / `build.gradle` | Define bibliotecas (`lib_deps`), flags de compilação e os "ambientes" (`[env:weather-clock]` ≈ um *profile*). |
+| **`platformio.ini`** | `pom.xml` / `build.gradle` | Define bibliotecas (`lib_deps`), flags de compilação e os "ambientes" (`[env:nextneo-vista]` ≈ um *profile*). |
 | **`lib_deps`** | `<dependencies>` | Ex.: `lvgl`, `ArduinoJson`. Baixadas na 1ª compilação. |
-| **Compilar** (`pio run`) | `mvn package` | Gera `.pio/build/weather-clock/firmware.bin`. |
-| **Gravar / flash** | *deploy* | Copia o `firmware.bin` para a memória da placa pelo cabo USB. |
+| **Compilar** (`pio run`) | `mvn package` | Gera `.pio/build/nextneo-vista/nextneo-vista.bin`. |
+| **Gravar / flash** | *deploy* | Copia o `nextneo-vista.bin` para a memória da placa pelo cabo USB. |
 | **Monitor serial** | console / `System.out` | Os `Log.printf(...)` do código aparecem aqui. Também dá para ver em `http://IP-DA-PLACA/log`. |
 | **`.h` e `.cpp`** | `interface` e `class` | O `.h` declara o que existe; o `.cpp` implementa. `#include "x.h"` ≈ `import`. |
 | **`setup()` e `loop()`** | `main()` + `while (true)` | O Arduino chama `setup()` uma vez ao ligar e depois `loop()` para sempre. |
@@ -80,17 +80,17 @@ Três diferenças que pegam quem vem do Java:
 ### 0.4 O ciclo de trabalho do dia a dia
 
 ```text
-editar código (.cpp/.h)  →  compilar  →  gravar na placa  →  olhar o log
+editar código (.cpp/.h)  →  testar na placa  →  gravar o app  →  olhar o log
 ```
 
 Na prática é um comando só, dentro da pasta do projeto (`guition-jc3248w535c`):
 
 ```sh
 cd ~/Documents/ChatGPT/"placa esp32"/guition-jc3248w535c
-./tools/flash_weather_clock.sh
+./tools/deploy_nextneo_vista.sh
 ```
 
-> Também funciona `pio run -e weather-clock -t upload` (ou o botão Upload → do VS Code). Os dois gravam a mesma tabela de partições; veja a seção 3.
+> **Regra do projeto: deploy é sempre com teste.** O script roda os testes automáticos na placa e só grava o app se todos passarem (seção 1). Evite `pio run -t upload` direto: ele grava sem testar.
 
 ### 0.5 Onde fica o código de verdade
 
@@ -111,7 +111,7 @@ O campo **Cidade** aceita dois formatos, tanto na página web quanto em Ajustes 
 | Formato | Exemplo | O que acontece |
 |---|---|---|
 | Nome da cidade | `São Paulo, BR` | A placa procura a cidade e usa o ponto "central" que o serviço adota. O `, BR` limita a busca ao Brasil. |
-| Nome + coordenadas | `São Paulo @ -xx.xxx,-xx.xxx` | Usa exatamente esse ponto. O texto antes do `@` é só o nome mostrado na tela. |
+| Nome + coordenadas | `Minha casa @ -xx.xxx,-xx.xxx` | Usa exatamente esse ponto. O texto antes do `@` é só o nome mostrado na tela. |
 
 **Como pegar as coordenadas:** no Google Maps, clique com o botão direito no local e clique nos números que aparecem (ex.: `-xx.xxx, -xx.xxx`). Eles são copiados. Cole depois do `@`.
 
@@ -134,36 +134,37 @@ Abra o Terminal na pasta do projeto:
 cd ~/Documents/ChatGPT/"placa esp32"/guition-jc3248w535c
 ```
 
-### Opção A: tudo em um comando (recomendado)
+### Opção A: deploy com testes (padrão)
 
 ```sh
-chmod +x tools/flash_weather_clock.sh     # só na primeira vez
-./tools/flash_weather_clock.sh
+chmod +x tools/deploy_nextneo_vista.sh     # só na primeira vez
+./tools/deploy_nextneo_vista.sh
 ```
 
-O script faz quatro coisas:
+O script faz três coisas, nesta ordem, e **para no primeiro erro**:
 
-1. Limpa o build anterior.
-2. Compila `weather-clock`.
-3. Confere se o app cabe na partição de 3264 KB e grava **somente o app** em `0x10000`. Bootloader, partições e Wi-Fi salvo ficam intactos.
-4. Abre o monitor serial.
+1. **Testa:** roda os testes automáticos na placa (`pio test`, seção 11). Se algum falhar, o app **não** é gravado e a placa fica com o firmware de teste. A saída completa vai para `logs/test.log`.
+2. **Compila** o app `nextneo-vista` e confere se ele cabe na partição de 3264 KB.
+3. **Grava somente o app** em `0x10000` e confere o `Hash of data verified`. Bootloader, partições e Wi-Fi salvo ficam intactos.
 
-Variações:
+Leva uns 6 minutos (5 dos testes). Variações:
 
 ```sh
-./tools/flash_weather_clock.sh /dev/cu.usbmodem1201   # informar a porta manualmente
-CLEAN=0 ./tools/flash_weather_clock.sh                # sem limpar (build mais rápido)
-MONITOR=0 ./tools/flash_weather_clock.sh              # sem abrir o monitor serial
+./tools/deploy_nextneo_vista.sh /dev/cu.usbmodem1201        # informar a porta manualmente
+SUITES="test_screens" ./tools/deploy_nextneo_vista.sh       # testar só uma suíte (mais rápido)
+CLEAN=1 ./tools/deploy_nextneo_vista.sh                     # limpar o build antes
+MONITOR=1 ./tools/deploy_nextneo_vista.sh                   # abrir o monitor serial no final
+SKIP_TESTS=1 ./tools/deploy_nextneo_vista.sh                # EMERGÊNCIA: gravar sem testar
 ```
 
 ### Opção B: passo a passo
 
 ```sh
 # 1) Limpar. Obrigatório após mudar flags do platformio.ini (ex.: alocador do LVGL)
-pio run -e weather-clock -t clean
+pio run -e nextneo-vista -t clean
 
 # 2) Compilar
-pio run -e weather-clock
+pio run -e nextneo-vista
 
 # 3) Descobrir a porta da placa
 ls /dev/cu.usbmodem*
@@ -171,7 +172,7 @@ ls /dev/cu.usbmodem*
 # 4) Gravar SOMENTE o app no offset 0x10000 (troque a porta se for diferente)
 ~/.platformio/penv/bin/python ~/.platformio/packages/tool-esptoolpy/esptool.py \
   --chip esp32s3 --port /dev/cu.usbmodem1201 --baud 921600 \
-  write_flash --flash_size 16MB 0x10000 .pio/build/weather-clock/firmware.bin
+  write_flash --flash_size 16MB 0x10000 .pio/build/nextneo-vista/nextneo-vista.bin
 
 # 5) Ver o log
 pio device monitor -b 115200
@@ -188,14 +189,14 @@ A gravação deu certo se aparecer `Hash of data verified`. Para sair do monitor
 
 | Objetivo | Comando |
 |---|---|
-| Compilar sem gravar | `pio run -e weather-clock` |
-| Limpar build | `pio run -e weather-clock -t clean` |
-| Compilar + gravar app + monitor | `./tools/flash_weather_clock.sh` |
-| Compilar + gravar app (script antigo, sem monitor) | `./tools/update_weather.sh [porta]` |
+| Compilar sem gravar | `pio run -e nextneo-vista` |
+| Limpar build | `pio run -e nextneo-vista -t clean` |
+| **Deploy (testes + gravar app)** | `./tools/deploy_nextneo_vista.sh [porta]` |
+| Só rodar os testes na placa | `pio test -e nextneo-vista` |
 | Monitor serial | `pio device monitor -b 115200` |
 | Listar portas | `ls /dev/cu.usbmodem*` ou `pio device list` |
-| Tamanho do app | `ls -l .pio/build/weather-clock/firmware.bin` (limite: 3 342 336 bytes) |
-| Hash do app gravado | `shasum -a 256 .pio/build/weather-clock/firmware.bin` |
+| Tamanho do app | `ls -l .pio/build/nextneo-vista/nextneo-vista.bin` (limite: 3 342 336 bytes) |
+| Hash do app gravado | `shasum -a 256 .pio/build/nextneo-vista/nextneo-vista.bin` |
 | Apagar cache de build | `rm -rf .pio/build` (é recriado no próximo build) |
 
 ---
@@ -217,8 +218,8 @@ coredump, data, coredump, 0x7f0000, 64K
 
 Essa tabela agora está fixada no `platformio.ini` (`board_build.partitions = default_8MB.csv`). Por isso:
 
-- `pio run -e weather-clock -t upload` é seguro: regrava a mesma tabela, e o NVS (Wi-Fi e ajustes) continua no mesmo lugar.
-- O script `tools/flash_weather_clock.sh` também funciona: grava só o app e confere se ele cabe nos 3264 KB.
+- `pio run -e nextneo-vista -t upload` é seguro para a tabela: regrava a mesma, e o NVS (Wi-Fi e ajustes) continua no mesmo lugar. Mas grava **sem testar**; prefira o deploy.
+- O script `tools/deploy_nextneo_vista.sh` testa, grava só o app e confere se ele cabe nos 3264 KB.
 - **Não troque** `board_build.partitions` sem saber o que faz: uma tabela diferente pode apagar o Wi-Fi e os ajustes salvos.
 
 Para conferir a tabela gravada na placa (só leitura):
@@ -240,14 +241,16 @@ Para conferir a tabela gravada na placa (só leitura):
 | `placa não encontrada` | Troque o cabo (alguns só carregam, sem dados) e confira `ls /dev/cu.usbmodem*`. |
 | Gravação não inicia ou fica em `Connecting...` | Segure **BOOT**, toque em **RESET**, solte **BOOT** e rode de novo. |
 | `Resource busy` na porta | Feche o monitor serial (Ctrl+C) ou outro programa usando a porta. |
-| Erro de compilação após atualizar o código | Rode `pio run -e weather-clock -t clean` e compile de novo. |
-| `app não cabe na partição` | O app passou de 3264 KB. Nada foi gravado; reduza imagens/fontes (o maior arquivo é `sky_images.c`). |
+| Erro de compilação após atualizar o código | Rode `pio run -e nextneo-vista -t clean` e compile de novo. |
+| `app não cabe na partição` | O app passou de 3264 KB. Nada foi gravado; reduza imagens/fontes (o maior arquivo é `modules/clock/sky_images.c`). |
 | Tela preta após gravar | Aperte RESET. Se continuar, olhe o monitor serial (`gfx->begin FAILED` indica problema de display ou framebuffer). |
 | `SSL - Memory allocation failed (-32512)` | Falta de RAM **interna** para o TLS (veja a seção 6). No monitor, confira `maior bloco` nas linhas `[net]` e `[mem]`. Abaixo de ~22 KB o handshake falha. |
 | Finanças sem atualizar | Veja no log: `HTTP 429` (limite do Yahoo; o app respeita `Retry-After`), `HTTP 401`/`403` (API recusou) ou `erro de transporte` + `[mem]` (memória/TLS). |
 | Radar sem mapa | O mapa é opcional (botão **MAPA**). Em caso de falha, o app tenta de novo após 60 s; o log mostra `Mapa: ...`. |
 
 ### O que observar no monitor serial
+
+> **Privacidade:** o log (serial e página `/log`) não mostra coordenadas, nome da cidade digitada, nome da rede Wi-Fi nem o IP de quem acessa a página web. O log fica só na memória da placa (PSRAM) e é apagado a cada reinício, inclusive a cada deploy. Arquivos `*.log` e a pasta `logs/` do computador ficam fora do git (`.gitignore`).
 
 ```text
 [net] flight-radar ok em 640ms (interno livre 98000, maior bloco 61440)
@@ -262,6 +265,18 @@ O número que importa para o TLS é o **maior bloco** de RAM interna.
 ---
 
 ## 5. Telas do app
+
+Imagens tiradas da própria placa (480×320). A tela **Fotos** fica de fora porque mostra fotos pessoais. Nas imagens, a cidade aparece como "Minha cidade" e o nome da rede Wi-Fi e o IP estão cobertos.
+
+| | | |
+|---|---|---|
+| **Menu**<br><img src="docs/screens/menu.png" width="240" alt="Tela Menu"> | **Clima**<br><img src="docs/screens/weather.png" width="240" alt="Tela Clima"> | **Finanças**<br><img src="docs/screens/finance.png" width="240" alt="Tela Finanças"> |
+| **Calendário**<br><img src="docs/screens/calendario.png" width="240" alt="Tela Calendário"> | **Radar aéreo**<br><img src="docs/screens/flight-radar.png" width="240" alt="Tela Radar aéreo"> | **Ajustes**<br><img src="docs/screens/settings.png" width="240" alt="Tela Ajustes"> |
+| **Servidores**<br><img src="docs/screens/servers.png" width="240" alt="Tela Servidores"> | **Relógio**<br><img src="docs/screens/clock.png" width="240" alt="Tela Relógio"> | **Aeroporto**<br><img src="docs/screens/airport.png" width="240" alt="Tela Aeroporto"> |
+| **Céu**<br><img src="docs/screens/sky.png" width="240" alt="Tela Céu"> | **Fórmula 1**<br><img src="docs/screens/f1.png" width="240" alt="Tela Fórmula 1"> | **Arte**<br><img src="docs/screens/art.png" width="240" alt="Tela Arte"> |
+| **Futebol**<br><img src="docs/screens/football.png" width="240" alt="Tela Futebol"> | | |
+
+> **Atualizar as imagens:** com a placa no USB, rode `./tools/capture_screenshots.sh`. Ele grava um firmware de captura (`test/test_screenshots`), abre cada tela, espera os dados chegarem, salva os PNGs em `docs/screens/` e, no fim, faz o deploy normal do app (com testes). Antes de fazer commit das imagens, **olhe cada uma**: elas mostram dados reais da placa.
 
 ### Menu
 Ícones para as telas do app (Clima, Relógio, Finanças, Calendário, Radar, Aeroporto, Servidores, Fotos) e Ajustes. O ícone de Wi-Fi fica verde quando conectado.
@@ -362,11 +377,11 @@ Regras adotadas no código:
 
 | O quê | Onde fica | Arquivo |
 |---|---|---|
-| Objetos e estilos do LVGL | PSRAM (`LV_USE_STDLIB_MALLOC=LV_STDLIB_CUSTOM`) | `lv_mem_psram.cpp`, `platformio.ini` |
+| Objetos e estilos do LVGL | PSRAM (`LV_USE_STDLIB_MALLOC=LV_STDLIB_CUSTOM`) | `core/lv_mem_psram.cpp`, `platformio.ini` |
 | Documentos JSON (ArduinoJson) | PSRAM (`SpiRamJsonAllocator`) | `services/psram_alloc.h` |
 | Corpo das respostas HTTP | PSRAM (`PsramBuffer` + `writeToStream`, sem `String`) | `services/https_fetch.cpp` |
 | Dados do radar, cache de rotas, mapa | PSRAM | `modules/flight_radar/flight_radar.cpp` |
-| Buffer de desenho do LVGL (40 linhas) | RAM interna (desempenho) | `main.cpp` |
+| Buffer de desenho do LVGL (40 linhas) | RAM interna (desempenho) | `core/display_touch.cpp` |
 
 Além disso:
 
@@ -376,38 +391,74 @@ Além disso:
 
 ---
 
-## 7. Estrutura do código
+## 7. Estrutura do código e arquitetura
+
+### 7.1 Pastas
 
 ```text
 guition-jc3248w535c/
 ├── platformio.ini                 # ambientes; flags do LVGL (inclui alocador PSRAM)
-├── tools/
-│   ├── flash_weather_clock.sh     # limpar + compilar + gravar app0 + monitor
-│   ├── update_weather.sh          # compilar + gravar app0
-│   └── flash_hub.sh               # hub de jogos (outra tabela de partições)
+├── tools/                         # deploy_nextneo_vista.sh (testes + gravação), flash_hub.sh, pio_progname.py
 ├── test/                          # testes automáticos que rodam na placa (seção 11)
 └── src/nextneo-vista/
-    ├── main.cpp                   # display/touch, gerenciador de telas, tarefa de rede, clima, finanças
-    ├── app_screens.h              # estado compartilhado, IDs de tela, comandos de rede
-    ├── config.cpp                 # tela de Ajustes
-    ├── weather.cpp / finance.cpp / calendario.cpp
-    ├── clock.cpp + sky_images.c   # Relógio "Céu vivo" e imagens de céu
-    ├── servers.cpp                # Servidores (Beszel)
-    ├── photos.cpp                 # Fotos
-    ├── lv_mem_psram.cpp           # alocador do LVGL em PSRAM
-    ├── lv_font_weather_14.c / _20.c   # Montserrat com acentos (Latin até U+017F)
-    ├── services/
-    │   ├── psram_alloc.h          # psramMalloc, SpiRamJsonAllocator, PsramBuffer, logInternalHeap
-    │   ├── https_fetch.*          # GET/POST HTTPS → PSRAM, checagem de memória p/ TLS
-    │   ├── adsblol_provider.cpp   # aeronaves (api.adsb.lol /v2/point)
-    │   ├── aircraft_details_provider.*  # rota/companhia/modelo (api.adsbdb.com)
-    │   └── radar_map_provider.*   # mapa Esri (JPEG → RGB565 tingido)
-    └── modules/flight_radar/
-        ├── flight_radar.*         # tela do radar (UI + snapshot + cache)
-        ├── flight_parser.* / flight_filter.* / flight_projection.*
-        ├── flight_types.h
-        └── radar_icons.c          # silhuetas de avião/monomotor/helicóptero (ARGB8888)
+    ├── main.cpp                   # só a inicialização (appSetup) e o laço (appLoop)
+    ├── app_screens.h              # "contrato" do app: estado compartilhado, IDs de tela, ScreenLifecycle
+    ├── core/                      # infraestrutura, igual para todas as telas
+    │   ├── screen_manager.*       # troca de telas + timer de atualização da tela ativa
+    │   ├── screen_registry.h      # lista das telas (cada módulo define a sua)
+    │   ├── net_worker.*           # tarefa de rede (núcleo 0): executa os jobs das telas
+    │   ├── display_touch.*        # tela AXS15231B, touch e integração com o LVGL
+    │   ├── web_config.*           # página web de configuração e log
+    │   ├── ui_kit.cpp             # makeLabel, makeCard, botão voltar, texto seguro
+    │   ├── app_state.cpp          # sh, cfg, mtx, prefs, hora local
+    │   └── lv_mem_psram.cpp       # alocador do LVGL em PSRAM
+    ├── modules/                   # uma pasta por tela
+    │   ├── menu/                  # menu inicial (ícones, páginas, snapshot)
+    │   ├── weather/               # weather_screen (tela) + weather_fetch (rede) + weather_codes
+    │   ├── finance/               # finance_screen + finance_fetch + finance_assets
+    │   ├── f1/                    # f1_screen + f1_fetch + f1_internal.h
+    │   ├── football/              # football_screen + football_fetch + football_internal.h
+    │   ├── servers/               # servers_screen + servers_data + servers_internal.h
+    │   ├── flight_radar/          # radar: tela + parser/filtro/projeção separados
+    │   ├── flight_airport/  sky/  clock/  calendar/  photos/  settings/  generative_art/
+    │   └── <tela>/<tela>.h        # o que a tela oferece para OUTROS módulos (quando existe)
+    ├── services/                  # HTTPS, alocação em PSRAM, log, provedores de aviões e mapas
+    └── assets/fonts/              # fontes Montserrat com acentos
 ```
+
+### 7.2 Como as peças conversam (comparando com Java)
+
+```text
+ Núcleo 1 (thread da tela, como a EDT do Swing)          Núcleo 0 (tarefa de rede)
+ ┌───────────────────────────────────────────┐          ┌──────────────────────────┐
+ │ screen_manager                            │  NetJob  │ net_worker               │
+ │  └─ tela ativa: onEnter / render / onExit │ ───────► │  └─ job.run() (HTTP)     │
+ │      timer → postScreenJob(CMD_...)       │  (fila)  │      grava resultado em  │
+ │  render() lê `sh` / dados do módulo  ◄────┼──────────┼──── `sh` (com mutex)     │
+ └───────────────────────────────────────────┘          └──────────────────────────┘
+```
+
+- **`ScreenLifecycle`** (em `app_screens.h`) é como uma *interface* Java que toda tela implementa: `build`, `onEnter`, `onExit`, `render`, os intervalos de atualização, a lista de **jobs de rede** (`NetJobDef`: comando + função `run()`) e `netRelease` (fechar conexões quando a tela sai).
+- Cada módulo **define a sua** no fim do `<tela>_screen.cpp` (ex.: `kWeatherScreen`). O `screen_manager` só tem a lista delas, na ordem do `enum ScreenID`. Não existe mais um `switch` gigante de comandos: a tarefa de rede procura o job na tela que o pediu.
+- **Só a tela ativa** busca dados. Cada job leva a tela e a "visita" (epoch) que o pediu; se o usuário saiu, o resultado é descartado. É assim que o app economiza a pouca RAM.
+- Os **widgets** (`lv_obj_t *`) são `static` dentro do `.cpp` da tela, como campos `private`. Outras telas não conseguem mexer neles.
+- Telas grandes separam **rede** (`*_fetch.cpp`/`*_data.cpp`) de **tela** (`*_screen.cpp`). O que os dois lados compartilham fica num `*_internal.h` com `namespace` próprio (equivale a classes *package-private*).
+
+### 7.3 Criar uma tela nova (passo a passo)
+
+1. Acrescente o ID no `enum ScreenID` em `app_screens.h` (antes de `SCREEN_COUNT`). Se ela busca dados na internet, acrescente também um `CMD_...` no `enum Cmd`.
+2. Crie `modules/nova/nova_screen.cpp`. Os widgets e as funções ficam `static`, e no fim do arquivo vai o registro:
+
+   ```cpp
+   static const NetJobDef kNovaJobs[] = {{CMD_NOVA, "nova", novaFetch, true}};
+   const ScreenLifecycle kNovaScreen = {
+     SCREEN_NOVA, "nova", &novaView, buildNovaScreen, novaOnEnter, novaOnExit, novaRender,
+     nullptr, 60000, 10000, kNovaJobs, 1, nullptr,
+   };
+   ```
+3. Declare `extern const ScreenLifecycle kNovaScreen;` em `core/screen_registry.h` e coloque `&kNovaScreen` na lista `kScreens` de `core/screen_manager.cpp`, **na mesma posição do enum**.
+4. Ponha o ícone no menu (`modules/menu/menu.cpp`, função `buildMenuScreen`) chamando `switchScreen(SCREEN_NOVA)`.
+5. Inclua a tela nos testes (seção 11.6) e rode `pio test`. O teste `test_registry_lists_every_screen_in_order` avisa se a ordem estiver errada.
 
 **Stack:** PlatformIO Core 6.x, plataforma pioarduino (Arduino-ESP32 3.x), LVGL 9.x, GFX Library for Arduino, ArduinoJson 7, JPEGDEC. A configuração do LVGL vem por flags (`-DLV_CONF_SKIP`), sem `lv_conf.h`.
 
@@ -473,7 +524,7 @@ Vídeo para o media player: `ffmpeg -i in.mp4 -vf "scale=480:320" -q:v 6 -r 20 o
   - Radar aéreo redesenhado: escopo circular, mapa, rota/companhia via adsbdb e movimento suave.
   - Correção do erro `SSL - Memory allocation failed`: LVGL, JSON e respostas HTTP movidos para a PSRAM.
   - Finanças com sessão TLS única por visita.
-  - Novo script `tools/flash_weather_clock.sh`.
+  - Novo script de gravação (hoje `tools/deploy_nextneo_vista.sh`).
   - Esta versão ainda precisa ser compilada e conferida na placa.
 
 - **2026-11-11:**
@@ -510,7 +561,7 @@ pio test  →  compila um firmware de teste  →  grava na placa  →  a placa r
 
 | Aqui | No Java | O que é |
 |---|---|---|
-| `pio test -e weather-clock` | `mvn test` | Roda todos os testes. |
+| `pio test -e nextneo-vista` | `mvn test` | Roda todos os testes. |
 | pasta `test/test_menu/` | uma classe `MenuTest` | Uma **suíte**: um grupo de testes sobre um assunto. |
 | `static void test_boot_lands_on_menu()` | método com `@Test` | Um teste. O nome começa com `test_`. |
 | `RUN_TEST(test_boot_lands_on_menu);` | (automático no JUnit) | Em C++ cada teste precisa ser listado no `setup()` da suíte. |
@@ -527,9 +578,11 @@ pio test  →  compila um firmware de teste  →  grava na placa  →  a placa r
 |---|---|---|
 | `test/test_menu/` | Ao ligar, aparece o menu. Existe um ícone para cada uma das 13 telas. Tocar em cada ícone abre a tela certa, e só ela fica visível. | 16 |
 | `test/test_screens/` | Para cada tela: tem botão voltar; fica aberta 1,5 s (tempo de pedir dados à internet) sem travar nem pular para outra tela; o botão voltar leva ao menu. | 39 |
-| `test/test_lifecycle/` | O "gerenciador de telas" (`switchScreen`): ignora telas inválidas, não faz nada se a tela já está aberta, troca direto de uma tela para outra, e **não vaza memória** depois de abrir todas as telas 5 vezes. | 4 |
+| `test/test_lifecycle/` | O "gerenciador de telas" (`switchScreen`): todas as telas registradas na ordem certa, ignora telas inválidas, não faz nada se a tela já está aberta, troca direto de uma tela para outra, e **não vaza memória** depois de abrir todas as telas 5 vezes. | 5 |
 
 As 13 telas testadas: Clima, Finanças, Calendário, Radar, Ajustes, Servidores, Relógio, Aeroporto, Fotos, Céu, F1, Arte e Futebol.
+
+> A pasta `test/test_screenshots/` **não** é uma suíte de verificação: é a ferramenta que tira as imagens da documentação (seção 5). Ela é ignorada pelo `pio test -e nextneo-vista` e pelo deploy, e roda só pelo `./tools/capture_screenshots.sh` (ambiente `nextneo-vista-docs`).
 
 ### 11.3 Passo a passo para rodar
 
@@ -556,7 +609,7 @@ Deve aparecer algo como `/dev/cu.usbmodem1201`. Use esse nome nos comandos abaix
 **3. Rode todos os testes** (leva uns 5 minutos, porque grava 3 firmwares):
 
 ```sh
-~/.platformio/penv/bin/pio test -e weather-clock --upload-port /dev/cu.usbmodem1201 --test-port /dev/cu.usbmodem1201
+~/.platformio/penv/bin/pio test -e nextneo-vista --upload-port /dev/cu.usbmodem1201 --test-port /dev/cu.usbmodem1201
 ```
 
 Enquanto roda, a tela da placa fica trocando de tela sozinha. É normal: são os testes "tocando" nos botões.
@@ -564,16 +617,16 @@ Enquanto roda, a tela da placa fica trocando de tela sozinha. É normal: são os
 **4. Leia o resultado.** No final aparece um resumo assim:
 
 ```text
-weather-clock  test_menu       PASSED    00:01:54
-weather-clock  test_screens    PASSED    00:01:51
-weather-clock  test_lifecycle  PASSED    00:01:20
-================= 59 test cases: 59 succeeded =================
+nextneo-vista  test_menu       PASSED    00:01:54
+nextneo-vista  test_screens    PASSED    00:01:51
+nextneo-vista  test_lifecycle  PASSED    00:01:20
+================= 60 test cases: 60 succeeded =================
 ```
 
-**5. Grave o app de volta.** Depois dos testes, a placa fica com o firmware **de teste** (a tela para no último teste). Para voltar ao app normal:
+**5. Grave o app de volta.** Depois dos testes, a placa fica com o firmware **de teste** (a tela para no último teste). Para testar **e** gravar o app num passo só, use o deploy (seção 1), que é o caminho normal:
 
 ```sh
-~/.platformio/penv/bin/pio run -e weather-clock -t upload --upload-port /dev/cu.usbmodem1201
+./tools/deploy_nextneo_vista.sh
 ```
 
 ### 11.4 Rodar só uma suíte
@@ -581,7 +634,7 @@ weather-clock  test_lifecycle  PASSED    00:01:20
 Útil quando você mexeu numa coisa só e quer uma resposta rápida (cerca de 2 minutos). O `-f` filtra pelo nome da pasta:
 
 ```sh
-~/.platformio/penv/bin/pio test -e weather-clock -f test_screens --upload-port /dev/cu.usbmodem1201 --test-port /dev/cu.usbmodem1201
+~/.platformio/penv/bin/pio test -e nextneo-vista -f test_screens --upload-port /dev/cu.usbmodem1201 --test-port /dev/cu.usbmodem1201
 ```
 
 Troque `test_screens` por `test_menu` ou `test_lifecycle`.
@@ -612,9 +665,11 @@ Problemas comuns:
 
 Se você adicionar uma tela ao `enum ScreenID`, **os testes deixam de compilar** de propósito (há uma checagem `static_assert` em `test/support/ui_harness.h`). Para corrigir:
 
-1. Em `test/support/ui_harness.h`, adicione uma linha na lista `kScreens` com o ID da tela, o texto do ícone no menu e a variável da view. Exemplo: `{SCREEN_NOVA, "Nova", &novaView},`.
+1. Em `test/support/ui_harness.h`, adicione uma linha na lista `kScreens` com o ID da tela e o texto do ícone no menu. Exemplo: `{SCREEN_NOVA, "Nova"},`. A view é encontrada sozinha (`screenView`).
 2. No mesmo arquivo, adicione a tela nas duas macros `UI_TEST_PER_SCREEN` e `UI_RUN_PER_SCREEN`, copiando uma linha existente.
 3. Rode os testes. A tela nova ganha automaticamente os testes de menu, de voltar e de memória.
 
-> Detalhe técnico: para os testes conseguirem ligar o app de verdade, o `main.cpp` tem `appSetup()`/`appLoop()` no lugar do conteúdo de `setup()`/`loop()`. No firmware normal, `setup()` só chama `appSetup()`. Nos testes, quem chama é a suíte (via `ui::bootApp()`).
+> Detalhes técnicos:
+> - Para os testes conseguirem ligar o app de verdade, o `main.cpp` tem `appSetup()`/`appLoop()`. No firmware normal, `setup()` só chama `appSetup()`. Nos testes, quem chama é a suíte (via `ui::bootApp()`).
+> - Depois do boot, os testes desligam a cópia do log do app na serial (`gLogSerialEcho = false`) e voltam a esperar a USB (`Serial.setTxTimeoutMs(500)`). Sem isso, as linhas do log e as do Unity se misturavam, e o PlatformIO contava resultados a menos. O log continua sendo gravado na página `/log`.
 

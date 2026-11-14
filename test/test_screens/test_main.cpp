@@ -9,7 +9,7 @@ void setUp() { ui::goToMenu(); }
 void tearDown() { ui::goToMenu(); }
 
 static void screenHasBackButton(const ui::ScreenCase &c) {
-  TEST_ASSERT_NOT_NULL_MESSAGE(ui::backButton(*c.view), c.caption);
+  TEST_ASSERT_NOT_NULL_MESSAGE(ui::backButton(c.view()), c.caption);
 }
 UI_TEST_PER_SCREEN(test_has_back_button, screenHasBackButton)
 
@@ -23,7 +23,7 @@ UI_TEST_PER_SCREEN(test_stays_active, screenStaysAliveAndActive)
 static void backButtonReturnsToMenu(const ui::ScreenCase &c) {
   switchScreen(c.id);
   ui::pump(300);
-  lv_obj_t *back = ui::backButton(*c.view);
+  lv_obj_t *back = ui::backButton(c.view());
   TEST_ASSERT_NOT_NULL_MESSAGE(back, c.caption);
   ui::tap(back);
   ui::assertOnMenu();

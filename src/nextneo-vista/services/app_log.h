@@ -28,6 +28,7 @@ class AppLog : public Print {
 extern AppLog Log;    // always recorded (info / aviso / erro)
 extern AppLog LogV;   // routine detail (cycles, timings, fps): recorded only when verbose is on
 extern volatile bool gLogVerbose;   // toggled on the web page (/log), saved in prefs
+extern volatile bool gLogSerialEcho;   // false: record only (on-device tests keep the serial for Unity)
 
 void appLogBegin();     // allocate the buffer and hook ets_printf; call early in setup()
 // Copies up to `max` lines newer than `sinceMs` (oldest first). Returns the count.

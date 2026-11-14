@@ -11,11 +11,12 @@
 // animation never blocks the UI and needs no locking. Leaving the screen pauses the
 // timer and frees the frame buffer + pattern state (~300 KB PSRAM).
 #include "../../app_screens.h"
+#include "core/screen_registry.h"
 #include "../../services/app_log.h"
 #include "art_engine.h"
 #include <esp_heap_caps.h>
 
-lv_obj_t *artView;
+static lv_obj_t *artView;
 
 static constexpr uint32_t ART_FRAME_MS = 66;          // ~15 fps: every frame pushes the full panel (see clock.cpp)
 static constexpr uint32_t ART_CONTROLS_HIDE_MS = 5000;
@@ -364,7 +365,7 @@ static void buildPanel() {
   show(panel, false);
 }
 
-void buildArtScreen(lv_obj_t *screen) {
+static void buildArtScreen(lv_obj_t *screen) {
   loadSettings();
 
   artView = lv_obj_create(screen);
@@ -436,7 +437,7 @@ void buildArtScreen(lv_obj_t *screen) {
 }
 
 // ---------------------------------------------------------------- lifecycle
-void artOnEnter() {
+static void artOnEnter() {
   engine.setParams(params);
   engine.setTimeScale(ambient ? ART_AMBIENT_TIME_SCALE : 1.0f);
   engine.setPattern(savedPattern);                     // only records the index: nothing allocated yet
@@ -463,7 +464,7 @@ void artOnEnter() {
   lv_timer_resume(frameTimer);
 }
 
-void artOnExit() {
+static void artOnExit() {
   lv_timer_pause(frameTimer);
   lv_timer_pause(hideTimer);
   show(panel, false);
@@ -473,3 +474,7 @@ void artOnExit() {
   engine.end();                                        // frees frame buffer + pattern state
   if (ambient) analogWrite(GFX_BL, map(cfg.bright, 0, 100, 25, 255));   // other screens: normal brightness
 }
+const ScreenLifecycle kArtScreen = {
+  SCREEN_ART, "art", &artView, buildArtScreen, artOnEnter, artOnExit, nullptr,
+  nullptr, 0, 0, nullptr, 0, nullptr,
+};
