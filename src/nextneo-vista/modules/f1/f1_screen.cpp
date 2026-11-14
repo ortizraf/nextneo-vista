@@ -1052,7 +1052,10 @@ static void f1OnEnter() {
     mapBuf = (uint16_t *)heap_caps_malloc(MAP_W * MAP_H * 2, MALLOC_CAP_SPIRAM);
     if (mapBuf) lv_canvas_set_buffer(mapCanvas, mapBuf, MAP_W, MAP_H, LV_COLOR_FORMAT_RGB565);
   }
-  shownVersion = 0xFFFFFFFF; autoPageDone = -1; strcpy(shownMapCid, "?");
+  // Kept between visits (redrawn only when their data changes): the circuit map in mapBuf
+  // (shownMapCid / shownMapVersion) and the standings tables (shownVersion). ~700 ms saved.
+  // The start page (next race / results) is chosen again on every visit.
+  autoPageDone = -1;
   f1Render();
 }
 static void f1OnExit() { closeProg(); previewIdx = -1; }

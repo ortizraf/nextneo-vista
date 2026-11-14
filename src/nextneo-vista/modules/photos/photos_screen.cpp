@@ -24,17 +24,24 @@ static lv_point_t pressAt;
 
 static bool fsReady() {
   static int state = -1;
-  if (state < 0) state = LittleFS.begin(true) ? 1 : 0;
-  if (state == 1 && !LittleFS.exists("/photos")) LittleFS.mkdir("/photos");
+  if (state < 0) {
+    state = LittleFS.begin(true) ? 1 : 0;
+    if (state == 1 && !LittleFS.exists("/photos")) LittleFS.mkdir("/photos");   // once, not on every check
+  }
   return state == 1;
 }
+// Which slots hold a photo. Each LittleFS lookup costs ~10 ms and the screen checks all
+// slots on entry (was ~200 ms): cached, refreshed after a web upload / delete.
+static int8_t slotHas[PHOTO_SLOTS] = {-1, -1, -1, -1, -1, -1, -1, -1};
+static void forgetSlots() { for (int8_t &s : slotHas) s = -1; }
 void photoPath(int slot, char *out, size_t n) { snprintf(out, n, "/photos/%d.jpg", slot); }
 bool photoExists(int slot) {
   if (slot < 0 || slot >= PHOTO_SLOTS || !fsReady()) return false;
-  char p[24]; photoPath(slot, p, sizeof p);
-  return LittleFS.exists(p);
+  if (slotHas[slot] < 0) { char p[24]; photoPath(slot, p, sizeof p); slotHas[slot] = LittleFS.exists(p) ? 1 : 0; }
+  return slotHas[slot] == 1;
 }
-void photosChanged() { changed = true; }
+static int decodedSlot = -1;              // slot currently decoded in pix (-1 = none / stale)
+void photosChanged() { changed = true; decodedSlot = -1; forgetSlots(); }   // web upload/delete: look again
 bool photosFsReady() { return fsReady(); }
 
 // ---------------------------------------------------------------- decode
@@ -76,6 +83,12 @@ static int32_t jSeek(JPEGFILE *f, int32_t pos) {
 
 static bool showSlot(int slot) {
   char p[24]; photoPath(slot, p, sizeof p);
+  if (pix && slot == decodedSlot) {                         // already decoded (e.g. back on this screen)
+    lv_image_set_src(img, &dsc);
+    lv_obj_set_hidden(img, false);
+    current = slot;
+    return true;
+  }
   if (!pix) pix = (uint16_t *)psramMalloc(SCR_W * SCR_H * 2);
   void *mem = psramMalloc(sizeof(JPEGDEC));
   if (!pix || !mem) { if (mem) heap_caps_free(mem); return false; }
@@ -84,6 +97,7 @@ static bool showSlot(int slot) {
   bool ok = false;
   if (jpeg->open(p, jOpen, jClose, jRead, jSeek, drawCb)) {
     jpeg->setPixelType(RGB8888);
+    decodedSlot = -1;                                       // pix is being overwritten
     memset(pix, 0, SCR_W * SCR_H * 2);
     // centre smaller images (the page always sends 480x320, this is just in case)
     const int ox = max(0, (SCR_W - jpeg->getWidth()) / 2), oy = max(0, (SCR_H - jpeg->getHeight()) / 2);
@@ -100,6 +114,7 @@ static bool showSlot(int slot) {
   lv_obj_invalidate(img);
   lv_obj_set_hidden(img, false);
   current = slot;
+  decodedSlot = slot;
   LogV.printf("Fotos: %s em %lums\n", p, (unsigned long)(millis() - t0));
   return true;
 }

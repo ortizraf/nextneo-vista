@@ -59,7 +59,6 @@ void appSetup() {
   // every log line waited for the TX timeout (seen as ~2 s gaps between log lines).
   Serial.setTxTimeoutMs(0);
   appLogBegin();   // keep the last minutes of log in PSRAM for http://IP/log
-  delay(1000);
   Log.println("NextNeo Vista boot");
 
   mtx = xSemaphoreCreateMutex();
