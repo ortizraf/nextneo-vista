@@ -1,12 +1,13 @@
 #!/bin/bash
 # Build and flash the game hub: launcher in ota_0, one game per ota slot.
-#   tools/flash_hub.sh [serial-port]   (auto-detects /dev/cu.usbmodem*)
+#   tools/flash_hub.sh [serial-port]   (auto-detects the USB port on macOS/Linux)
 # Slot offsets come from hub_partitions.csv (ota_N = 0x1B0000 + (N-1) * 0x100000).
 set -e
 cd "$(dirname "$0")/.."
-PORT=${1:-$(ls /dev/cu.usbmodem* 2>/dev/null | head -1)}   # first USB serial port if none given
+source tools/lib_port.sh
+PORT="$(detect_port "${1:-}")"
 ESPTOOL=~/.platformio/packages/tool-esptoolpy/esptool.py
-PY=~/.platformio/penv/bin/python   # PlatformIO's Python has esptool's dependencies
+PY="$(find_pio_python)"   # PlatformIO's Python has esptool's dependencies
 GAMES=(tictactoe game2048 snake connect4 tetris minesweeper memory paint)   # ota_1 .. ota_8
 
 echo "== launcher + bootloader + partition table"

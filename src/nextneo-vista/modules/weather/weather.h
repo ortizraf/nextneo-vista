@@ -2,9 +2,7 @@
 // Weather module: Open-Meteo forecast (network task) and WMO code helpers.
 #include <Arduino.h>
 
-const char *weatherText(int code, bool night = false);   // night: "Céu limpo" instead of "Ensolarado"
-bool isRainCode(int code);
-int rainLevel(int code);   // 0 none, 1 garoa, 2 chuva, 3 chuva forte / tempestade
+#include "modules/weather/weather_codes.h"
 
 // ---- network task
 bool weatherFetch();                                  // forecast for cfg.lat/lon into sh

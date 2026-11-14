@@ -2,13 +2,15 @@
 # NextNeo Vista — deploy na placa: TESTA primeiro, grava o app só se tudo passar.
 #
 #   ./tools/deploy_nextneo_vista.sh                    # testes + gravação (porta detectada)
-#   ./tools/deploy_nextneo_vista.sh /dev/cu.usbmodem1201
+#   ./tools/deploy_nextneo_vista.sh /dev/cu.usbmodem1201   # macOS (porta manual)
+#   ./tools/deploy_nextneo_vista.sh /dev/ttyACM0           # Linux (porta manual)
 #   SUITES="test_screens" ./tools/deploy_nextneo_vista.sh   # só algumas suítes (mais rápido)
 #   CLEAN=1 ./tools/deploy_nextneo_vista.sh            # limpa o build antes
 #   MONITOR=1 ./tools/deploy_nextneo_vista.sh          # abre o monitor serial no final
 #   SKIP_TESTS=1 ./tools/deploy_nextneo_vista.sh       # EMERGÊNCIA: grava sem testar
 #
 # Passos:
+#   0. Testes de lógica no computador (pio test -e native, segundos). Falhou: PARA.
 #   1. Testes automáticos na placa (pio test: test/test_*). Se algum falhar, PARA:
 #      nada do app é gravado e a placa fica com o firmware de teste.
 #   2. Compila o app e confere se cabe na partição app0 (3264 KB).
@@ -16,6 +18,7 @@
 #      (Wi-Fi/configurações) ficam intactos. Tabela: default_8MB.csv (platformio.ini).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source tools/lib_port.sh
 
 ENV_NAME=nextneo-vista
 APP_OFFSET=0x10000
@@ -23,26 +26,23 @@ APP_SLOT_BYTES=$((0x330000))   # app0 = 3264 KB (default_8MB.csv)
 IMAGE=".pio/build/$ENV_NAME/nextneo-vista.bin"
 mkdir -p logs                  # saída completa dos testes / gravação (fora do git)
 
-# ---- PlatformIO
-PIO="$(command -v pio || true)"
-if [[ -z "$PIO" && -x "$HOME/.platformio/penv/bin/pio" ]]; then PIO="$HOME/.platformio/penv/bin/pio"; fi
-[[ -n "$PIO" ]] || { echo "Erro: PlatformIO (pio) não encontrado. Instale o PlatformIO Core." >&2; exit 1; }
-PIO_PY="$HOME/.platformio/penv/bin/python"
-
-# ---- porta USB
-PORT="${1:-}"
-if [[ -z "$PORT" ]]; then
-  for candidate in /dev/cu.usbmodem*; do
-    if [[ -e "$candidate" ]]; then PORT="$candidate"; fi
-  done
-fi
-[[ -n "$PORT" ]] || { echo "Erro: placa não encontrada. Conecte o USB ou informe a porta: $0 /dev/cu.usbmodemXXXX" >&2; exit 1; }
+# ---- PlatformIO e porta USB (macOS e Linux: tools/lib_port.sh)
+PIO="$(find_pio)"
+PIO_PY="$(find_pio_python)"
+PORT="$(detect_port "${1:-}")"
 echo "== Porta: $PORT"
 
-# ---- 1. testes
+# ---- 0 + 1. testes (computador, depois placa)
 if [[ "${SKIP_TESTS:-0}" == "1" ]]; then
   echo "== ATENÇÃO: testes pulados (SKIP_TESTS=1)"
 else
+  echo "== 0/3 Testes de lógica no computador (saída completa em logs/native.log)"
+  if ! "$PIO" test -e native > logs/native.log 2>&1; then
+    grep -E ":FAIL|error:|native +test_|test cases" logs/native.log | tail -20 || true
+    echo "Erro: testes de lógica falharam. Nada foi gravado na placa." >&2
+    exit 1
+  fi
+  grep -E "test cases" logs/native.log | tail -1
   FILTER=()
   for s in ${SUITES:-}; do FILTER+=(-f "$s"); done
   echo "== 1/3 Testes na placa (leva alguns minutos; saída completa em logs/test.log)"
@@ -64,7 +64,7 @@ echo "== 2/3 Compilando $ENV_NAME"
 "$PIO" run -e "$ENV_NAME" > logs/build.log 2>&1 || { tail -30 logs/build.log; echo "Erro: falha na compilação (logs/build.log)." >&2; exit 1; }
 grep -E "RAM:|Flash:" logs/build.log || true
 
-SIZE=$(stat -f%z "$IMAGE" 2>/dev/null || stat -c%s "$IMAGE")
+SIZE=$(file_size "$IMAGE")
 echo "== Tamanho do app: $SIZE bytes (limite $APP_SLOT_BYTES)"
 (( SIZE <= APP_SLOT_BYTES )) || { echo "Erro: o app não cabe na partição app0 de 3264 KB. Nada foi gravado." >&2; exit 1; }
 

@@ -1,6 +1,7 @@
 #pragma once
 
-#include <Arduino.h>
+#include <stddef.h>
+#include <stdint.h>
 
 // Aircraft kept per poll (nearest first). Buffers live in PSRAM, so this can be
 // generous without touching the internal heap that mbedTLS needs.

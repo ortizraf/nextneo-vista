@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 20 px
  * Bpp: 4
- * Opts: --no-compress --no-prefilter --force-fast-kern-format --size 20 --bpp 4 --format lvgl --font /Users/rafaelortiz/Documents/ChatGPT/placa esp32/JC3248W535EN/1-Demo/Demo_Arduino/DEMO_LVGL/libraries/lvgl/scripts/built_in_font/Montserrat-Medium.ttf -r 0x20-0x17F,0x20AC,0x2022 --lv-font-name lv_font_weather_20 --lv-fallback lv_font_montserrat_20 --lv-include lvgl.h --output src/nextneo-vista/lv_font_weather_20.c
+ * Opts: --no-compress --no-prefilter --force-fast-kern-format --size 20 --bpp 4 --format lvgl --font <lvgl>/scripts/built_in_font/Montserrat-Medium.ttf -r 0x20-0x17F,0x20AC,0x2022 --lv-font-name lv_font_weather_20 --lv-fallback lv_font_montserrat_20 --lv-include lvgl.h --output src/nextneo-vista/lv_font_weather_20.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

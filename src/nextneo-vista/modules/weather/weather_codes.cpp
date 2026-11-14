@@ -1,5 +1,5 @@
 // WMO weather codes (Open-Meteo) -> Portuguese text and rain helpers. Pure functions.
-#include "modules/weather/weather.h"
+#include "modules/weather/weather_codes.h"
 
 const char *weatherText(int c, bool night) {
   if (c == 0) return night ? "C\xC3\xA9u limpo" : "Ensolarado";
