@@ -24,6 +24,7 @@ class GenerativeArtEngine {
   void update(uint32_t dtMs);              // advance + draw one frame
   uint16_t *pixels() const { return surface_.px; }
   uint32_t lastStepUs() const { return lastStepUs_; }
+  bool caption(char *buf, size_t n);       // active pattern's overlay text, if any
 
  private:
   void startPattern();

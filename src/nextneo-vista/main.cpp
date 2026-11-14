@@ -27,6 +27,8 @@ static bool localNow(struct tm *t) {
 #include "services/web_auth.h"
 #include <LittleFS.h>
 #include <ESPmDNS.h>
+#include <mdns.h>
+#include <esp_netif.h>
 static const char PHOTOS_PAGE[] PROGMEM = R"HTML(<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NextNeo Vista | Fotos</title>
 <style>*{box-sizing:border-box}body{margin:0;background:#0b1424;color:#d9e4f2;font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:16px}
 main{max-width:560px;margin:0 auto}h1{font-size:22px;margin:0 0 4px}.muted{color:#8fa6c2;font-size:13px}a{color:#7cc4ff}
@@ -93,6 +95,7 @@ WebServer configServer(80);
 // sky photo) overflowed the default 8 KB stack ("Stack canary watchpoint (loopTask)").
 SET_LOOP_TASK_STACK_SIZE(24 * 1024);
 bool configServerStarted = false;
+static bool mdnsStarted = false;
 static uint32_t financeRetryAfterMs[FINANCE_MAX_ASSETS] = {};
 volatile int8_t financeSingleIndex = -1;
 static uint32_t financeBlockedUntilMs = 0;   // honours HTTP 429 Retry-After
@@ -1791,13 +1794,13 @@ static void startConfigServer() {
   configServer.onNotFound([]() { configServer.send(404, "text/plain; charset=utf-8", "Nao encontrado"); });
   configServer.begin();
   configServerStarted = true;
-  // http://nextneovista.local : the web page without knowing the IP (mDNS / Bonjour).
-  // ESPmDNS follows Wi-Fi reconnects on its own; started once, like the web server.
-  if (MDNS.begin(DEVICE_HOSTNAME)) {
-    MDNS.setInstanceName("NextNeo Vista");     // friendly name in Bonjour/network browsers
-    MDNS.addService("http", "tcp", 80);
-    Log.printf("mDNS: http://%s.local\n", DEVICE_HOSTNAME);
-  } else Log.println("mDNS: falha ao iniciar");
+  // mDNS was started in setup() (before Wi-Fi). Here the IP exists: make sure the Wi-Fi
+  // interface answers the hostname (A record) and announce it right away.
+  if (mdnsStarted) {
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta) mdns_netif_action(sta, (mdns_event_actions_t)(MDNS_EVENT_ENABLE_IP4 | MDNS_EVENT_ANNOUNCE_IP4));
+    Log.printf("mDNS: http://%s.local -> %s\n", DEVICE_HOSTNAME, WiFi.localIP().toString().c_str());
+  }
 }
 
 lv_obj_t *makeLabel(lv_obj_t *parent, const char *txt, const lv_font_t *font, uint32_t color) {
@@ -2253,6 +2256,15 @@ void setup() {
   // queries (nextneovista.local) were answered late or missed and the browser retried for
   // seconds. Also lowers web page / API latency. Cost: a few tens of mA (screen is on anyway).
   WiFi.setSleep(false);
+  // http://nextneovista.local (mDNS / Bonjour). Started BEFORE connecting: the mDNS
+  // responder enables the Wi-Fi interface on the "got IP" event. Started after it (as
+  // before), the service was announced but the hostname itself was never answered:
+  // "dns-sd -B" listed the board, while "ping nextneovista.local" could not resolve it.
+  if (MDNS.begin(DEVICE_HOSTNAME)) {
+    MDNS.setInstanceName("NextNeo Vista");     // friendly name in Bonjour/network browsers
+    MDNS.addService("http", "tcp", 80);
+    mdnsStarted = true;
+  } else Log.println("mDNS: falha ao iniciar");
   WiFi.setAutoReconnect(true);
   String ssid = prefs.getString("ssid", "");
   if (ssid.length()) {

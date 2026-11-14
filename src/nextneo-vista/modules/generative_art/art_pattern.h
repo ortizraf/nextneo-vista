@@ -37,8 +37,11 @@ class ArtPattern {
   virtual void step(ArtContext &ctx, float dt, const ArtTouch &touch) = 0;
   // true: begin() must run again when density changes
   virtual bool densityNeedsRestart() const { return false; }
+  // Optional short text shown over the art (e.g. the Christmas countdown). false = none.
+  virtual bool caption(char *buf, size_t n) { (void)buf; (void)n; return false; }
 };
 
 ArtPattern &artPatternWaves();
 ArtPattern &artPatternParticles();
 ArtPattern &artPatternFlow();
+ArtPattern &artPatternChristmas();

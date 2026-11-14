@@ -123,10 +123,11 @@ static bool loaded = false;
 static void loadCredentials() {                          // also used by Settings, which is built before the web server
   if (loaded) return;
   loaded = true;
-  String u = prefs.getString("webUser", "admin");
+  // isKey first: getString on a missing key logs an [E] line (seen as ERRO in /log)
+  String u = prefs.isKey("webUser") ? prefs.getString("webUser", "admin") : String("admin");
   if (!u.length()) u = "admin";
   snprintf(gUser, sizeof gUser, "%s", u.c_str());
-  String h = prefs.getString("webPassH", "");
+  String h = prefs.isKey("webPassH") ? prefs.getString("webPassH", "") : String();
   if (h.length() == 64) snprintf(gPassHash, sizeof gPassHash, "%s", h.c_str());
   else hashPass("admin", gPassHash);
 }

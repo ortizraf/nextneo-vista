@@ -24,7 +24,8 @@ static const uint16_t kAutoMinutes[3] = {1, 5, 15};
 
 static GenerativeArtEngine engine;
 static lv_image_dsc_t frameDsc;
-static lv_obj_t *frameImg, *backBtn, *bar, *titleLbl, *pauseLbl, *ambientBtn, *errLbl;
+static lv_obj_t *frameImg, *backBtn, *bar, *titleLbl, *pauseLbl, *ambientBtn, *errLbl, *capLbl;
+static uint32_t capLastMs = 0;
 static lv_obj_t *panel, *bmPattern, *bmPalette, *bmAuto, *slSpeed, *slDensity, *slAmbient, *swRepel, *swAuto;
 static lv_timer_t *frameTimer, *hideTimer;
 
@@ -83,7 +84,8 @@ static void saveSettings() {
 
 // ---------------------------------------------------------------- controls
 static void showControls(bool on) {
-  show(backBtn, on); show(bar, on); show(titleLbl, on);
+  show(backBtn, on); show(bar, on);
+  show(titleLbl, on && lv_obj_has_flag(capLbl, LV_OBJ_FLAG_HIDDEN));   // the caption already names the scene
   if (on) { lv_timer_reset(hideTimer); lv_timer_resume(hideTimer); }
   else lv_timer_pause(hideTimer);
 }
@@ -104,6 +106,7 @@ static void syncPatternUi() {
 static void selectPattern(uint8_t i) {
   engine.setPattern(i);
   autoElapsedMs = 0;
+  capLastMs = 0;                                       // refresh/hide the overlay text right away
   settingsDirty = true;
   syncPatternUi();
   if (engine.running()) lv_obj_invalidate(frameImg);
@@ -210,6 +213,12 @@ static void frameCb(lv_timer_t *) {
   engine.update(dt);
   lv_obj_invalidate(frameImg);
   perfStepUs += engine.lastStepUs(); ++perfSteps;
+  if (now - capLastMs >= 1000 || !capLastMs) {         // overlay text (e.g. Christmas countdown), 1x/s
+    capLastMs = now;
+    char cap[48];
+    if (engine.caption(cap, sizeof cap)) { setLabelIfChanged(capLbl, cap); show(capLbl, true); }
+    else show(capLbl, false);
+  }
   if (now - perfLastMs >= 10000) {                     // fps itself is in the [perf] line (main.cpp)
     LogV.printf("[art] %s: passo %lu us (media) | PSRAM livre %u | interna livre %u\n",
                 engine.patternName(engine.pattern()), (unsigned long)(perfSteps ? perfStepUs / perfSteps : 0),
@@ -333,7 +342,7 @@ static void buildPanel() {
   lv_obj_t *close = glassButton(head, LV_SYMBOL_OK, closePanelEvent);
   lv_obj_align(close, LV_ALIGN_RIGHT_MID, 0, 0);
 
-  static const char *kPatternMap[] = {"Ondas", "Part\xC3\xAD" "culas", "Fluxo", ""};
+  static const char *kPatternMap[] = {"Ondas", "Part\xC3\xAD" "culas", "Fluxo", "Natal", ""};
   static const char *kPaletteMap[] = {"Oceano", "Aurora", "El\xC3\xA9trico", ""};
   static const char *kAutoMap[] = {"1 min", "5 min", "15 min", ""};
 
@@ -382,6 +391,17 @@ void buildArtScreen(lv_obj_t *screen) {
   lv_obj_center(errLbl);
   show(errLbl, false);
 
+  capLbl = makeLabel(artView, "", &lv_font_weather_14, 0xFFD278);   // pill, top right (Natal countdown)
+  lv_obj_set_style_bg_color(capLbl, lv_color_hex(0x050E24), 0);
+  lv_obj_set_style_bg_opa(capLbl, LV_OPA_60, 0);
+  lv_obj_set_style_border_color(capLbl, lv_color_hex(0xFFC23C), 0);
+  lv_obj_set_style_border_opa(capLbl, LV_OPA_50, 0);
+  lv_obj_set_style_border_width(capLbl, 1, 0);
+  lv_obj_set_style_radius(capLbl, 12, 0);
+  lv_obj_set_style_pad_hor(capLbl, 10, 0);
+  lv_obj_set_style_pad_ver(capLbl, 5, 0);
+  lv_obj_align(capLbl, LV_ALIGN_TOP_RIGHT, -10, 8);
+  show(capLbl, false);
   titleLbl = makeLabel(artView, "", &lv_font_weather_14, 0x8FB8F0);
   lv_obj_set_style_text_opa(titleLbl, LV_OPA_80, 0);
   lv_obj_align(titleLbl, LV_ALIGN_TOP_MID, 0, 12);

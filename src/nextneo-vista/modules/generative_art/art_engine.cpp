@@ -7,6 +7,7 @@ static ArtPattern *const kPatterns[] = {
   &artPatternWaves(),
   &artPatternParticles(),
   &artPatternFlow(),
+  &artPatternChristmas(),
 };
 static constexpr uint8_t kPatternCount = sizeof(kPatterns) / sizeof(kPatterns[0]);
 
@@ -74,4 +75,8 @@ void GenerativeArtEngine::update(uint32_t dtMs) {
   ArtContext ctx{surface_, palette_, params_, rng_, t_};
   kPatterns[pattern_]->step(ctx, dt, touch_);
   lastStepUs_ = micros() - t0;
+}
+
+bool GenerativeArtEngine::caption(char *buf, size_t n) {
+  return surface_.px && patternLive_ && kPatterns[pattern_]->caption(buf, n);
 }
