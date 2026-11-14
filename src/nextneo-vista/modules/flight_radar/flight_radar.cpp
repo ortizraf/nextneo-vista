@@ -15,6 +15,8 @@
 // buffers are in PSRAM so the internal heap stays free for TLS.
 #include "flight_radar.h"
 #include "../../app_screens.h"
+#include "core/screen_registry.h"
+#include "modules/flight_airport/flight_airport.h"
 #include "../../services/aircraft_data_provider.h"
 #include "../../services/aircraft_details_provider.h"
 #include "../../services/radar_map_provider.h"
@@ -27,8 +29,6 @@
 #include <string.h>
 
 // Airport geometry drawn into the map image (modules/flight_airport/flight_airport.cpp).
-bool airportEnsureRadarGeometry(const char *code, double lat, double lon, bool allowDownload);
-void airportDrawRadarOverlay(float radiusKm, uint16_t *buf, int size);
 
 extern "C" {
 extern const lv_image_dsc_t radar_icon_jet;
@@ -79,8 +79,9 @@ float mapRadius = 0;
 bool mapStreets = false, mapAirport = false;   // what the loaded image contains
 uint32_t mapRetryAfterMs = 0, airportRetryAfterMs = 0;
 volatile bool radarActive = false;
-void (*requestRefresh)() = nullptr;
-void (*requestDetails)() = nullptr;
+static lv_obj_t *flightRadarView;
+static void (*requestRefresh)() = [] { postScreenJob(CMD_FLIGHT_RADAR); };
+static void (*requestDetails)() = [] { postScreenJob(CMD_FLIGHT_DETAILS); };
 
 // ---------------------------------------------------------------- UI state
 FlightRadarSnapshot *uiCopy = nullptr;
@@ -680,7 +681,7 @@ void placeHome(const FlightRadarSnapshot &data) {
   static int lastLogR = -1;
   if (inside != homeVisible || lastLogR != (int)data.radiusKm) {
     lastLogR = (int)data.radiusKm;
-    Log.printf("Radar: localização %.4f,%.4f -> x=%d y=%d (%s)\n", cfg.lat, cfg.lon, x, y, inside ? "visível" : "fora do raio");
+    Log.printf("Radar: localização -> x=%d y=%d (%s)\n", x, y, inside ? "visível" : "fora do raio");   // no coordinates in the log (privacy)
   }
   if (inside != homeVisible) {
     homeVisible = inside;
@@ -955,11 +956,9 @@ void buildPanel(lv_obj_t *screen) {
 }  // namespace
 
 // ================================================================ public API
-void setFlightRadarRefreshRequester(void (*requester)()) { requestRefresh = requester; }
-void setFlightRadarDetailsRequester(void (*requester)()) { requestDetails = requester; }
 bool flightRadarIsActive() { return radarActive; }
 
-void flightRadarOnEnter() {
+static void flightRadarOnEnter() {
   radarActive = true;
   renderedVersion = UINT32_MAX;
   renderedDetailsVersion = UINT32_MAX;
@@ -968,7 +967,7 @@ void flightRadarOnEnter() {
   if (sweepTimer && SWEEP_ENABLED) lv_timer_resume(sweepTimer);
 }
 
-void flightRadarOnExit() {
+static void flightRadarOnExit() {
   radarActive = false;
   selectedHex[0] = 0;
   if (sweepTimer) lv_timer_pause(sweepTimer);
@@ -1222,9 +1221,9 @@ void loadFlightRadarSettings() {
   mapEnabled = prefs.getBool("radarMap", true);
 }
 
-void buildFlightRadarScreen(lv_obj_t *screen) {
+static void buildFlightRadarScreen(lv_obj_t *parent) {
   ensureState();
-  flightRadarView = screen;
+  lv_obj_t *screen = flightRadarView = lv_obj_create(parent);
   loadFlightRadarSettings();
   lv_obj_set_size(screen, SCR_W, SCR_H);
   lv_obj_set_pos(screen, 0, 0);
@@ -1247,7 +1246,7 @@ void buildFlightRadarScreen(lv_obj_t *screen) {
 }
 
 // UI thread, called every UI tick while the radar is the active screen.
-void updateFlightRadarScreen() {
+static void updateFlightRadarScreen() {
   if (!radarActive || !flightRadarView || !uiCopy) return;
   uint32_t version, dVersion;
   xSemaphoreTake(mtx, portMAX_DELAY);
@@ -1274,3 +1273,19 @@ void updateFlightRadarScreen() {
     if (selectedHex[0]) renderPanel(*uiCopy);
   }
 }
+
+// Network task, while the radar is not the active screen. ADSB.lol's session is
+// shared with the Airport screen: keep it while the Airport is shown.
+static void radarNetRelease() {
+  if (activeScreenId() != SCREEN_AIRPORT) adsbLolReleaseConnection();
+}
+
+static const NetJobDef kFlightRadarJobs[] = {
+  {CMD_FLIGHT_RADAR, "flight-radar", updateFlightRadarData, true},
+  {CMD_FLIGHT_DETAILS, "flight-details", updateFlightRadarDetails, true},
+};
+const ScreenLifecycle kFlightRadarScreen = {
+  SCREEN_FLIGHT_RADAR, "flight-radar", &flightRadarView, buildFlightRadarScreen, flightRadarOnEnter,
+  flightRadarOnExit, updateFlightRadarScreen, nullptr, FLIGHT_RADAR_UPDATE_INTERVAL_MS,
+  FLIGHT_RADAR_RETRY_INTERVAL_MS, kFlightRadarJobs, 2, radarNetRelease,
+};

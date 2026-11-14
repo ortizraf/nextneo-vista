@@ -7,6 +7,10 @@
 // Dark "night aviation" palette, text only where needed. Nothing is invented:
 // fields the source does not send are shown as "—".
 #include "../../app_screens.h"
+#include "core/screen_registry.h"
+static void airportRender();
+#include "core/display_touch.h"
+#include "modules/flight_airport/flight_airport.h"
 #include "../flight_radar/flight_radar.h"
 #include "../../services/aircraft_data_provider.h"
 #include "../../services/https_fetch.h"
@@ -83,7 +87,7 @@ static AirportTraffic *traffic;        // written by the network task under mtx
 static Aircraft *fetchBuf;
 
 // ---------------------------------------------------------------- UI
-lv_obj_t *airportView;
+static lv_obj_t *airportView;
 static lv_obj_t *canvas, *title, *statusDot, *statusLbl, *footLbl, *attribLbl, *msgLbl;
 static lv_obj_t *statNum[3], *srcLbl;   // footer: 3 stats (number + caption) and the sources
 static lv_obj_t *info, *infoCall, *infoState, *infoLine1, *infoLine2, *infoRoute, *infoModel;
@@ -1541,7 +1545,7 @@ static void canvasEvent(lv_event_t *e) {
   }
 }
 
-void airportRender();
+static void airportRender();
 static void zoomBy(float f) {
   scale = constrain(scale * f, MIN_SCALE, MAX_SCALE);
   drawMap(); renderedTrafficVersion = UINT32_MAX;
@@ -1567,7 +1571,7 @@ static lv_obj_t *roundBtn(lv_obj_t *p, const char *sym, lv_event_cb_t cb, int y)
 }
 
 // ---------------------------------------------------------------- build
-void buildAirportScreen(lv_obj_t *scr) {
+static void buildAirportScreen(lv_obj_t *scr) {
   airportView = lv_obj_create(scr);
   lv_obj_set_size(airportView, SCR_W, SCR_H); lv_obj_set_pos(airportView, 0, 0);
   lv_obj_set_style_radius(airportView, 0, 0);
@@ -1688,7 +1692,7 @@ void buildAirportScreen(lv_obj_t *scr) {
 }
 
 // ---------------------------------------------------------------- lifecycle (UI thread)
-void airportOnEnter() {
+static void airportOnEnter() {
   xSemaphoreTake(mtx, portMAX_DELAY);
   detCacheN = 0; memset(&det, 0, sizeof det);                     // details are per visit
   xSemaphoreGive(mtx);
@@ -1701,13 +1705,13 @@ void airportOnEnter() {
   lv_obj_add_flag(info, LV_OBJ_FLAG_HIDDEN);
 }
 
-void airportOnExit() {
+static void airportOnExit() {
   dragging = false; pinching = false;
   lv_obj_set_pos(canvas, 0, MAP_Y);
   if (glideTimer) lv_timer_pause(glideTimer);
 }
 
-void airportRender() {
+static void airportRender() {
   char code[5]; double lat, lon;
   currentAirport(code, lat, lon);
   char iata[5], icao[5], b[96];
@@ -1803,3 +1807,16 @@ void airportRender() {
   lv_obj_move_foreground(info);
   renderInfo(t);
 }
+
+static const NetJobDef kAirportJobs[] = {{CMD_AIRPORT, "airport", airportFetch, true}};
+
+// Network task, while the Airport is not the active screen. ADSB.lol's session is
+// shared with the Flight Radar: keep it while the radar is shown.
+static void airportNetRelease() {
+  airportReleaseConnection();
+  if (activeScreenId() != SCREEN_FLIGHT_RADAR) adsbLolReleaseConnection();
+}
+const ScreenLifecycle kAirportScreen = {
+  SCREEN_AIRPORT, "airport", &airportView, buildAirportScreen, airportOnEnter, airportOnExit, airportRender,
+  nullptr, AIRPORT_UPDATE_INTERVAL_MS, AIRPORT_RETRY_INTERVAL_MS, kAirportJobs, 1, airportNetRelease,
+};

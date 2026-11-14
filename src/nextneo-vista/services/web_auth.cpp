@@ -150,7 +150,7 @@ void webAuthBegin(WebServer &server) {
     const bool ok = sameStr(server.arg("u").c_str(), gUser) & sameStr(h, gPassHash);
     if (!ok) {
       if (++fails >= MAX_FAILS) { fails = 0; lockedUntil = millis() + LOCK_MS; }
-      Log.printf("Web: login recusado (%s)\n", server.client().remoteIP().toString().c_str());
+      Log.println("Web: login recusado");
       sendLogin(server, next, "Usuário ou senha incorretos.");
       return;
     }
@@ -163,7 +163,7 @@ void webAuthBegin(WebServer &server) {
     for (int i = 0; i < 16; ++i) sprintf(slot->token + i * 2, "%02x", (unsigned)(esp_random() & 0xFF));
     slot->token[32] = 0;
     slot->lastMs = millis();
-    Log.printf("Web: login de %s\n", server.client().remoteIP().toString().c_str());
+    Log.println("Web: login ok");
     server.sendHeader("Set-Cookie", String("nnv=") + slot->token + "; Path=/; HttpOnly; SameSite=Strict");
     server.sendHeader("Location", next);
     server.send(302, "text/plain", "");

@@ -93,11 +93,13 @@ void drainCore() {
 }
 }  // namespace
 
+volatile bool gLogSerialEcho = true;
+
 size_t AppLog::write(uint8_t c) { return write(&c, 1); }
 
 size_t AppLog::write(const uint8_t *buffer, size_t size) {
   if (verbose_ && !gLogVerbose) return size;          // verbose off: drop routine detail
-  Serial.write(buffer, size);
+  if (gLogSerialEcho) Serial.write(buffer, size);
   portENTER_CRITICAL_SAFE(&mux);
   drainCore();
   for (size_t i = 0; i < size; ++i) feed(verbose_ ? 2 : 0, (char)buffer[i]);

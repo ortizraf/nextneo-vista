@@ -2,13 +2,6 @@
 #include <lvgl.h>
 #include "flight_types.h"
 
-void buildFlightRadarScreen(lv_obj_t *screen);
-// UI thread: lifecycle hooks used by the screen manager.
-void flightRadarOnEnter();
-void flightRadarOnExit();
-void updateFlightRadarScreen();          // render cached snapshot (active screen only)
-void setFlightRadarRefreshRequester(void (*requester)());
-void setFlightRadarDetailsRequester(void (*requester)());
 bool flightRadarIsActive();
 // Network task: fetch + parse ADS-B data (and the basemap when needed).
 bool updateFlightRadarData();

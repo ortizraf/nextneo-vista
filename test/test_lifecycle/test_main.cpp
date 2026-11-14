@@ -1,9 +1,21 @@
-// Suite: screen manager (switchScreen). Invalid IDs are ignored, re-entering the
+// Suite: screen manager (registry + switchScreen). Every screen is registered in
+// ScreenID order, invalid IDs are ignored, re-entering the
 // active screen is a no-op, and cycling through every screen does not leak memory.
 #include "../support/ui_harness.h"
 
 void setUp() { ui::goToMenu(); }
 void tearDown() {}
+
+static void test_registry_lists_every_screen_in_order() {
+  for (int i = SCREEN_MENU; i < SCREEN_COUNT; ++i) {
+    const ScreenLifecycle *s = screenLifecycle((ScreenID)i);
+    TEST_ASSERT_EQUAL_MESSAGE(i, s->id, s->name);
+    TEST_ASSERT_NOT_NULL_MESSAGE(s->build, s->name);
+    TEST_ASSERT_NOT_NULL_MESSAGE(screenView((ScreenID)i), s->name);
+    for (uint8_t j = 0; j < s->jobCount; ++j) TEST_ASSERT_NOT_NULL_MESSAGE(s->jobs[j].run, s->name);
+  }
+  TEST_ASSERT_EQUAL(SCREEN_NONE, screenLifecycle((ScreenID)200)->id);   // unknown id -> "none"
+}
 
 static void test_invalid_ids_are_ignored() {
   switchScreen(SCREEN_NONE);
@@ -58,6 +70,7 @@ static void test_cycling_screens_does_not_leak() {
 void setup() {
   ui::bootApp();
   UNITY_BEGIN();
+  RUN_TEST(test_registry_lists_every_screen_in_order);
   RUN_TEST(test_invalid_ids_are_ignored);
   RUN_TEST(test_switch_to_active_screen_is_noop);
   RUN_TEST(test_direct_switch_between_screens);

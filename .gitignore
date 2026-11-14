@@ -14,3 +14,7 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Logs locais (build, testes, gravação): nunca no git
+logs/
+*.log
