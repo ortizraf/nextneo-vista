@@ -160,12 +160,13 @@ O script faz quatro coisas, nesta ordem, e **para no primeiro erro**:
 2. **Compila** o app `nextneo-vista` e confere se ele cabe na partição de 3264 KB.
 3. **Grava somente o app** em `0x10000` e confere o `Hash of data verified`. Bootloader, partições e Wi-Fi salvo ficam intactos.
 
-Leva uns 7 minutos (quase tudo nos testes da placa). Variações:
+Leva uns 9 minutos (quase tudo nos testes da placa). Para **mudanças simples** (um texto, uma cor, um tempo), use `QUICK=1`: roda os testes do computador e só a suíte `test_smoke` na placa (abre cada tela uma vez), ~4 minutos no total. Variações:
 
 ```sh
 ./tools/deploy_nextneo_vista.sh /dev/cu.usbmodem1201        # informar a porta (macOS)
 ./tools/deploy_nextneo_vista.sh /dev/ttyACM0                # informar a porta (Linux)
-SUITES="test_screens" ./tools/deploy_nextneo_vista.sh       # testar só uma suíte (mais rápido)
+QUICK=1 ./tools/deploy_nextneo_vista.sh                     # mudança simples: teste rápido (~4 min no total)
+SUITES="test_screens" ./tools/deploy_nextneo_vista.sh       # testar só uma suíte
 CLEAN=1 ./tools/deploy_nextneo_vista.sh                     # limpar o build antes
 MONITOR=1 ./tools/deploy_nextneo_vista.sh                   # abrir o monitor serial no final
 SKIP_TESTS=1 ./tools/deploy_nextneo_vista.sh                # EMERGÊNCIA: gravar sem testar
@@ -690,6 +691,7 @@ pio test  →  compila um firmware de teste  →  grava na placa  →  a placa r
 |---|---|---|
 | `test/test_menu/` | Ao ligar, aparece o menu. Existe um ícone para cada uma das 13 telas. Tocar em cada ícone abre a tela certa, e só ela fica visível. | 16 |
 | `test/test_screens/` | Para cada tela: tem botão voltar; fica aberta 1,5 s (tempo de pedir dados à internet) sem travar nem pular para outra tela; o botão voltar leva ao menu. | 39 |
+| `test/test_smoke/` | Teste rápido do `QUICK=1`: liga o app, abre cada uma das 13 telas uma vez e volta ao menu. Prova que nada trava; os detalhes ficam com as outras suítes. | 2 |
 | `test/test_lifecycle/` | O "gerenciador de telas" (`switchScreen`): todas as telas registradas na ordem certa, ignora telas inválidas, não faz nada se a tela já está aberta, troca direto de uma tela para outra, e **não vaza memória** depois de abrir todas as telas 5 vezes. | 5 |
 
 As 13 telas testadas: Clima, Finanças, Calendário, Radar, Ajustes, Servidores, Relógio, Aeroporto, Fotos, Céu, F1, Arte e Futebol.

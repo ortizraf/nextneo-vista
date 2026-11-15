@@ -62,7 +62,7 @@ static const WebSection kDisplayWeb = {"display", displayCard, displayRoutes};
 
 // ---------------------------------------------------------------- sections, in page order
 static const WebSection *const kSections[] = {
-  &kFootballWeb, &kDisplayWeb, &kWeatherWeb, &kRadarWeb, &kFinanceWeb, &kPhotosWeb, &kServersWeb,
+  &kDisplayWeb, &kWeatherWeb, &kRadarWeb, &kFinanceWeb, &kPhotosWeb, &kServersWeb, &kFootballWeb,
 };
 
 // ---------------------------------------------------------------- settings page

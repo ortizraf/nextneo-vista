@@ -4,14 +4,16 @@
 #   ./tools/deploy_nextneo_vista.sh                    # testes + gravação (porta detectada)
 #   ./tools/deploy_nextneo_vista.sh /dev/cu.usbmodem1201   # macOS (porta manual)
 #   ./tools/deploy_nextneo_vista.sh /dev/ttyACM0           # Linux (porta manual)
-#   SUITES="test_screens" ./tools/deploy_nextneo_vista.sh   # só algumas suítes (mais rápido)
+#   QUICK=1 ./tools/deploy_nextneo_vista.sh            # mudança simples: teste rápido (~2 min no total)
+#   SUITES="test_screens" ./tools/deploy_nextneo_vista.sh   # só algumas suítes
 #   CLEAN=1 ./tools/deploy_nextneo_vista.sh            # limpa o build antes
 #   MONITOR=1 ./tools/deploy_nextneo_vista.sh          # abre o monitor serial no final
 #   SKIP_TESTS=1 ./tools/deploy_nextneo_vista.sh       # EMERGÊNCIA: grava sem testar
 #
 # Passos:
 #   0. Testes de lógica no computador (pio test -e native, segundos). Falhou: PARA.
-#   1. Testes automáticos na placa (pio test: test/test_*). Se algum falhar, PARA:
+#   1. Testes automáticos na placa: completos (test_menu, test_screens, test_lifecycle,
+#      ~7 min) ou, com QUICK=1, só test_smoke (~1 min). Se algum falhar, PARA:
 #      nada do app é gravado e a placa fica com o firmware de teste.
 #   2. Compila o app e confere se cabe na partição app0 (3264 KB).
 #   3. Grava SOMENTE o app no offset 0x10000. Bootloader, tabela de partições e NVS
@@ -43,9 +45,13 @@ else
     exit 1
   fi
   grep -E "test cases" logs/native.log | tail -1
+  # Default: the full board suites. QUICK=1: the smoke suite only (small changes).
+  if [[ -z "${SUITES:-}" ]]; then
+    if [[ "${QUICK:-0}" == "1" ]]; then SUITES="test_smoke"; else SUITES="test_menu test_screens test_lifecycle"; fi
+  fi
   FILTER=()
-  for s in ${SUITES:-}; do FILTER+=(-f "$s"); done
-  echo "== 1/3 Testes na placa (leva alguns minutos; saída completa em logs/test.log)"
+  for s in $SUITES; do FILTER+=(-f "$s"); done
+  echo "== 1/3 Testes na placa: $SUITES (saída completa em logs/test.log)"
   if ! "$PIO" test -e "$ENV_NAME" ${FILTER[@]+"${FILTER[@]}"} --upload-port "$PORT" --test-port "$PORT" > logs/test.log 2>&1; then
     grep -E ":FAIL|error:|$ENV_NAME +test_|test cases" logs/test.log | tail -20 || true
     echo "Erro: testes falharam. O app NÃO foi gravado (a placa está com o firmware de teste)." >&2
