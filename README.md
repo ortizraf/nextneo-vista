@@ -290,9 +290,9 @@ Imagens tiradas da própria placa (480×320). A tela **Fotos** fica de fora porq
 | **Calendário**<br><img src="docs/screens/calendario.png" width="240" alt="Tela Calendário"> | **Radar aéreo**<br><img src="docs/screens/flight-radar.png" width="240" alt="Tela Radar aéreo"> | **Ajustes**<br><img src="docs/screens/settings.png" width="240" alt="Tela Ajustes"> |
 | **Servidores**<br><img src="docs/screens/servers.png" width="240" alt="Tela Servidores"> | **Relógio**<br><img src="docs/screens/clock.png" width="240" alt="Tela Relógio"> | **Aeroporto**<br><img src="docs/screens/airport.png" width="240" alt="Tela Aeroporto"> |
 | **Céu**<br><img src="docs/screens/sky.png" width="240" alt="Tela Céu"> | **Fórmula 1**<br><img src="docs/screens/f1.png" width="240" alt="Tela Fórmula 1"> | **Arte**<br><img src="docs/screens/art.png" width="240" alt="Tela Arte"> |
-| **Futebol**<br><img src="docs/screens/football.png" width="240" alt="Tela Futebol"> | | |
+| **Futebol**<br><img src="docs/screens/football.png" width="240" alt="Tela Futebol"> | **Jardim**<br><img src="docs/screens/garden.png" width="240" alt="Tela Jardim"> | |
 
-> **Atualizar as imagens:** com a placa no USB, rode `./tools/capture_screenshots.sh`. Ele grava um firmware de captura (`test/test_screenshots`), abre cada tela, espera os dados chegarem, salva os PNGs em `docs/screens/` e, no fim, faz o deploy normal do app (com testes). Antes de fazer commit das imagens, **olhe cada uma**: elas mostram dados reais da placa.
+> **Atualizar as imagens:** com a placa no USB, rode `./tools/capture_screenshots.sh`. Ele grava um firmware de captura (`test/test_screenshots`), abre cada tela, espera os dados chegarem, salva os PNGs em `docs/screens/` e, no fim, faz o deploy normal do app (com testes). `ONLY=garden ./tools/capture_screenshots.sh` fotografa só o Jardim (cada espécie e fase, murcha, borboleta e o menu com a gotinha) em `logs/garden-shots/` e volta o app com o deploy rápido (`QUICK=1`). Antes de fazer commit das imagens, **olhe cada uma**: elas mostram dados reais da placa.
 
 ### Menu
 Ícones para as telas do app (Clima, Relógio, Finanças, Calendário, Radar, Aeroporto, Servidores, Fotos) e Ajustes. O ícone de Wi-Fi fica verde quando conectado.
@@ -483,6 +483,20 @@ GET https://a.espncdn.com/combiner/i?img={logo}&w={n}&h={n}     escudos e logos 
 GET https://a.espncdn.com{logo}                                 alternativa, se o redimensionado falhar
 ```
 
+### Jardim
+
+Uma planta virtual que cresce em dias reais, mesmo com a tela fechada ou a placa desligada (o estado fica salvo na flash, em `Preferences` "garden").
+
+- **Plantar:** com o vaso vazio, escolha uma das 8 sementes (girassol, hibisco, lavanda, orquídea, cacto, tulipa, buganvília, tomate). Tocar no cartão do nome abre a escolha de novo. As fases são semente, broto, muda, crescida, botões e florida.
+- **Cuidar:** o botão da gota rega. Sem água a planta fica com sede, depois murcha (caule caído, cor de palha) e por fim seca; aí aparece o botão de replantar. Chuva de verdade (dados do Clima) também rega, e o calor seca mais rápido. O cacto apodrece se receber água demais. Com a placa desligada, conta no máximo um dia de sede.
+- **Álbum:** cada espécie que já floresceu ganha um ✓ na escolha de sementes.
+- **Vida na tela:** rajadas de vento a cada 7–14 s balançam a planta; de dia, sem chuva, uma borboleta visita a planta florida; ao mudar de fase aparece "Nova fase: …" com um pulo e faíscas (uma vez por fase).
+- **Gotinha no menu:** o ícone Jardim ganha uma gota azul quando a água fica abaixo de 25%. É calculada no máximo a cada 10 min (ou logo depois de regar), sem custo de CPU.
+- **Imagens:** plantas, vaso, borboleta e o fundo de árvores desfocadas são pré-renderizados com relevo, luz e sombra por `tools/garden_art.py` (Python + pillow + numpy), que gera `modules/garden/garden_art.cpp` (JPEG + alfa de 4 bits, ~280 KB). A placa decodifica cada imagem só quando a fase muda; a murcha é aplicada nessa hora. Para mudar o desenho, edite o script e rode `python tools/garden_art.py --preview pasta/` (uns 3 min).
+- **Céu:** a mesma foto do céu do Relógio, conforme a hora e o clima.
+
+Sem APIs próprias: usa só o clima já baixado (chuva) e o relógio.
+
 ### Página web de configuração
 Com o celular ou computador na mesma rede, abra `http://IP-DO-APARELHO`. O IP aparece em Ajustes e no último cartão do Finance. As seções da página:
 
@@ -535,7 +549,7 @@ Além disso:
 ```text
 nextneo-vista/                     # pasta do projeto (o nome é o que você escolher ao clonar)
 ├── platformio.ini                 # ambientes; flags do LVGL (inclui alocador PSRAM)
-├── tools/                         # deploy_nextneo_vista.sh (testes + gravação), capture_screenshots.sh, lib_port.sh (porta macOS/Linux)
+├── tools/                         # deploy_nextneo_vista.sh (testes + gravação), capture_screenshots.sh, garden_art.py (imagens do Jardim), lib_port.sh (porta macOS/Linux)
 ├── test/                          # testes automáticos que rodam na placa (seção 10)
 └── src/nextneo-vista/
     ├── main.cpp                   # só a inicialização (appSetup) e o laço (appLoop)
@@ -607,7 +621,7 @@ nextneo-vista/                     # pasta do projeto (o nome é o que você esc
 
 ### 7.4 Idiomas (português e inglês)
 
-O app tem **português (padrão)** e **inglês**: as 13 telas, o menu e a página web. Os logs continuam em português.
+O app tem **português (padrão)** e **inglês**: as 14 telas, o menu e a página web. Os logs continuam em português.
 
 - **Escolher o idioma:** em **Ajustes → Tela → Idioma**, na placa, ou no card **Idioma / Language** da página web. A placa reinicia ao salvar, e todas as telas são criadas de novo no idioma escolhido. A escolha fica salva (`prefs`, chave `lang`).
 - **Escrever um texto novo:** use `T("português", "English")` (`core/i18n.h`), como num `ResourceBundle` do Java, só que com os dois textos no mesmo lugar:
@@ -680,7 +694,7 @@ Vídeo para o media player: `ffmpeg -i in.mp4 -vf "scale=480:320" -q:v 6 -r 20 o
 
 ## 10. Testes automáticos
 
-Os testes conferem, sozinhos, que o **menu** e as **13 telas** abrem e funcionam. Rode-os depois de mexer no código e antes de fazer commit. Assim você não precisa abrir tela por tela com o dedo.
+Os testes conferem, sozinhos, que o **menu** e as **14 telas** abrem e funcionam. Rode-os depois de mexer no código e antes de fazer commit. Assim você não precisa abrir tela por tela com o dedo.
 
 ### 10.1 Como funciona, comparando com o Java
 
@@ -708,12 +722,13 @@ pio test  →  compila um firmware de teste  →  grava na placa  →  a placa r
 
 | Suíte (pasta) | O que verifica | Testes |
 |---|---|---|
-| `test/test_menu/` | Ao ligar, aparece o menu. Existe um ícone para cada uma das 13 telas. Tocar em cada ícone abre a tela certa, e só ela fica visível. | 16 |
-| `test/test_screens/` | Para cada tela: tem botão voltar; fica aberta 1,5 s (tempo de pedir dados à internet) sem travar nem pular para outra tela; o botão voltar leva ao menu. | 39 |
-| `test/test_smoke/` | Teste rápido do `QUICK=1`: liga o app, abre cada uma das 13 telas uma vez e volta ao menu. Prova que nada trava; os detalhes ficam com as outras suítes. | 2 |
+| `test/test_menu/` | Ao ligar, aparece o menu. Existe um ícone para cada uma das 14 telas. Tocar em cada ícone abre a tela certa, e só ela fica visível. | 17 |
+| `test/test_screens/` | Para cada tela: tem botão voltar; fica aberta 1,5 s (tempo de pedir dados à internet) sem travar nem pular para outra tela; o botão voltar leva ao menu. | 42 |
+| `test/test_smoke/` | Teste rápido do `QUICK=1`: liga o app, abre cada uma das 14 telas uma vez e volta ao menu. Prova que nada trava; os detalhes ficam com as outras suítes. | 2 |
 | `test/test_lifecycle/` | O "gerenciador de telas" (`switchScreen`): todas as telas registradas na ordem certa, ignora telas inválidas, não faz nada se a tela já está aberta, troca direto de uma tela para outra, e **não vaza memória** depois de abrir todas as telas 5 vezes. | 5 |
+| `test/test_garden/` | Jardim: vaso vazio abre a escolha de sementes, plantar e regar salvam, planta seca oferece replantar, álbum, a planta sobrevive a sair da tela, posição no menu, imagens decodificadas (planta e fundo), comemoração de fase uma vez só, borboleta só com flores e a gotinha de sede no menu. Guarda a planta real do dono e devolve no fim. | 12 |
 
-As 13 telas testadas: Clima, Finanças, Calendário, Radar, Ajustes, Servidores, Relógio, Aeroporto, Fotos, Céu, F1, Arte e Futebol.
+As 14 telas testadas: Clima, Finanças, Calendário, Radar, Ajustes, Servidores, Relógio, Aeroporto, Fotos, Céu, Jardim, F1, Arte e Futebol. O deploy padrão roda `test_menu`, `test_screens`, `test_lifecycle` e `test_garden`.
 
 > A pasta `test/test_screenshots/` **não** é uma suíte de verificação: é a ferramenta que tira as imagens da documentação (seção 5). Ela é ignorada pelo `pio test -e nextneo-vista` e pelo deploy, e roda só pelo `./tools/capture_screenshots.sh` (ambiente `nextneo-vista-docs`).
 
@@ -824,6 +839,7 @@ pio test -e native
 | `test/test_native_text/` | Troca de caracteres que as fontes não têm (travessão, aspas curvas, emoji). | 5 |
 | `test/test_native_sky/` | Órbitas do Céu: leitura dos formatos TLE (com um TLE público da ISS) e CSV (lançamentos novos, catálogo de 6 dígitos) e o SGP4 colocando os satélites em órbita baixa. | 8 |
 | `test/test_native_i18n/` | Português como padrão, inglês quando escolhido, nomes de dias e meses e textos do clima nos dois idiomas. | 6 |
+| `test/test_native_garden/` | Regras do Jardim: florescer depois dos dias da espécie, planta esquecida secando, placa desligada contando no máximo um dia de sede, calor secando mais rápido e chuva regando, cacto apodrecendo com água demais, replantio mantendo o álbum, sede (abaixo de 25%) e a comemoração de fase uma vez só. | 9 |
 
 **Como isso funciona:** o ambiente `[env:native]` do `platformio.ini` compila só os arquivos `.cpp` puros (sem `Arduino.h` nem LVGL) com o compilador do computador (`g++`/`clang`). Por isso essas funções ficam em arquivos próprios, como `servers_retry.cpp` e `finance_symbols.cpp`, e o resto do app só as chama.
 

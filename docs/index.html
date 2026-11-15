@@ -112,7 +112,7 @@
   <div class="hero" id="overview">
     <h1>JC3248W535C touch display module<br>Product specification</h1>
     <p class="lead">An ESP32-S3 module with a 3.5&nbsp;inch 320&times;480 capacitive touch display, microSD slot and speaker output,
-      running a suite of twelve apps: a game hub with eight games, the NextNeo Vista app (13 screens: weather, finance, flight radar, airport, sky, F1, football, servers and more), a photo and video player,
+      running a suite of twelve apps: a game hub with eight games, the NextNeo Vista app (14 screens: weather, finance, flight radar, airport, sky, garden, F1, football, servers and more), a photo and video player,
       a music player and an LVGL demo. Every item below is marked <span class="tag ok">verified</span> when it was tested on the real
       board, or <span class="tag warn">unverified</span> when it was not.</p>
     <div class="chips">
@@ -221,7 +221,7 @@
     <div class="tablewrap"><table>
       <thead><tr><th>App</th><th>Description</th><th>Needs</th></tr></thead>
       <tbody>
-        <tr><td>NextNeo Vista</td><td>Main LVGL app (env <code>nextneo-vista</code>, <code>src/nextneo-vista/</code>): home menu plus 13 screens (weather, clock, calendar, finance, flight radar, airport, sky, F1, football, servers, photos, generative art, settings), NTP clock, Open-Meteo forecast, WiFi scan and connect with an on-screen keyboard, settings web page at <code>nextneovista.local</code>. Credentials stay in on-board flash. Deploy with <code>tools/deploy_nextneo_vista.sh</code> (tests first).</td><td>WiFi</td></tr>
+        <tr><td>NextNeo Vista</td><td>Main LVGL app (env <code>nextneo-vista</code>, <code>src/nextneo-vista/</code>): home menu plus 14 screens (weather, clock, calendar, finance, flight radar, airport, sky, garden, F1, football, servers, photos, generative art, settings), NTP clock, Open-Meteo forecast, WiFi scan and connect with an on-screen keyboard, settings web page at <code>nextneovista.local</code>. Credentials stay in on-board flash. Deploy with <code>tools/deploy_nextneo_vista.sh</code> (tests first).</td><td>WiFi</td></tr>
         <tr><td>Media player</td><td>Photo slideshow (<code>/pic</code>, JPEG) and MJPEG video (<code>/mjpeg</code>) from the SD card. Landscape media is rotated to fill the screen. Tap pauses, swipe changes item, long-press switches photos and video.</td><td>microSD</td></tr>
         <tr><td>Music player</td><td>Plays MP3, WAV, FLAC, AAC and M4A from <code>/music</code> with a track list, previous / play / next, volume slider, progress bar and auto-advance.</td><td>microSD, speaker</td></tr>
         <tr><td>LVGL basic</td><td>Minimal LVGL 9 demo with a button counter, slider, switch and arc. A starting point for new UIs.</td><td>None</td></tr>
