@@ -36,6 +36,8 @@ extern const lv_image_dsc_t radar_icon_light;
 extern const lv_image_dsc_t radar_icon_heli;
 }
 
+static SemaphoreHandle_t radarMtx = xSemaphoreCreateMutex();   // radar data (not the app-wide mtx)
+
 namespace {
 // ---------------------------------------------------------------- layout
 constexpr int SCOPE_CX = 160, SCOPE_CY = 160, SCOPE_R = 148;
@@ -61,7 +63,7 @@ constexpr uint16_t hexTo565(uint32_t c) {
   return (uint16_t)((((c >> 16) & 0xF8) << 8) | (((c >> 8) & 0xFC) << 3) | ((c & 0xFF) >> 3));
 }
 
-// ---------------------------------------------------------------- shared state (mtx)
+// ---------------------------------------------------------------- shared state (radarMtx)
 FlightRadarSnapshot *snapshot = nullptr;       // network -> UI
 Aircraft *freshAircraft = nullptr;             // network scratch
 AircraftDetails *detailsCache = nullptr;       // DETAILS_CACHE entries
@@ -126,11 +128,11 @@ void ensureState() {
 // ---------------------------------------------------------------- helpers
 const char *statusName(FlightRadarStatus status) {
   switch (status) {
-    case FlightRadarStatus::LOADING: return "BUSCANDO";
-    case FlightRadarStatus::ONLINE: return "AO VIVO";
-    case FlightRadarStatus::STALE: return "ATRASADO";
+    case FlightRadarStatus::LOADING: return T("BUSCANDO", "SEARCHING");
+    case FlightRadarStatus::ONLINE: return T("AO VIVO", "LIVE");
+    case FlightRadarStatus::STALE: return T("ATRASADO", "DELAYED");
     case FlightRadarStatus::OFFLINE: return "OFFLINE";
-    case FlightRadarStatus::EMPTY: return "SEM VOOS";
+    case FlightRadarStatus::EMPTY: return T("SEM VOOS", "NO FLIGHTS");
   }
   return "--";
 }
@@ -184,7 +186,7 @@ uint32_t iconScale(const Aircraft &a) {
 }
 
 void formatAltitude(const Aircraft &a, char *out, size_t size) {
-  if (a.onGround) snprintf(out, size, "solo");
+  if (a.onGround) snprintf(out, size, T("solo", "ground"));
   else if (!a.hasAltitude) snprintf(out, size, "--");
   else if (a.altitudeFeet >= 10000) snprintf(out, size, "FL%03d", (int)lroundf(a.altitudeFeet / 100.0f));
   else snprintf(out, size, "%d ft", (int)(lroundf(a.altitudeFeet / 50.0f) * 50));
@@ -279,7 +281,7 @@ AircraftDetails *findDetails(const char *hex, const char *callsign) {
 void requestSelectedDetails(const Aircraft &a) {
   if (!a.icao24[0]) return;
   bool post = false;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(radarMtx, portMAX_DELAY);
   AircraftDetails *d = findDetails(a.icao24, a.callsign);
   if (!d || (d->state == DetailsState::FAILED && millis() - d->requestedMs > 30000UL)) {
     if (!d) {
@@ -296,7 +298,7 @@ void requestSelectedDetails(const Aircraft &a) {
     ++detailsVersion;
     post = true;
   }
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(radarMtx);
   if (post && requestDetails) requestDetails();
 }
 
@@ -314,9 +316,9 @@ void renderAge(const FlightRadarSnapshot &data) {
   if (age == renderedAgeSeconds) return;
   renderedAgeSeconds = age;
   char text[40];
-  if (data.lastSuccessMs) snprintf(text, sizeof text, "%u %s  •  há %lus", data.count,
-                                   data.count == 1 ? "avião" : "aviões", (unsigned long)age);
-  else snprintf(text, sizeof text, "%s", data.status == FlightRadarStatus::LOADING ? "Consultando..." : "Sem dados");
+  if (data.lastSuccessMs) snprintf(text, sizeof text, T("%u %s  •  há %lus", "%u %s  •  %lus ago"), data.count,
+                                   data.count == 1 ? T("avião", "aircraft") : T("aviões", "aircraft"), (unsigned long)age);
+  else snprintf(text, sizeof text, "%s", data.status == FlightRadarStatus::LOADING ? T("Consultando...", "Checking...") : T("Sem dados", "No data"));
   setLabelIfChanged(countLabel, text);
   renderClock();
 }
@@ -469,13 +471,13 @@ void renderList(const FlightRadarSnapshot &data) {
   }
   if (showList) {
     lv_obj_set_hidden(listEmpty, true);
-    setLabelIfChanged(listTitle, "MAIS PRÓXIMOS");
+    setLabelIfChanged(listTitle, T("MAIS PRÓXIMOS", "NEAREST"));
   } else {
     lv_obj_set_hidden(listEmpty, false);
     setLabelIfChanged(listTitle, "RADAR");
     char msg[96];
-    if (data.status == FlightRadarStatus::LOADING) snprintf(msg, sizeof msg, "Buscando aeronaves perto de %s...", data.airportCode);
-    else if (data.status == FlightRadarStatus::EMPTY) snprintf(msg, sizeof msg, "Nenhuma aeronave em %.0f km de %s.", data.radiusKm, data.airportCode);
+    if (data.status == FlightRadarStatus::LOADING) snprintf(msg, sizeof msg, T("Buscando aeronaves perto de %s...", "Searching aircraft near %s..."), data.airportCode);
+    else if (data.status == FlightRadarStatus::EMPTY) snprintf(msg, sizeof msg, T("Nenhuma aeronave em %.0f km de %s.", "No aircraft within %.0f km of %s."), data.radiusKm, data.airportCode);
     else snprintf(msg, sizeof msg, "%s", data.message);
     setLabelIfChanged(listEmpty, msg);
   }
@@ -487,18 +489,18 @@ void renderDetails(const Aircraft &a) {
   setLabelIfChanged(dTitle, a.callsign[0] ? a.callsign : (a.registration[0] ? a.registration : a.icao24));
 
   AircraftDetails details;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(radarMtx, portMAX_DELAY);
   const AircraftDetails *cached = findDetails(a.icao24, a.callsign);
   if (cached) details = *cached;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(radarMtx);
 
   char line[64];
   const bool ready = details.state == DetailsState::READY;
   if (details.state == DetailsState::LOADING || details.state == DetailsState::NONE)
-    setLabelIfChanged(dAirline, "Buscando rota...");
+    setLabelIfChanged(dAirline, T("Buscando rota...", "Searching route..."));
   else if (ready && details.airline[0]) setLabelIfChanged(dAirline, details.airline);
   else if (ready && details.owner[0]) setLabelIfChanged(dAirline, details.owner);
-  else setLabelIfChanged(dAirline, details.state == DetailsState::FAILED ? "Rota indisponível" : "Voo sem rota cadastrada");
+  else setLabelIfChanged(dAirline, details.state == DetailsState::FAILED ? T("Rota indisponível", "Route unavailable") : T("Voo sem rota cadastrada", "Flight without a known route"));
 
   if (ready && details.originCode[0] && details.destCode[0]) {
     snprintf(line, sizeof line, "%s " LV_SYMBOL_RIGHT " %s", details.originCode, details.destCode);
@@ -510,7 +512,7 @@ void renderDetails(const Aircraft &a) {
     setLabelIfChanged(dCities, "");
   }
   if (ready && details.model[0]) setLabelIfChanged(dModel, details.model);
-  else setLabelIfChanged(dModel, a.type[0] ? a.type : "Modelo desconhecido");
+  else setLabelIfChanged(dModel, a.type[0] ? a.type : T("Modelo desconhecido", "Unknown model"));
 
   char v[24];
   formatAltitude(a, v, sizeof v);
@@ -521,7 +523,7 @@ void renderDetails(const Aircraft &a) {
   setLabelIfChanged(dValue[2], v);
   if (a.hasVerticalRate && fabsf(a.verticalRateFpm) >= 100)
     snprintf(v, sizeof v, "%s%.0f", a.verticalRateFpm > 0 ? LV_SYMBOL_UP " " : LV_SYMBOL_DOWN " ", fabsf(a.verticalRateFpm));
-  else snprintf(v, sizeof v, "%s", a.hasVerticalRate ? "nivelado" : "--");
+  else snprintf(v, sizeof v, "%s", a.hasVerticalRate ? T("nivelado", "level") : "--");
   setLabelIfChanged(dValue[3], v);
   formatKm(a.distanceNm * 1.852f, v, sizeof v);
   setLabelIfChanged(dValue[4], v);
@@ -542,10 +544,10 @@ void renderPanel(const FlightRadarSnapshot &data) {
 void renderMap() {
   int8_t front;
   uint32_t version;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(radarMtx, portMAX_DELAY);
   front = mapFront;
   version = mapVersion;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(radarMtx);
   if (version == renderedMapVersion) return;
   renderedMapVersion = version;
   if (!mapAreaValid || front < 0 || !mapBuffer[front]) {
@@ -633,10 +635,10 @@ void mapClickEvent(lv_event_t *) {
   prefs.putBool("radarMap", mapEnabled);
   lv_obj_set_style_text_color(mapText, lv_color_hex(mapEnabled ? C_ACCENT : C_MUTED), 0);
   renderedMapVersion = UINT32_MAX;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(radarMtx, portMAX_DELAY);
   mapRetryAfterMs = 0;
   mapVersion = mapVersion + 1;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(radarMtx);
   renderMap();
   if (requestRefresh) requestRefresh();   // network task rebuilds the image (with/without streets)
 }
@@ -867,7 +869,7 @@ void buildScope(lv_obj_t *screen) {
   statusPill = makePill(screen, 4, 290, 96, manualRefreshEvent);
   statusDot = makeBox(statusPill, 8, 8, 0x35E08F, LV_OPA_COVER, LV_RADIUS_CIRCLE);
   lv_obj_align(statusDot, LV_ALIGN_LEFT_MID, 9, 0);
-  statusText = makeText(statusPill, "BUSCANDO", &lv_font_weather_14, C_TEXT);
+  statusText = makeText(statusPill, T("BUSCANDO", "SEARCHING"), &lv_font_weather_14, C_TEXT);
   lv_obj_align(statusText, LV_ALIGN_LEFT_MID, 22, 0);
   mapPill = makePill(screen, 252, 290, 64, mapClickEvent);
   mapText = makeText(mapPill, "MAPA", &lv_font_weather_14, mapEnabled ? C_ACCENT : C_MUTED);
@@ -899,7 +901,7 @@ void buildPanel(lv_obj_t *screen) {
   // ---- list of the nearest aircraft
   listView = makeBox(card, inner, 222, 0, LV_OPA_TRANSP, 0);
   lv_obj_set_pos(listView, 8, 8);
-  listTitle = makeText(listView, "MAIS PRÓXIMOS", &lv_font_weather_14, C_MUTED);
+  listTitle = makeText(listView, T("MAIS PRÓXIMOS", "NEAREST"), &lv_font_weather_14, C_MUTED);
   lv_obj_set_pos(listTitle, 0, 0);
   listEmpty = makeText(listView, "", &lv_font_weather_14, C_MUTED);
   lv_obj_set_width(listEmpty, inner);
@@ -1030,13 +1032,13 @@ static void maybeFetchMap(double lat, double lon, float radiusKm, const char *co
   if (airportOk) airportDrawRadarOverlay(radiusKm, mapBuffer[target], MAP_SIZE);
   mapLat = lat; mapLon = lon; mapRadius = radiusKm;
   mapStreets = streets; mapAirport = airportOk;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(radarMtx, portMAX_DELAY);
   mapFront = target;
   mapFrontStreets = streets;
   // Only valid if the user didn't switch airport/radius while downloading.
   mapAreaValid = snapshot->centerLat == lat && snapshot->centerLon == lon && snapshot->radiusKm == radiusKm;
   mapVersion = mapVersion + 1;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(radarMtx);
 }
 
 bool updateFlightRadarData() {
@@ -1047,12 +1049,12 @@ bool updateFlightRadarData() {
   double centerLat, centerLon;
   float radiusKm;
   char code[8];
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(radarMtx, portMAX_DELAY);
   snprintf(code, sizeof code, "%s", snapshot->airportCode);
   centerLat = snapshot->centerLat;
   centerLon = snapshot->centerLon;
   radiusKm = snapshot->radiusKm;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(radarMtx);
   // ADSB.lol first; if it fails (429, connection refused, timeout...) the SAME poll uses
   // adsb.fi (same readsb data). A source that failed rests 12 s, doubling up to 2 min,
   // and is skipped meanwhile; each success clears its rest. One source per poll.
@@ -1075,9 +1077,9 @@ bool updateFlightRadarData() {
         freshAircraft, FLIGHT_RADAR_MAX_AIRCRAFT, count, error, sizeof error, screenJobStillCurrent);
     if (ok) fiRest = {0, 0}; else if (screenJobStillCurrent()) fail(fiRest, "adsb.fi");
   }
-  if (!ok && !error[0]) snprintf(error, sizeof error, "Fontes em pausa");
+  if (!ok && !error[0]) snprintf(error, sizeof error, T("Fontes em pausa", "Sources paused"));
   if (!screenJobStillCurrent()) return false;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(radarMtx, portMAX_DELAY);
   // Settings may have changed while downloading: drop results for the old area.
   const bool sameArea = snapshot->centerLat == centerLat && snapshot->centerLon == centerLon &&
                         snapshot->radiusKm == radiusKm;
@@ -1086,13 +1088,13 @@ bool updateFlightRadarData() {
     snapshot->count = count;
     snapshot->lastSuccessMs = millis();
     snapshot->status = count ? FlightRadarStatus::ONLINE : FlightRadarStatus::EMPTY;
-    snprintf(snapshot->message, sizeof snapshot->message, "%s", count ? "Dados ADS-B" : "Nenhuma aeronave na área");
+    snprintf(snapshot->message, sizeof snapshot->message, "%s", count ? T("Dados ADS-B", "ADS-B data") : T("Nenhuma aeronave na área", "No aircraft in the area"));
   } else if (!ok) {
     snapshot->status = snapshot->lastSuccessMs ? FlightRadarStatus::STALE : FlightRadarStatus::OFFLINE;
-    snprintf(snapshot->message, sizeof snapshot->message, "%s", error[0] ? error : "Falha de consulta");
+    snprintf(snapshot->message, sizeof snapshot->message, "%s", error[0] ? error : T("Falha de consulta", "Query failed"));
   }
   ++snapshot->version;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(radarMtx);
   // Basemap after the aircraft, so traffic shows up first.
   if (ok) maybeFetchMap(centerLat, centerLon, radiusKm, code);
   return ok;
@@ -1103,7 +1105,7 @@ bool updateFlightRadarDetails() {
   if (!radarActive || !screenJobStillCurrent()) return false;
   AircraftDetails job;
   bool found = false;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(radarMtx, portMAX_DELAY);
   uint32_t newest = 0;
   for (uint8_t i = 0; i < DETAILS_CACHE; ++i)
     if (detailsCache[i].state == DetailsState::LOADING && detailsCache[i].requestedMs >= newest) {
@@ -1111,14 +1113,14 @@ bool updateFlightRadarDetails() {
       newest = job.requestedMs;
       found = true;
     }
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(radarMtx);
   if (!found) return true;
   fetchAircraftDetails(job);
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(radarMtx, portMAX_DELAY);
   AircraftDetails *slot = findDetails(job.icao24, job.callsign);
   if (slot) { job.requestedMs = slot->requestedMs; *slot = job; }
   ++detailsVersion;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(radarMtx);
   return job.state != DetailsState::FAILED;
 }
 
@@ -1159,7 +1161,7 @@ bool setFlightRadarAirportCode(const char *input) {
   const Airport *found = nullptr;
   for (const Airport &airport : airports) if (!strcmp(code, airport.code)) { found = &airport; break; }
   if (!found) return false;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(radarMtx, portMAX_DELAY);
   snprintf(snapshot->airportCode, sizeof snapshot->airportCode, "%s", code);
   snprintf(snapshot->airportName, sizeof snapshot->airportName, "%s", found->name);
   snapshot->centerLat = found->lat;
@@ -1167,12 +1169,12 @@ bool setFlightRadarAirportCode(const char *input) {
   snapshot->count = 0;
   snapshot->lastSuccessMs = 0;
   snapshot->status = FlightRadarStatus::LOADING;
-  snprintf(snapshot->message, sizeof snapshot->message, "Consultando %s", code);
+  snprintf(snapshot->message, sizeof snapshot->message, T("Consultando %s", "Checking %s"), code);
   ++snapshot->version;
   mapRetryAfterMs = 0;
   mapAreaValid = false;   // hide the old basemap until the new one is decoded
   mapVersion = mapVersion + 1;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(radarMtx);
   prefs.putString("radarAirport", code);
   if (radarActive && requestRefresh) requestRefresh();
   return true;
@@ -1181,7 +1183,7 @@ bool setFlightRadarAirportCode(const char *input) {
 bool setFlightRadarRadiusKm(uint8_t radiusKm) {
   ensureState();
   if (radiusKm != 5 && radiusKm != 10 && radiusKm != 25 && radiusKm != 50) return false;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(radarMtx, portMAX_DELAY);
   snapshot->radiusKm = radiusKm;
   snapshot->count = 0;
   snapshot->lastSuccessMs = 0;
@@ -1190,7 +1192,7 @@ bool setFlightRadarRadiusKm(uint8_t radiusKm) {
   mapRetryAfterMs = 0;
   mapAreaValid = false;   // hide the old basemap until the new one is decoded
   mapVersion = mapVersion + 1;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(radarMtx);
   prefs.putUChar("radarRadiusKm", radiusKm);
   if (radarActive && requestRefresh) requestRefresh();
   return true;
@@ -1198,18 +1200,18 @@ bool setFlightRadarRadiusKm(uint8_t radiusKm) {
 
 void getFlightRadarSettings(char *code, size_t codeSize, char *name, size_t nameSize, uint8_t &radiusKm) {
   ensureState();
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(radarMtx, portMAX_DELAY);
   if (code) snprintf(code, codeSize, "%s", snapshot->airportCode);
   if (name) snprintf(name, nameSize, "%s", snapshot->airportName);
   radiusKm = (uint8_t)lroundf(snapshot->radiusKm);
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(radarMtx);
 }
 
 void getFlightRadarCenter(double &lat, double &lon) {
   ensureState();
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(radarMtx, portMAX_DELAY);
   lat = snapshot->centerLat; lon = snapshot->centerLon;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(radarMtx);
 }
 
 void loadFlightRadarSettings() {
@@ -1239,9 +1241,9 @@ static void buildFlightRadarScreen(lv_obj_t *parent) {
   addBackButton(screen);   // last: always on top
   sweepTimer = lv_timer_create(sweepTimerCb, SWEEP_PERIOD_MS, nullptr);
   lv_timer_pause(sweepTimer);
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(radarMtx, portMAX_DELAY);
   *uiCopy = *snapshot;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(radarMtx);
   renderedVersion = uiCopy->version;
   renderSnapshot(*uiCopy);
 }
@@ -1250,12 +1252,12 @@ static void buildFlightRadarScreen(lv_obj_t *parent) {
 static void updateFlightRadarScreen() {
   if (!radarActive || !flightRadarView || !uiCopy) return;
   uint32_t version, dVersion;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(radarMtx, portMAX_DELAY);
   version = snapshot->version;
   dVersion = detailsVersion;
   const bool changed = version != renderedVersion;
   if (changed) *uiCopy = *snapshot;   // copy only when the network task published
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(radarMtx);
   renderMap();
   if (changed) {
     if (uiCopy->lastSuccessMs && millis() - uiCopy->lastSuccessMs > FLIGHT_RADAR_UPDATE_INTERVAL_MS * 3 &&

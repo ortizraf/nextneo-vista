@@ -20,32 +20,32 @@
 namespace f1 {
 
 static const CircuitInfo kCircuits[] = {
-  {"albert_park", "au-1953", "GP da Austr\xC3\xA1lia", "Austr\xC3\xA1lia"},
-  {"shanghai", "cn-2004", "GP da China", "China"},
-  {"suzuka", "jp-1962", "GP do Jap\xC3\xA3o", "Jap\xC3\xA3o"},
-  {"bahrain", "bh-2002", "GP do Bahrein", "Bahrein"},
-  {"jeddah", "sa-2021", "GP da Ar\xC3\xA1" "bia Saudita", "Ar\xC3\xA1" "bia Saudita"},
-  {"miami", "us-2022", "GP de Miami", "EUA"},
-  {"villeneuve", "ca-1978", "GP do Canad\xC3\xA1", "Canad\xC3\xA1"},
-  {"monaco", "mc-1929", "GP de M\xC3\xB4naco", "M\xC3\xB4naco"},
-  {"catalunya", "es-1991", "GP de Barcelona", "Espanha"},
-  {"red_bull_ring", "at-1969", "GP da \xC3\x81ustria", "\xC3\x81ustria"},
-  {"silverstone", "gb-1948", "GP da Inglaterra", "Reino Unido"},
-  {"spa", "be-1925", "GP da B\xC3\xA9lgica", "B\xC3\xA9lgica"},
-  {"hungaroring", "hu-1986", "GP da Hungria", "Hungria"},
-  {"zandvoort", "nl-1948", "GP da Holanda", "Holanda"},
-  {"monza", "it-1922", "GP da It\xC3\xA1lia", "It\xC3\xA1lia"},
-  {"imola", "it-1953", "GP da Emilia-Romagna", "It\xC3\xA1lia"},
-  {"madring", "es-2026", "GP da Espanha", "Espanha"},
-  {"baku", "az-2016", "GP do Azerbaij\xC3\xA3o", "Azerbaij\xC3\xA3o"},
-  {"sepang", "my-1999", "GP da Mal\xC3\xA1sia", "Mal\xC3\xA1sia"},
-  {"marina_bay", "sg-2008", "GP de Singapura", "Singapura"},
-  {"americas", "us-2012", "GP dos EUA", "EUA"},
-  {"rodriguez", "mx-1962", "GP da Cidade do M\xC3\xA9xico", "M\xC3\xA9xico"},
-  {"interlagos", "br-1940", "GP de S\xC3\xA3o Paulo", "Brasil"},
-  {"vegas", "us-2023", "GP de Las Vegas", "EUA"},
-  {"losail", "qa-2004", "GP do Catar", "Catar"},
-  {"yas_marina", "ae-2009", "GP de Abu Dhabi", "Emirados \xC3\x81rabes"},
+  {"albert_park", "au-1953", "GP da Austr\xC3\xA1lia", "Austr\xC3\xA1lia", "Australian GP", "Australia"},
+  {"shanghai", "cn-2004", "GP da China", "China", "Chinese GP", "China"},
+  {"suzuka", "jp-1962", "GP do Jap\xC3\xA3o", "Jap\xC3\xA3o", "Japanese GP", "Japan"},
+  {"bahrain", "bh-2002", "GP do Bahrein", "Bahrein", "Bahrain GP", "Bahrain"},
+  {"jeddah", "sa-2021", "GP da Ar\xC3\xA1" "bia Saudita", "Ar\xC3\xA1" "bia Saudita", "Saudi Arabian GP", "Saudi Arabia"},
+  {"miami", "us-2022", "GP de Miami", "EUA", "Miami GP", "USA"},
+  {"villeneuve", "ca-1978", "GP do Canad\xC3\xA1", "Canad\xC3\xA1", "Canadian GP", "Canada"},
+  {"monaco", "mc-1929", "GP de M\xC3\xB4naco", "M\xC3\xB4naco", "Monaco GP", "Monaco"},
+  {"catalunya", "es-1991", "GP de Barcelona", "Espanha", "Barcelona GP", "Spain"},
+  {"red_bull_ring", "at-1969", "GP da \xC3\x81ustria", "\xC3\x81ustria", "Austrian GP", "Austria"},
+  {"silverstone", "gb-1948", "GP da Inglaterra", "Reino Unido", "British GP", "United Kingdom"},
+  {"spa", "be-1925", "GP da B\xC3\xA9lgica", "B\xC3\xA9lgica", "Belgian GP", "Belgium"},
+  {"hungaroring", "hu-1986", "GP da Hungria", "Hungria", "Hungarian GP", "Hungary"},
+  {"zandvoort", "nl-1948", "GP da Holanda", "Holanda", "Dutch GP", "Netherlands"},
+  {"monza", "it-1922", "GP da It\xC3\xA1lia", "It\xC3\xA1lia", "Italian GP", "Italy"},
+  {"imola", "it-1953", "GP da Emilia-Romagna", "It\xC3\xA1lia", "Emilia-Romagna GP", "Italy"},
+  {"madring", "es-2026", "GP da Espanha", "Espanha", "Spanish GP", "Spain"},
+  {"baku", "az-2016", "GP do Azerbaij\xC3\xA3o", "Azerbaij\xC3\xA3o", "Azerbaijan GP", "Azerbaijan"},
+  {"sepang", "my-1999", "GP da Mal\xC3\xA1sia", "Mal\xC3\xA1sia", "Malaysian GP", "Malaysia"},
+  {"marina_bay", "sg-2008", "GP de Singapura", "Singapura", "Singapore GP", "Singapore"},
+  {"americas", "us-2012", "GP dos EUA", "EUA", "United States GP", "USA"},
+  {"rodriguez", "mx-1962", "GP da Cidade do M\xC3\xA9xico", "M\xC3\xA9xico", "Mexico City GP", "Mexico"},
+  {"interlagos", "br-1940", "GP de S\xC3\xA3o Paulo", "Brasil", "S\xC3\xA3o Paulo GP", "Brazil"},
+  {"vegas", "us-2023", "GP de Las Vegas", "EUA", "Las Vegas GP", "USA"},
+  {"losail", "qa-2004", "GP do Catar", "Catar", "Qatar GP", "Qatar"},
+  {"yas_marina", "ae-2009", "GP de Abu Dhabi", "Emirados \xC3\x81rabes", "Abu Dhabi GP", "United Arab Emirates"},
 };
 const CircuitInfo *circuitInfo(const char *cid) {
   for (const auto &c : kCircuits) if (!strcmp(c.cid, cid)) return &c;
@@ -85,7 +85,7 @@ static int fetchJson(const char *url, JsonDocument &doc, PsramBuffer &body, cons
   const bool toJolpica = jolpica && !strncmp(url, "https://api.jolpi.ca/", 21);
   if (!toJolpica) releaseJolpica();                   // one TLS context at a time
   if (!(toJolpica && jolpica->connected()) && !tlsMemoryAvailable("f1")) {
-    snprintf(netMsg, sizeof netMsg, "mem\xC3\xB3ria baixa p/ conex\xC3\xA3o, tentando de novo"); return -1;
+    snprintf(netMsg, sizeof netMsg, T("mem\xC3\xB3ria baixa p/ conex\xC3\xA3o, tentando de novo", "low memory for the connection, retrying")); return -1;
   }
   body.clear();
   WiFiClientSecure oneShot;
@@ -97,8 +97,8 @@ static int fetchJson(const char *url, JsonDocument &doc, PsramBuffer &body, cons
                             postBody ? "application/x-www-form-urlencoded" : "application/json", opt);
   if (!toJolpica) client.stop();
   LogV.printf("F1: %.60s -> HTTP %d, %u bytes, %lums\n", url + 8, st, (unsigned)body.length(), (unsigned long)(millis() - t0));
-  if (st != 200 || body.overflowed()) { snprintf(netMsg, sizeof netMsg, "servidor respondeu %d, tentando de novo", st); return st == 200 ? -2 : st; }
-  if (deserializeJson(doc, body.c_str(), body.length())) { snprintf(netMsg, sizeof netMsg, "resposta inv\xC3\xA1lida, tentando de novo"); return -3; }
+  if (st != 200 || body.overflowed()) { snprintf(netMsg, sizeof netMsg, T("servidor respondeu %d, tentando de novo", "server answered %d, retrying"), st); return st == 200 ? -2 : st; }
+  if (deserializeJson(doc, body.c_str(), body.length())) { snprintf(netMsg, sizeof netMsg, T("resposta inv\xC3\xA1lida, tentando de novo", "invalid answer, retrying")); return -3; }
   netMsg[0] = 0;
   return 200;
 }
@@ -143,7 +143,7 @@ static bool fetchStandings(PsramBuffer &body) {
       if (!r.isNull()) {
         d.resultRound = atoi(r["round"] | "0");
         const CircuitInfo *ci = circuitInfo(r["Circuit"]["circuitId"] | "");
-        copyStr(ci ? ci->gp : (const char *)(r["raceName"] | ""), d.resultRace, sizeof d.resultRace);
+        copyStr(ci ? gpName(ci) : (const char *)(r["raceName"] | ""), d.resultRace, sizeof d.resultRace);
         int k = 0;
         for (JsonObjectConst x : r["Results"].as<JsonArrayConst>()) {
           if (k >= 3) break;

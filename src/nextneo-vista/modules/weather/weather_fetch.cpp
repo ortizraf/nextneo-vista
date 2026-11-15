@@ -11,7 +11,8 @@
 #include "services/psram_alloc.h"
 #include "services/app_log.h"
 
-WeatherData wx;   // owned by this module; read by Weather / Clock / web page (under mtx)
+WeatherData wx;   // owned by this module; read by Weather / Clock / web page (under wxMtx)
+SemaphoreHandle_t wxMtx = xSemaphoreCreateMutex();
 
 static String urlEncode(const String &s) {
   String o;
@@ -28,7 +29,7 @@ static String urlEncode(const String &s) {
 static bool httpGetJson(const String &url, JsonDocument &doc, String &error) {
   static PsramBuffer body(256 * 1024);   // response kept in PSRAM, not in an internal String
   for (int attempt = 0; attempt < 2; ++attempt) {
-    if (!screenJobStillCurrent()) { error = "cancelado (tela inativa)"; return false; }  // no retry off-screen
+    if (!screenJobStillCurrent()) { error = T("cancelado (tela inativa)", "cancelled (screen not active)"); return false; }  // no retry off-screen
     WiFiClientSecure client;
     client.setInsecure();  // public read-only weather data; no secrets are sent
     client.setHandshakeTimeout(12);
@@ -37,14 +38,14 @@ static bool httpGetJson(const String &url, JsonDocument &doc, String &error) {
     if (code == HTTP_CODE_OK) {
       // The user may have left the screen while the download was running:
       // skip the JSON parsing entirely in that case.
-      if (!screenJobStillCurrent()) { error = "cancelado (tela inativa)"; return false; }
+      if (!screenJobStillCurrent()) { error = T("cancelado (tela inativa)", "cancelled (screen not active)"); return false; }
       DeserializationError jsonError = deserializeJson(doc, body.c_str(), body.length());
       if (!jsonError) return true;
-      error = String("JSON inválido: ") + jsonError.c_str();
+      error = String(T("JSON inválido: ", "invalid JSON: ")) + jsonError.c_str();
       Log.printf("Weather: %s\n", error.c_str());
       return false;
     }
-    error = code <= 0 ? String("erro de conexão: ") + HTTPClient::errorToString(code)
+    error = code <= 0 ? String(T("erro de conexão: ", "connection error: ")) + HTTPClient::errorToString(code)
                       : String("HTTP ") + code;
     Log.printf("Weather: %s (tentativa %d/2)\n", error.c_str(), attempt + 1);
     if (code <= 0) logInternalHeap("weather");
@@ -92,7 +93,7 @@ bool weatherFetch() {
   JsonDocument doc(SpiRamJsonAllocator::instance());  // PSRAM: keep internal RAM for TLS
   String error;
   if (!httpGetJson(url, doc, error)) {
-    if (screenJobStillCurrent()) setStatus(String("Falha clima: ") + error);
+    if (screenJobStillCurrent()) setStatus(String(T("Falha clima: ", "Failed (weather): ")) + error);
     return false;
   }
   JsonArray hourlyTimes = doc["hourly"]["time"].as<JsonArray>();
@@ -109,7 +110,7 @@ bool weatherFetch() {
       hourlyCodes.size() != hourlyTimes.size() || hourlyRain.size() != hourlyTimes.size() ||
       dailyTimes.isNull() || dailyTimes.size() < 7 || dailyMax.size() < 7 ||
       dailyMin.size() < 7 || dailyCodes.size() < 7) {
-    setStatus("Falha clima: resposta incompleta da API");
+    setStatus(T("Falha clima: resposta incompleta da API", "Failed (weather): incomplete API answer"));
     Log.println("Weather: resposta incompleta da API");
     return false;
   }
@@ -120,7 +121,7 @@ bool weatherFetch() {
     prefs.putInt("tz", off);
     applyTime();
   }
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(wxMtx, portMAX_DELAY);
   wx.temp = doc["current"]["temperature_2m"] | 0.0f;
   {
     const int apiCode = doc["current"]["weather_code"] | 0;
@@ -193,14 +194,13 @@ bool weatherFetch() {
     if (sscanf(d, "%d-%d-%d", &y, &m, &dd) == 3) {
       t.tm_year = y - 1900; t.tm_mon = m - 1; t.tm_mday = dd; t.tm_hour = 12;
       mktime(&t);
-      static const char *weekdays[] = {"Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"};
-      snprintf(wx.dayName[i], sizeof wx.dayName[i], "%s", weekdays[t.tm_wday]);
+      snprintf(wx.dayName[i], sizeof wx.dayName[i], "%s", weekdayShort(t.tm_wday));
     }
   }
   wx.haveWeather = true;
   wx.weatherVersion++;
-  sh.status = "Previsão atualizada";
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(wxMtx);
+  setStatus(T("Previsão atualizada", "Forecast updated"));   // sh is guarded by mtx, not wxMtx
   return true;
 }
 
@@ -223,12 +223,12 @@ bool applyManualLocation(const String &input) {
   prefs.putFloat("lon", cfg.lon);
   prefs.putString("city", name);
   prefs.putString("cityRaw", input);
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(wxMtx, portMAX_DELAY);
   wx.cityName = name;
   wx.weatherVersion++;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(wxMtx);
   Log.println("Local manual salvo");   // no name/coordinates in the log (privacy)
-  setStatus("Local salvo: " + name);
+  setStatus(T("Local salvo: ", "Location saved: ") + name);
   return true;
 }
 
@@ -236,11 +236,11 @@ bool weatherGeocodeFetch() {
   xSemaphoreTake(mtx, portMAX_DELAY);
   String city = sh.pendingCity;
   xSemaphoreGive(mtx);
-  if (city.isEmpty() || WiFi.status() != WL_CONNECTED) { setStatus("Conecte ao Wi-Fi primeiro"); return false; }
+  if (city.isEmpty() || WiFi.status() != WL_CONNECTED) { setStatus(T("Conecte ao Wi-Fi primeiro", "Connect to Wi-Fi first")); return false; }
   // Coordenadas manuais: "Nome @ lat,lon" (ex.: "Minha casa @ -xx.xxx,-xx.xxx").
   if (city.indexOf('@') >= 0) {
     if (applyManualLocation(city)) return true;
-    setStatus("Coordenadas inválidas (use Nome @ lat,lon)");
+    setStatus(T("Coordenadas inválidas (use Nome @ lat,lon)", "Invalid coordinates (use Name @ lat,lon)"));
     return false;
   }
   String countryCode;
@@ -257,11 +257,11 @@ bool weatherGeocodeFetch() {
   JsonDocument doc(SpiRamJsonAllocator::instance());  // PSRAM: keep internal RAM for TLS
   String error;
   if (!httpGetJson(lookup, doc, error)) {
-    setStatus(String("Falha geocodificação: ") + error);
+    setStatus(String(T("Falha geocodificação: ", "Failed (city search): ")) + error);
     return false;
   }
   if (doc["results"].isNull()) {
-    setStatus("Cidade não encontrada");
+    setStatus(T("Cidade não encontrada", "City not found"));
     return false;
   }
   cfg.lat = doc["results"][0]["latitude"] | cfg.lat;
@@ -273,11 +273,11 @@ bool weatherGeocodeFetch() {
   prefs.putFloat("lon", cfg.lon);
   prefs.putString("city", name);
   prefs.remove("cityRaw");
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(wxMtx, portMAX_DELAY);
   wx.cityName = name;
   wx.weatherVersion++;
-  xSemaphoreGive(mtx);
-  setStatus("Local salvo: " + name);
+  xSemaphoreGive(wxMtx);
+  setStatus(T("Local salvo: ", "Location saved: ") + name);
   Log.println("Cidade encontrada (geocodificação ok)");   // no name/coordinates in the log (privacy)
   return true;
 }

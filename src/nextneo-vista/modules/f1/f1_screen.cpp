@@ -110,7 +110,20 @@ static uint32_t teamColor(const char *id) {
 }
 
 // ============================================================== data model
-static const char *kSession[S_COUNT] = {"TL1", "TL2", "TL3", "Classif. Sprint", "Sprint", "Classifica\xC3\xA7\xC3\xA3o", "CORRIDA"};
+static const char *sessionName(int i) {                  // current language
+  static const char *const pt[S_COUNT] = {"TL1", "TL2", "TL3", "Classif. Sprint", "Sprint", "Classifica\xC3\xA7\xC3\xA3o", "CORRIDA"};
+  static const char *const en[S_COUNT] = {"FP1", "FP2", "FP3", "Sprint Quali", "Sprint", "Qualifying", "RACE"};
+  return gLang == LANG_EN ? en[i] : pt[i];
+}
+// Generic landmark / map words (proper names like "Eau Rouge" stay as they are).
+static const char *placeName(const char *pt) {
+  if (gLang != LANG_EN) return pt;
+  static const char *const kMap[][2] = {{"Roda-gigante", "Ferris wheel"}, {"Cassino", "Casino"}, {"Porto", "Harbour"},
+    {"Est\xC3\xA1" "dio", "Stadium"}, {"Lago", "Lake"}, {"Cidade Velha", "Old Town"}, {"Curva 1", "Turn 1"},
+    {"T\xC3\xBAnel", "Tunnel"}, {"Piscina", "Swimming pool"}, {"Largada", "Start"}, {"Boxes", "Pits"}};
+  for (auto &m : kMap) if (!strcmp(pt, m[0])) return m[1];
+  return pt;
+}
 static F1Data *ui;                                        // UI thread copy
 
 // ============================================================== UI: raster helpers (RGB565 map buffer)
@@ -508,7 +521,7 @@ static void renderMap(const Race *race) {
   mCx = (minX + maxX) / 2.0f; mCy = (minY + maxY) / 2.0f;
   mScale = fminf((MAP_W - 26) / (float)imax(1, maxX - minX), (MAP_H - 26) / (float)imax(1, maxY - minY));
   // background: photo / street map when downloaded, otherwise our own drawing of the area
-  const bool picture = drawImage(race->cid, mapStyle);   // "Ruas": street map; "Pista": black, track only
+  const bool picture = drawImage(race->cid, mapStyle);   // T("Ruas", "Streets"): street map; T("Pista", "Track"): black, track only
   const bool lightMap = false;                           // light labels on black
   osmCornerN = 0; havePit = false;
   // corners: walk the lap in 2 px steps; where the heading turns fast it is a corner. The outside
@@ -633,7 +646,7 @@ static void renderMap(const Race *race) {
     const float cx = x + qx * (k + 0.5f) * 1.25f + ux * l * 1.25f, cy = y + qy * (k + 0.5f) * 1.25f + uy * l * 1.25f;
     thick(cx - ux * 0.3f, cy - uy * 0.3f, cx + ux * 0.3f, cy + uy * 0.3f, 0.45f, ((k + l) & 1) ? 0x101010 : 0xFFFFFF, 1);
   }
-  if (mapLabelN < MAX_LABELS) mapLabels[mapLabelN++] = {(int)(x - qx * 11) - 22, (int)(y - qy * 11) - 9, "Largada", lightMap ? 0x111111u : 0xFFFFFFu};
+  if (mapLabelN < MAX_LABELS) mapLabels[mapLabelN++] = {(int)(x - qx * 11) - 22, (int)(y - qy * 11) - 9, placeName("Largada"), lightMap ? 0x111111u : 0xFFFFFFu};
   trackPoint(0.035f, x, y, ux, uy);
   const float ax = x + qx * 9, ay = y + qy * 9;          // beside the track
   line(ax - ux * 5, ay - uy * 5, ax + ux * 5, ay + uy * 5, 0xFFFFFF, 1);
@@ -645,12 +658,12 @@ static void renderMap(const Race *race) {
     const float lx = mx((l.lon - h.lon0) * kx), ly = my((l.lat - h.lat0) * ky);
     if (lx < 6 || lx > MAP_W - 6 || ly < 8 || ly > MAP_H - 8) continue;
     drawIcon(lx, ly, l.icon);
-    if (mapLabelN < MAX_LABELS) mapLabels[mapLabelN++] = {(int)lx + 10, (int)ly - 8, l.name, lightMap ? 0x33404Fu : 0xB8C6DCu};
+    if (mapLabelN < MAX_LABELS) mapLabels[mapLabelN++] = {(int)lx + 10, (int)ly - 8, placeName(l.name), lightMap ? 0x33404Fu : 0xB8C6DCu};
   }
   // famous corners (tap the map to show / hide)
   if (havePit && mapLabelN < MAX_LABELS) {
     const float px = mx(pitX), py = my(pitY);
-    if (px > 4 && px < MAP_W - 30 && py > 6 && py < MAP_H - 6) mapLabels[mapLabelN++] = {(int)px + 6, (int)py - 8, "Boxes", lightMap ? 0x33404Fu : 0xF0F0F0u};
+    if (px > 4 && px < MAP_W - 30 && py > 6 && py < MAP_H - 6) mapLabels[mapLabelN++] = {(int)px + 6, (int)py - 8, placeName("Boxes"), lightMap ? 0x33404Fu : 0xF0F0F0u};
   }
   if (showCorners && osmCornerN)
     for (int i = 0; i < osmCornerN; ++i) {
@@ -665,7 +678,7 @@ static void renderMap(const Race *race) {
       if (strcmp(c.cid, race->cid)) continue;
       trackPoint(c.frac, x, y, ux, uy);
       disc(x, y, 2.6f, 0xFFD54A, 1);
-      if (mapLabelN < MAX_LABELS) mapLabels[mapLabelN++] = {(int)x + 5, (int)y - 16, c.name, lightMap ? 0x7A4E00u : 0xFFD54Au};
+      if (mapLabelN < MAX_LABELS) mapLabels[mapLabelN++] = {(int)x + 5, (int)y - 16, placeName(c.name), lightMap ? 0x7A4E00u : 0xFFD54Au};
     }
   if (showCorners && !named) {                            // no names known: number the corners, like the TV maps
     static char num[30][4];
@@ -699,7 +712,10 @@ static int autoPageDone = -1;                             // version for which t
 static const uint32_t C_RED = 0xE10600, C_BG = 0x0B0F17, C_TXT = 0xECF0F6, C_DIM = 0x8C97AA;
 
 static void localTm(time_t t, struct tm &out) { const time_t l = t + cfg.utcOffset; gmtime_r(&l, &out); }
-static const char *kWd[7] = {"dom", "seg", "ter", "qua", "qui", "sex", "s\xC3\xA1" "b"};
+static const char *wdF1(int w) {                          // "dom" / "Sun"
+  static const char *const pt[7] = {"dom", "seg", "ter", "qua", "qui", "sex", "s\xC3\xA1" "b"};
+  return gLang == LANG_EN ? weekdayShort(w) : pt[w];
+}
 
 // race shown on the "next" f1Page: the first one not finished yet (start + 2 h)
 static int previewIdx = -1;                                // >= 0: browsing other circuits (arrows on the map)
@@ -752,17 +768,17 @@ static void fillStandings(int which, time_t now) {
     lv_obj_set_style_bg_color(bar, lv_color_hex(C_RED), 0); lv_obj_set_style_border_width(bar, 0, 0); lv_obj_set_style_radius(bar, 2, 0);
     char t1[64], t2[96];
     if (over) {
-      snprintf(t1, sizeof t1, "CAMPE\xC3\x95" "ES %d", ui->season);
+      snprintf(t1, sizeof t1, T("CAMPE\xC3\x95" "ES %d", "CHAMPIONS %d"), ui->season);
       snprintf(t2, sizeof t2, "%s  \xC2\xB7  %s", ui->drivers[0].name, ui->teams[0].name);
     } else {
-      snprintf(t1, sizeof t1, "RESULTADO  \xC2\xB7  %s", ui->resultRace);
+      snprintf(t1, sizeof t1, T("RESULTADO  \xC2\xB7  %s", "RESULT  \xC2\xB7  %s"), ui->resultRace);
       snprintf(t2, sizeof t2, "1\xC2\xBA %s    2\xC2\xBA %s    3\xC2\xBA %s", ui->podium[0], ui->podium[1], ui->podium[2]);
     }
     lv_obj_t *l1 = makeLabel(b, t1, &lv_font_weather_14, 0xFFD54A); lv_obj_set_pos(l1, 20, 4);
     lv_obj_t *l2 = makeLabel(b, t2, &lv_font_weather_14, C_TXT); lv_obj_set_pos(l2, 20, 24);
   }
   const int n = which == 0 ? ui->nDrivers : ui->nTeams;
-  if (!n) { lv_obj_t *r = row(40); makeLabel(r, ui->standMs ? "O campeonato ainda n\xC3\xA3o come\xC3\xA7ou" : "carregando...", &lv_font_weather_14, C_DIM); return; }
+  if (!n) { lv_obj_t *r = row(40); makeLabel(r, ui->standMs ? T("O campeonato ainda n\xC3\xA3o come\xC3\xA7ou", "The championship has not started yet") : T("carregando...", "loading..."), &lv_font_weather_14, C_DIM); return; }
   const Standing *s = which == 0 ? ui->drivers : ui->teams;
   for (int i = 0; i < n; ++i) {
     lv_obj_t *r = row(25);
@@ -798,16 +814,16 @@ static int nextSession(const Race *r, time_t now, bool &live) {
 }
 
 static const char *shortSky(int c, bool night) {       // short sky text for the programme
-  if (c == 0) return night ? "C\xC3\xA9u limpo" : "Sol";
-  if (c == 1) return night ? "Poucas nuvens" : "Sol e nuvens";
-  if (c == 2) return "Parc. nublado";
-  if (c == 3) return "Nublado";
-  if (c == 45 || c == 48) return "Neblina";
-  if (c >= 51 && c <= 57) return "Garoa";
-  if (c >= 61 && c <= 67) return "Chuva";
-  if (c >= 71 && c <= 77) return "Neve";
-  if (c >= 80 && c <= 82) return "Pancadas";
-  if (c >= 95) return "Trovoada";
+  if (c == 0) return night ? T("C\xC3\xA9u limpo", "Clear sky") : T("Sol", "Sun");
+  if (c == 1) return night ? T("Poucas nuvens", "Mostly clear") : T("Sol e nuvens", "Sun and clouds");
+  if (c == 2) return T("Parc. nublado", "Partly cloudy");
+  if (c == 3) return T("Nublado", "Overcast");
+  if (c == 45 || c == 48) return T("Neblina", "Fog");
+  if (c >= 51 && c <= 57) return T("Garoa", "Drizzle");
+  if (c >= 61 && c <= 67) return T("Chuva", "Rain");
+  if (c >= 71 && c <= 77) return T("Neve", "Snow");
+  if (c >= 80 && c <= 82) return T("Pancadas", "Showers");
+  if (c >= 95) return T("Trovoada", "Thunderstorm");
   return "";
 }
 static void closeProg() { lv_obj_set_hidden(progPanel, true); lv_timer_pause(progTimer); }
@@ -822,8 +838,8 @@ static bool fillProg() {
   if (!r) return false;
   progVersion = ui->version;
   const CircuitInfo *ci = circuitInfo(r->cid);
-  lv_label_set_text(progTitle, ci ? ci->gp : r->name);
-  static char sub[64]; snprintf(sub, sizeof sub, "Programa\xC3\xA7\xC3\xA3o  \xC2\xB7  seu hor\xC3\xA1rio (GMT%+d)", cfg.utcOffset / 3600);
+  lv_label_set_text(progTitle, ci ? gpName(ci) : r->name);
+  static char sub[64]; snprintf(sub, sizeof sub, T("Programa\xC3\xA7\xC3\xA3o  \xC2\xB7  seu hor\xC3\xA1rio (GMT%+d)", "Schedule  \xC2\xB7  your time (GMT%+d)"), cfg.utcOffset / 3600);
   lv_label_set_text(progSub, sub);
   bool live; const int nx = nextSession(r, now, live);
   int k = 0;
@@ -838,9 +854,9 @@ static bool fillProg() {
     lv_obj_set_style_bg_opa(progBox[k], next || (k & 1) ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     lv_obj_set_style_bg_color(progDot[k], lv_color_hex(dot), 0);
     char b[24];
-    lv_label_set_text(progRow[k], kSession[s]);
-    snprintf(b, sizeof b, "%s %02d/%02d", kWd[t.tm_wday], t.tm_mday, t.tm_mon + 1); lv_label_set_text(progDay[k], b);
-    if (next && live) snprintf(b, sizeof b, "AO VIVO"); else snprintf(b, sizeof b, "%02d:%02d", t.tm_hour, t.tm_min);
+    lv_label_set_text(progRow[k], sessionName(s));
+    snprintf(b, sizeof b, "%s %02d/%02d", wdF1(t.tm_wday), t.tm_mday, t.tm_mon + 1); lv_label_set_text(progDay[k], b);
+    if (next && live) snprintf(b, sizeof b, T("AO VIVO", "LIVE")); else snprintf(b, sizeof b, "%02d:%02d", t.tm_hour, t.tm_min);
     lv_label_set_text(progTime[k], b);
     for (lv_obj_t *o : {progRow[k], progDay[k], progTime[k]}) lv_obj_set_style_text_color(o, lv_color_hex(next ? 0xFFFFFF : txt), 0);
     lv_obj_set_hidden(progBox[k], false);
@@ -851,7 +867,7 @@ static bool fillProg() {
   if (previewIdx < 0 && ui->wxHave[S_RACE] && !strcmp(ui->wxCid, r->cid)) {
     static char w[96];
     // main race only (not the sprint): day min/max at the circuit + the sky at the start time
-    snprintf(w, sizeof w, "Previs\xC3\xA3o p/ a corrida:  m\xC3\xADn %.0f\xC2\xB0  \xC2\xB7  m\xC3\xA1x %.0f\xC2\xB0  \xC2\xB7  %s",
+    snprintf(w, sizeof w, T("Previs\xC3\xA3o p/ a corrida:  m\xC3\xADn %.0f\xC2\xB0  \xC2\xB7  m\xC3\xA1x %.0f\xC2\xB0  \xC2\xB7  %s", "Race forecast:  min %.0f\xC2\xB0  \xC2\xB7  max %.0f\xC2\xB0  \xC2\xB7  %s"),
              ui->wxMin[S_RACE], ui->wxMax[S_RACE],
              shortSky(ui->wxCode[S_RACE], ui->wxNight[S_RACE]));
     lv_label_set_text(progRaceWx, w); lv_obj_set_hidden(progRaceWx, false);
@@ -860,7 +876,7 @@ static bool fillProg() {
   char len[16] = "";
   TrackHdr h;
   if (fsOk() && loadTrackHdr(r->cid, h, nullptr, 0) && h.lengthM) { snprintf(len, sizeof len, "%.3f km", h.lengthM / 1000.0f); for (char *q = len; *q; ++q) if (*q == '.') *q = ','; }
-  snprintf(foot, sizeof foot, "%s%s%s, %s", len[0] ? "Circuito " : "", len, len[0] ? "  \xC2\xB7  " : "", r->locality, ci ? ci->country : r->country);
+  snprintf(foot, sizeof foot, "%s%s%s, %s", len[0] ? T("Circuito ", "Circuit ") : "", len, len[0] ? "  \xC2\xB7  " : "", r->locality, ci ? countryName(ci) : r->country);
   lv_label_set_text(progFoot, foot);
   return true;
 }
@@ -914,13 +930,13 @@ static void buildF1Screen(lv_obj_t *scr) {
   // header: red slash + "FÓRMULA 1" + chequered strip
   lv_obj_t *slash = lv_obj_create(f1View); lv_obj_set_size(slash, 6, 22); lv_obj_set_pos(slash, 52, 10);
   lv_obj_set_style_bg_color(slash, lv_color_hex(C_RED), 0); lv_obj_set_style_border_width(slash, 0, 0); lv_obj_set_style_radius(slash, 1, 0);
-  lv_obj_t *t = makeLabel(f1View, "F\xC3\x93RMULA 1", &lv_font_weather_20, 0xFFFFFF); lv_obj_set_pos(t, 64, 10);
+  lv_obj_t *t = makeLabel(f1View, T("F\xC3\x93RMULA 1", "FORMULA 1"), &lv_font_weather_20, 0xFFFFFF); lv_obj_set_pos(t, 64, 10);
   for (int i = 0; i < 6; ++i) for (int j = 0; j < 2; ++j) {
     lv_obj_t *q = lv_obj_create(f1View); lv_obj_set_size(q, 5, 5); lv_obj_set_pos(q, 180 + i * 5, 14 + j * 5);
     lv_obj_set_style_bg_color(q, lv_color_hex((i + j) & 1 ? 0x101010 : 0xF0F0F0), 0);
     lv_obj_set_style_border_width(q, 0, 0); lv_obj_set_style_radius(q, 0, 0);
   }
-  static const char *kTab[3] = {"GP", "Pilotos", "Equipes"};
+  static const char *kTab[3] = {"GP", T("Pilotos", "Drivers"), T("Equipes", "Teams")};
   for (int i = 0; i < 3; ++i) {
     tabBtn[i] = lv_button_create(f1View);
     lv_obj_set_size(tabBtn[i], 74, 28); lv_obj_set_pos(tabBtn[i], 248 + i * 76, 7);
@@ -944,7 +960,7 @@ static void buildF1Screen(lv_obj_t *scr) {
   f1LblDate = makeLabel(left, "", &lv_font_weather_20, C_TXT); lv_obj_set_pos(f1LblDate, 12, 106);
   lblTime = makeLabel(left, "", &lv_font_montserrat_48, 0xFFFFFF); lv_obj_set_pos(lblTime, 8, 130);
   lblCount = makeLabel(left, "", &lv_font_weather_14, 0xFFD54A); lv_obj_set_pos(lblCount, 12, 188);
-  lblHint = makeLabel(left, "toque: programa\xC3\xA7\xC3\xA3o >", &lv_font_weather_14, 0x4E5A6C); lv_obj_set_pos(lblHint, 12, 248);
+  lblHint = makeLabel(left, T("toque: programa\xC3\xA7\xC3\xA3o >", "tap: schedule >"), &lv_font_weather_14, 0x4E5A6C); lv_obj_set_pos(lblHint, 12, 248);
   for (lv_obj_t *o : {lblGp, lblPlace, lblRound, lblNextKind, f1LblDate, lblTime, lblCount, lblHint}) lv_obj_set_clickable(o, false);
   mapCanvas = lv_canvas_create(p);
   lv_obj_set_pos(mapCanvas, SCR_W - MAP_W - 2, 0);
@@ -1061,11 +1077,11 @@ static void f1OnEnter() {
 static void f1OnExit() { closeProg(); previewIdx = -1; }
 
 static void countdown(char *b, size_t n, long s) {
-  if (s <= 0) { snprintf(b, n, "agora"); return; }
+  if (s <= 0) { snprintf(b, n, T("agora", "now")); return; }
   const long d = s / 86400, h = s % 86400 / 3600, m = s % 3600 / 60;
-  if (d) snprintf(b, n, "em %ldd %02ldh %02ldmin", d, h, m);
-  else if (h) snprintf(b, n, "em %ldh %02ldmin", h, m);
-  else snprintf(b, n, "em %ldmin %02lds", m, s % 60);
+  if (d) snprintf(b, n, T("em %ldd %02ldh %02ldmin", "in %ldd %02ldh %02ldmin"), d, h, m);
+  else if (h) snprintf(b, n, T("em %ldh %02ldmin", "in %ldh %02ldmin"), h, m);
+  else snprintf(b, n, T("em %ldmin %02lds", "in %ldmin %02lds"), m, s % 60);
 }
 
 // UI tick (500 ms while shown)
@@ -1094,12 +1110,12 @@ static void f1Render() {
   // f1Page 0 texts
   char b[64];
   if (!ui->nRaces) {
-    setLabelIfChanged(lblGp, "F\xC3\xB3rmula 1");
-    char m[96]; snprintf(m, sizeof m, "carregando calend\xC3\xA1rio...%s%s", netMsg[0] ? "\n" : "", netMsg);
+    setLabelIfChanged(lblGp, T("F\xC3\xB3rmula 1", "Formula 1"));
+    char m[96]; snprintf(m, sizeof m, T("carregando calend\xC3\xA1rio...%s%s", "loading calendar...%s%s"), netMsg[0] ? "\n" : "", netMsg);
     setLabelIfChanged(lblPlace, ui->schedMs ? "" : m);
   } else if (!r) {                                       // season over
-    snprintf(b, sizeof b, "Temporada %d encerrada", ui->season); setLabelIfChanged(lblGp, b);
-    setLabelIfChanged(lblPlace, "Campe\xC3\xA3o de pilotos:");
+    snprintf(b, sizeof b, T("Temporada %d encerrada", "Season %d over"), ui->season); setLabelIfChanged(lblGp, b);
+    setLabelIfChanged(lblPlace, T("Campe\xC3\xA3o de pilotos:", "Drivers' champion:"));
     setLabelIfChanged(lblRound, "");
     setLabelIfChanged(lblNextKind, "");
     setLabelIfChanged(f1LblDate, ui->nDrivers ? ui->drivers[0].name : "");
@@ -1107,16 +1123,16 @@ static void f1Render() {
     snprintf(b, sizeof b, "%s", ui->nTeams ? ui->teams[0].name : ""); setLabelIfChanged(lblCount, b);
   } else {
     const CircuitInfo *ci = circuitInfo(r->cid);
-    setLabelIfChanged(lblGp, ci ? ci->gp : r->name);
-    snprintf(b, sizeof b, "%s  \xC2\xB7  %s", r->locality, ci ? ci->country : r->country); setLabelIfChanged(lblPlace, b);
-    snprintf(b, sizeof b, "Rodada %d de %d", r->round, ui->nRaces); setLabelIfChanged(lblRound, b);
+    setLabelIfChanged(lblGp, ci ? gpName(ci) : r->name);
+    snprintf(b, sizeof b, "%s  \xC2\xB7  %s", r->locality, ci ? countryName(ci) : r->country); setLabelIfChanged(lblPlace, b);
+    snprintf(b, sizeof b, T("Rodada %d de %d", "Round %d of %d"), r->round, ui->nRaces); setLabelIfChanged(lblRound, b);
     bool live; const int s = nextSession(r, now, live);
-    snprintf(b, sizeof b, "%s  \xC2\xB7  %s", previewIdx >= 0 ? "PR\xC3\x89VIA" : live ? "AO VIVO" : "PR\xC3\x93XIMA", kSession[s]);
+    snprintf(b, sizeof b, "%s  \xC2\xB7  %s", previewIdx >= 0 ? T("PR\xC3\x89VIA", "PREVIEW") : live ? T("AO VIVO", "LIVE") : T("PR\xC3\x93XIMA", "NEXT"), sessionName(s));
     setLabelIfChanged(lblNextKind, b);
     struct tm t; localTm(r->t[s], t);
-    snprintf(b, sizeof b, "%s %02d/%02d", kWd[t.tm_wday], t.tm_mday, t.tm_mon + 1); setLabelIfChanged(f1LblDate, b);
+    snprintf(b, sizeof b, "%s %02d/%02d", wdF1(t.tm_wday), t.tm_mday, t.tm_mon + 1); setLabelIfChanged(f1LblDate, b);
     snprintf(b, sizeof b, "%02d:%02d", t.tm_hour, t.tm_min); setLabelIfChanged(lblTime, b);
-    if (live) snprintf(b, sizeof b, "come\xC3\xA7ou h\xC3\xA1 %ld min", (long)(now - r->t[s]) / 60);
+    if (live) snprintf(b, sizeof b, T("come\xC3\xA7ou h\xC3\xA1 %ld min", "started %ld min ago"), (long)(now - r->t[s]) / 60);
     else if (previewIdx >= 0 && r->t[s] <= now) b[0] = 0;          // preview of a race already run: no countdown
     else countdown(b, sizeof b, (long)(r->t[s] - now));
     setLabelIfChanged(lblCount, b);
@@ -1139,7 +1155,7 @@ static void f1Render() {
     }
     if (!trkN) {
       ld.color = lv_color_hex(0x5F6B7E); ld.align = LV_TEXT_ALIGN_CENTER;
-      ld.text = mapRace ? "baixando o tra\xC3\xA7" "ado..." : "";
+      ld.text = mapRace ? T("baixando o tra\xC3\xA7" "ado...", "downloading the track...") : "";
       lv_area_t a = {0, MAP_H / 2 - 9, MAP_W, MAP_H / 2 + 9}; lv_draw_label(&layer, &ld, &a);
     }
     lv_canvas_finish_layer(mapCanvas, &layer);

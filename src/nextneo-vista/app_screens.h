@@ -11,6 +11,7 @@
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
 #include "core/text_utils.h"
+#include "core/i18n.h"
 
 LV_FONT_DECLARE(lv_font_weather_14);
 LV_FONT_DECLARE(lv_font_weather_20);
@@ -39,7 +40,7 @@ struct Config {
 
 extern Shared sh;
 extern Config cfg;
-extern SemaphoreHandle_t mtx;
+extern SemaphoreHandle_t mtx;          // guards sh only; each module has its own lock (wxMtx, finMtx...)
 extern Preferences prefs;
 extern QueueHandle_t cmdQ;
 

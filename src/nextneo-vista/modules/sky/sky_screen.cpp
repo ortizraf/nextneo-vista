@@ -265,7 +265,8 @@ static void drawScene() {
   }
 
   // planets
-  static const char *kPlanet[5] = {"Merc\xC3\xBArio", "V\xC3\xAAnus", "Marte", "J\xC3\xBApiter", "Saturno"};
+  static const char *kPlanet[5] = {T("Merc\xC3\xBArio", "Mercury"), T("V\xC3\xAAnus", "Venus"), T("Marte", "Mars"),
+                                   T("J\xC3\xBApiter", "Jupiter"), T("Saturno", "Saturn")};
   static const uint32_t kPCol[5] = {0xD8D0C0, 0xFFF8E0, 0xFF8A5C, 0xFFE7B8, 0xF2DFA0};
   static const float kPMag[5] = {0.0f, -4.2f, 0.8f, -2.3f, 0.6f};
   for (int k = 0; k < 5; ++k) {
@@ -462,7 +463,7 @@ static constexpr int ART = 116;
 static constexpr uint32_t C_CARD = 0x0B1426;
 
 struct BodyInfo { const char *name, *sub, *diam, *yearKey, *year; };
-static const BodyInfo kInfo[B_COUNT] = {
+static const BodyInfo kInfoPt[B_COUNT] = {
   {"Merc\xC3\xBArio", "Planeta  \xC2\xB7  o mais perto do Sol", "4.879 km", "ANO", "88 dias"},
   {"V\xC3\xAAnus", "Planeta  \xC2\xB7  o mais brilhante do c\xC3\xA9u", "12.104 km", "ANO", "225 dias"},
   {"Marte", "Planeta  \xC2\xB7  o planeta vermelho", "6.779 km", "ANO", "687 dias"},
@@ -470,6 +471,15 @@ static const BodyInfo kInfo[B_COUNT] = {
   {"Saturno", "Planeta  \xC2\xB7  an\xC3\xA9is de gelo e rocha", "116.460 km", "ANO", "29,5 anos"},
   {"Sol", "Estrela  \xC2\xB7  an\xC3\xA3 amarela", "1,39 mi de km", "IDADE", "4,6 bi de anos"},
   {"Lua", "Sat\xC3\xA9lite natural da Terra", "3.474 km", "\xC3\x93RBITA", "27,3 dias"}};
+static const BodyInfo kInfoEn[B_COUNT] = {
+  {"Mercury", "Planet  \xC2\xB7  the closest to the Sun", "4,879 km", "YEAR", "88 days"},
+  {"Venus", "Planet  \xC2\xB7  the brightest in the sky", "12,104 km", "YEAR", "225 days"},
+  {"Mars", "Planet  \xC2\xB7  the red planet", "6,779 km", "YEAR", "687 days"},
+  {"Jupiter", "Planet  \xC2\xB7  the largest in the solar system", "139,820 km", "YEAR", "11.9 years"},
+  {"Saturn", "Planet  \xC2\xB7  rings of ice and rock", "116,460 km", "YEAR", "29.5 years"},
+  {"Sun", "Star  \xC2\xB7  yellow dwarf", "1.39 million km", "AGE", "4.6 billion years"},
+  {"Moon", "Earth's natural satellite", "3,474 km", "ORBIT", "27.3 days"}};
+static const BodyInfo &bodyInfo(int i) { return gLang == LANG_EN ? kInfoEn[i] : kInfoPt[i]; }
 
 static uint32_t shadeCol(uint32_t c, float k) {
   k = fmaxf(0, fminf(1.2f, k));
@@ -603,8 +613,11 @@ static void closeInfo() {
 static void infoTimerCb(lv_timer_t *) { closeInfo(); }
 
 static const char *moonPhase(float e) {
-  static const char *n[8] = {"Lua nova", "Crescente", "Quarto crescente", "Crescente gibosa", "Lua cheia",
-                             "Minguante gibosa", "Quarto minguante", "Minguante"};
+  static const char *const pt[8] = {"Lua nova", "Crescente", "Quarto crescente", "Crescente gibosa", "Lua cheia",
+                                    "Minguante gibosa", "Quarto minguante", "Minguante"};
+  static const char *const en[8] = {"New moon", "Waxing crescent", "First quarter", "Waxing gibbous", "Full moon",
+                                    "Waning gibbous", "Last quarter", "Waning crescent"};
+  const char *const *n = gLang == LANG_EN ? en : pt;
   return n[(int)((e + 22.5f) / 45.0f) % 8];
 }
 static void fmtBig(char *o, size_t n, double v) {               // 384400 -> "384.400"
@@ -623,22 +636,22 @@ static void openInfo(int k) {
     lv_canvas_set_buffer(infoArt, artBuf, ART, ART, LV_COLOR_FORMAT_RGB565);
   }
   const Body &b = bodies[k];
-  const BodyInfo &in = kInfo[k];
+  const BodyInfo &in = bodyInfo(k);
   drawArt(k);
   lv_label_set_text(infoTitle, in.name);
   lv_label_set_text(infoSub, in.sub);
   char v[32];
   snprintf(v, sizeof v, "%.0f\xC2\xB0", b.alt); cell(0, "ALTURA", v);
-  snprintf(v, sizeof v, "%s  %.0f\xC2\xB0", kDir[((int)lroundf(b.az / 45.0f)) % 8], b.az); cell(1, "DIRE\xC3\x87\xC3\x83O", v);
+  snprintf(v, sizeof v, "%s  %.0f\xC2\xB0", kDir[((int)lroundf(b.az / 45.0f)) % 8], b.az); cell(1, T("DIRE\xC3\x87\xC3\x83O", "DIRECTION"), v);
   if (k == B_MOON) {
-    char big[16]; fmtBig(big, sizeof big, b.dist); snprintf(v, sizeof v, "%s km", big); cell(2, "DIST\xC3\x82NCIA", v);
+    char big[16]; fmtBig(big, sizeof big, b.dist); snprintf(v, sizeof v, "%s km", big); cell(2, T("DIST\xC3\x82NCIA", "DISTANCE"), v);
     cell(3, "FASE", moonPhase(moonElong));
     snprintf(v, sizeof v, "%.0f%%", 50.0f * (1 - cosf(moonElong * (float)RAD))); cell(4, "ILUMINADA", v);
-    cell(5, "DI\xC3\x82METRO", in.diam);
+    cell(5, T("DI\xC3\x82METRO", "DIAMETER"), in.diam);
   } else {
-    snprintf(v, sizeof v, "%.0f mi de km", b.dist * 149.6); cell(2, "DIST\xC3\x82NCIA", v);
-    snprintf(v, sizeof v, "%.1f min", b.dist * 8.317); comma(v); cell(3, "LUZ CHEGA EM", v);
-    cell(4, "DI\xC3\x82METRO", in.diam);
+    snprintf(v, sizeof v, T("%.0f mi de km", "%.0f million km"), b.dist * 149.6); cell(2, T("DIST\xC3\x82NCIA", "DISTANCE"), v);
+    snprintf(v, sizeof v, "%.1f min", b.dist * 8.317); comma(v); cell(3, T("LUZ CHEGA EM", "LIGHT TAKES"), v);
+    cell(4, T("DI\xC3\x82METRO", "DIAMETER"), in.diam);
     cell(5, in.yearKey, in.year);
   }
   lv_obj_set_hidden(infoPanel, false);
@@ -657,17 +670,17 @@ static void openSat(int k) {
   const SatView &v = shown[k].v;
   drawSatArt(s.kind);
   lv_label_set_text(infoTitle, s.name);
-  lv_label_set_text(infoSub, s.kind == SAT_ISS ? "Esta\xC3\xA7\xC3\xA3o Espacial Internacional"
-                           : s.kind == SAT_CSS ? "Esta\xC3\xA7\xC3\xA3o espacial chinesa"
-                           : s.kind == SAT_STARLINK ? "Starlink lan\xC3\xA7" "ado h\xC3\xA1 menos de 30 dias"
-                                                    : "Um dos sat\xC3\xA9lites mais brilhantes");
+  lv_label_set_text(infoSub, s.kind == SAT_ISS ? T("Esta\xC3\xA7\xC3\xA3o Espacial Internacional", "International Space Station")
+                           : s.kind == SAT_CSS ? T("Esta\xC3\xA7\xC3\xA3o espacial chinesa", "Chinese space station")
+                           : s.kind == SAT_STARLINK ? T("Starlink lan\xC3\xA7" "ado h\xC3\xA1 menos de 30 dias", "Starlink launched less than 30 days ago")
+                                                    : T("Um dos sat\xC3\xA9lites mais brilhantes", "One of the brightest satellites"));
   char t[32];
-  snprintf(t, sizeof t, "%.0f\xC2\xB0", v.alt); cell(0, "ALTURA NO C\xC3\x89U", t);
-  snprintf(t, sizeof t, "%s  %.0f\xC2\xB0", kDir[((int)lroundf(v.az / 45.0f)) % 8], v.az); cell(1, "DIRE\xC3\x87\xC3\x83O", t);
-  char big[16]; fmtBig(big, sizeof big, v.rangeKm); snprintf(t, sizeof t, "%s km", big); cell(2, "DIST\xC3\x82NCIA", t);
+  snprintf(t, sizeof t, "%.0f\xC2\xB0", v.alt); cell(0, T("ALTURA NO C\xC3\x89U", "HEIGHT IN THE SKY"), t);
+  snprintf(t, sizeof t, "%s  %.0f\xC2\xB0", kDir[((int)lroundf(v.az / 45.0f)) % 8], v.az); cell(1, T("DIRE\xC3\x87\xC3\x83O", "DIRECTION"), t);
+  char big[16]; fmtBig(big, sizeof big, v.rangeKm); snprintf(t, sizeof t, "%s km", big); cell(2, T("DIST\xC3\x82NCIA", "DISTANCE"), t);
   fmtBig(big, sizeof big, v.heightKm); snprintf(t, sizeof t, "%s km", big); cell(3, "ALTITUDE", t);
   snprintf(t, sizeof t, "%.1f km/s", sqrt(398600.8 / (RE_KM + v.heightKm))); comma(t); cell(4, "VELOCIDADE", t);
-  cell(5, "LUZ DO SOL", !v.lit ? "na sombra da Terra" : gSunAlt < -6 ? "iluminado: vis\xC3\xADvel" : "iluminado (c\xC3\xA9u claro)");
+  cell(5, T("LUZ DO SOL", "SUNLIGHT"), !v.lit ? T("na sombra da Terra", "in Earth's shadow") : gSunAlt < -6 ? T("iluminado: vis\xC3\xADvel", "lit: visible") : T("iluminado (c\xC3\xA9u claro)", "lit (bright sky)"));
   lv_obj_set_hidden(infoPanel, false);
   lv_obj_move_foreground(infoPanel);
   lv_timer_reset(infoTimer); lv_timer_resume(infoTimer);
@@ -794,12 +807,12 @@ static void skyRender() {
   satPass(full);
   if (satLbl) {
     char t[48];
-    if (satFetching) snprintf(t, sizeof t, "baixando sat\xC3\xA9lites...");
-    else if (!satN) snprintf(t, sizeof t, "%s", satEverFetched ? "" : "sat\xC3\xA9lites: sem dados");
-    else if (!shownN) snprintf(t, sizeof t, "nenhum sat\xC3\xA9lite nesta dire\xC3\xA7\xC3\xA3o");
-    else if (shownN > shadowN) snprintf(t, sizeof t, "%d sat\xC3\xA9lite%s vis\xC3\xADve%s", shownN - shadowN,
+    if (satFetching) snprintf(t, sizeof t, T("baixando sat\xC3\xA9lites...", "downloading satellites..."));
+    else if (!satN) snprintf(t, sizeof t, "%s", satEverFetched ? "" : T("sat\xC3\xA9lites: sem dados", "satellites: no data"));
+    else if (!shownN) snprintf(t, sizeof t, T("nenhum sat\xC3\xA9lite nesta dire\xC3\xA7\xC3\xA3o", "no satellite in this direction"));
+    else if (shownN > shadowN) snprintf(t, sizeof t, T("%d sat\xC3\xA9lite%s vis\xC3\xADve%s", "%d visible satellite%s%.0s"), shownN - shadowN,
                                         shownN - shadowN == 1 ? "" : "s", shownN - shadowN == 1 ? "l" : "is");
-    else snprintf(t, sizeof t, "%d sat\xC3\xA9lite%s nesta dire\xC3\xA7\xC3\xA3o", shownN, shownN == 1 ? "" : "s");
+    else snprintf(t, sizeof t, T("%d sat\xC3\xA9lite%s nesta dire\xC3\xA7\xC3\xA3o", "%d satellite%s in this direction"), shownN, shownN == 1 ? "" : "s");
     setLabelIfChanged(satLbl, t);
     if (t[0]) lv_obj_set_hidden(satLbl, false); else lv_obj_set_hidden(satLbl, true);
   }

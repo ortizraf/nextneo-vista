@@ -30,11 +30,13 @@ bool containsI(const char *hay, const char *needle) {
 
 LogLevel classify(const char *t) {
   if (!strncmp(t, "[E]", 3) || strstr(t, "][E]") || containsI(t, "error") || containsI(t, "falh") ||
-      containsI(t, "erro ") || containsI(t, "erro:") || containsI(t, "inválid") || containsI(t, "failed"))
+      containsI(t, "erro ") || containsI(t, "erro:") || containsI(t, "inválid") || containsI(t, "failed") ||
+      containsI(t, "invalid"))                               // English texts (UI language) end up here too
     return LogLevel::ERROR;
   if (!strncmp(t, "[W]", 3) || strstr(t, "][W]") || containsI(t, "warn") || containsI(t, "tentativa") ||
       containsI(t, "aguardando retry") || containsI(t, "ausente") || containsI(t, "memória baixa") ||
-      containsI(t, "sem conexão") || containsI(t, "offline") || containsI(t, "http 4") || containsI(t, "http 5"))
+      containsI(t, "sem conexão") || containsI(t, "offline") ||
+      containsI(t, "low memory") || containsI(t, "no connection") || containsI(t, "retrying") || containsI(t, "http 4") || containsI(t, "http 5"))
     return LogLevel::WARN;
   return LogLevel::INFO;
 }

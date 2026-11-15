@@ -9,6 +9,7 @@
 //   - Static scenery (sky gradient, snowy ground, trunk, presents, star) is drawn once into
 //     a PSRAM background that is copied at the start of each frame.
 // Fixed Christmas colours: the user's blue palettes apply to the other patterns.
+#include "core/i18n.h"
 #include "art_pattern.h"
 #include <esp_heap_caps.h>
 #include <math.h>
@@ -76,14 +77,14 @@ class ChristmasPattern : public ArtPattern {
     const time_t now = time(nullptr);
     if (now < 1700000000) return false;
     struct tm t; localtime_r(&now, &t);
-    if (t.tm_mon == 11 && t.tm_mday == 24) { snprintf(buf, n, "V\xC3\xA9spera de Natal!"); return true; }
-    if (t.tm_mon == 11 && t.tm_mday == 25) { snprintf(buf, n, "Feliz Natal!"); return true; }
-    if (t.tm_mon == 11 && t.tm_mday > 25) { snprintf(buf, n, "Boas festas!"); return true; }
+    if (t.tm_mon == 11 && t.tm_mday == 24) { snprintf(buf, n, T("V\xC3\xA9spera de Natal!", "Christmas Eve!")); return true; }
+    if (t.tm_mon == 11 && t.tm_mday == 25) { snprintf(buf, n, T("Feliz Natal!", "Merry Christmas!")); return true; }
+    if (t.tm_mon == 11 && t.tm_mday > 25) { snprintf(buf, n, T("Boas festas!", "Happy holidays!")); return true; }
     struct tm x = t; x.tm_mon = 11; x.tm_mday = 25; x.tm_hour = 0; x.tm_min = 0; x.tm_sec = 0;
     t.tm_hour = t.tm_min = t.tm_sec = 0;
     const long days = (long)((mktime(&x) - mktime(&t) + 43200) / 86400);
-    if (days == 1) snprintf(buf, n, "Falta 1 dia para o Natal");
-    else snprintf(buf, n, "Faltam %ld dias para o Natal", days);
+    if (days == 1) snprintf(buf, n, T("Falta 1 dia para o Natal", "1 day to Christmas"));
+    else snprintf(buf, n, T("Faltam %ld dias para o Natal", "%ld days to Christmas"), days);
     return true;
   }
 

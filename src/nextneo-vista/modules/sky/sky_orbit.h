@@ -26,5 +26,8 @@ bool sgp4(const Sat &s, double minutesSinceEpoch, double r[3]);   // TEME positi
 // Appends the satellites of one CelesTrak TLE text to out[n..cap). mode: 0 = stations
 // (ISS + Tiangong only), 1 = visual (without those two), 2 = STARLINK only. Returns new n.
 int parseTle(const char *txt, Sat *out, int n, int cap, uint8_t mode);
+// Same for CelesTrak FORMAT=csv (OMM mean elements). Needed for catalog numbers >= 100000,
+// which TLE cannot hold (new launches). Columns are found by name in the header.
+int parseOmmCsv(const char *txt, Sat *out, int n, int cap, uint8_t mode);
 
 }  // namespace sky

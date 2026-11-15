@@ -1,3 +1,4 @@
+#include "core/i18n.h"
 #include "web_auth.h"
 #include <Preferences.h>
 #include <esp_random.h>
@@ -66,7 +67,7 @@ void webAuthDeny(WebServer &server) {
     server.sendHeader("Location", "/login?next=" + next);
     server.send(302, "text/plain", "");
   } else {
-    server.send(401, "text/plain; charset=utf-8", "Sessão expirada: entre novamente");
+    server.send(401, "text/plain; charset=utf-8", T("Sessão expirada: entre novamente", "Session expired: log in again"));
   }
 }
 
@@ -107,8 +108,36 @@ font-size:16px;font-weight:700;cursor:pointer}button:active{background:#1767c8}
 <div class="foot">A sessão expira após 10 min sem uso · usuário e senha são alterados no aparelho, em Ajustes</div>
 </form></body></html>)HTML";
 
+static const char LOGIN_PAGE_EN[] PROGMEM = R"HTML(<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>NextNeo Vista</title><style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#edf4ff;
+background:radial-gradient(120% 90% at 50% 0%,#0b2a6b 0%,#050e24 60%,#03091a 100%)}
+.box{width:min(360px,calc(100% - 32px));padding:28px 24px;border-radius:20px;background:#0a1430cc;
+border:1px solid #1e4fd855;box-shadow:0 20px 60px #0008}
+.logo{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.mark{width:42px;height:42px;border-radius:12px;background:linear-gradient(160deg,#38d6f5,#1456e0 70%);
+display:flex;align-items:center;justify-content:center;font-weight:800;color:#03122e;font-size:18px}
+h1{margin:0;font-size:22px;letter-spacing:.3px}.sub{color:#8fa8cc;font-size:14px;margin:0 0 22px}
+label{display:block;font-size:13px;color:#9fb6d0;margin:14px 0 6px}
+input{width:100%;padding:12px 14px;border:1px solid #ffffff26;border-radius:12px;background:#07122a;color:#fff;font-size:16px}
+input:focus{outline:none;border-color:#38d6f5}
+button{margin-top:22px;width:100%;padding:13px;border:0;border-radius:12px;background:#1e90ff;color:#fff;
+font-size:16px;font-weight:700;cursor:pointer}button:active{background:#1767c8}
+.err{margin-top:14px;padding:10px 12px;border-radius:10px;background:#ff5a5a22;color:#ffb3b3;font-size:14px}
+.foot{margin-top:18px;color:#5f7699;font-size:12px;text-align:center}</style></head><body>
+<form class="box" method="post" action="/login">
+<div class="logo"><div class="mark">NV</div><h1>NextNeo Vista</h1></div>
+<p class="sub">Entre para acessar os ajustes do aparelho</p>
+<label for="u">User</label><input id="u" name="u" autocomplete="username" autocapitalize="none" required autofocus>
+<label for="p">Password</label><input id="p" name="p" type="password" autocomplete="current-password" required>
+<input type="hidden" name="next" value="%NEXT%">%ERR%
+<button type="submit">Log in</button>
+<div class="foot">The session expires after 10 min without use · user and password are changed on the device, in Settings</div>
+</form></body></html>)HTML";
+
 static void sendLogin(WebServer &server, const String &next, const char *err) {
-  String page = FPSTR(LOGIN_PAGE);
+  String page = gLang == LANG_EN ? FPSTR(LOGIN_PAGE_EN) : FPSTR(LOGIN_PAGE);
   page.replace("%NEXT%", htmlEsc(next));
   page.replace("%ERR%", err && *err ? String("<div class=\"err\">") + err + "</div>" : String());
   server.sendHeader("Cache-Control", "no-store");
@@ -145,13 +174,13 @@ void webAuthBegin(WebServer &server) {
   });
   server.on("/login", HTTP_POST, [&server]() {
     const String next = safeNext(server.arg("next"));
-    if ((int32_t)(millis() - lockedUntil) < 0) { sendLogin(server, next, "Muitas tentativas. Aguarde 30 segundos."); return; }
+    if ((int32_t)(millis() - lockedUntil) < 0) { sendLogin(server, next, T("Muitas tentativas. Aguarde 30 segundos.", "Too many attempts. Wait 30 seconds.")); return; }
     char h[65]; hashPass(server.arg("p").c_str(), h);
     const bool ok = sameStr(server.arg("u").c_str(), gUser) & sameStr(h, gPassHash);
     if (!ok) {
       if (++fails >= MAX_FAILS) { fails = 0; lockedUntil = millis() + LOCK_MS; }
       Log.println("Web: login recusado");
-      sendLogin(server, next, "Usuário ou senha incorretos.");
+      sendLogin(server, next, T("Usuário ou senha incorretos.", "Wrong user or password."));
       return;
     }
     fails = 0;

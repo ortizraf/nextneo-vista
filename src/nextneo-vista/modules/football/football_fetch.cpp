@@ -63,7 +63,7 @@ static time_t utcFromIso(const char *s) {               // "2026-11-14T22:00Z" /
   const long days = era * 146097L + (long)doe - 719468L;
   return (time_t)(days * 86400L + h * 3600L + m * 60L);
 }
-// ESPN phase notes are English: translate the usual words
+// ESPN phase notes are English: translated to Portuguese; in English only " - " -> " · "
 static void phasePt(const char *in, char *out, size_t n) {
   static const char *const kMap[][2] = {
     {"Quarterfinals", "Quartas de final"}, {"Quarterfinal", "Quartas de final"}, {"Semifinals", "Semifinal"},
@@ -71,7 +71,7 @@ static void phasePt(const char *in, char *out, size_t n) {
     {"League Phase", "Fase de liga"}, {"Group Stage", "Fase de grupos"}, {"1st Leg", "ida"}, {"2nd Leg", "volta"},
     {"Leg 1", "ida"}, {"Leg 2", "volta"}, {"Aggregate", "agreg."}, {"Final", "Final"}, {" - ", " \xC2\xB7 "}};
   String s = in ? in : "";
-  for (auto &p : kMap) s.replace(p[0], p[1]);
+  for (auto &p : kMap) if (gLang != LANG_EN || !strcmp(p[0], " - ")) s.replace(p[0], p[1]);
   copyStr(s.c_str(), out, n);
 }
 
@@ -94,7 +94,7 @@ void footballReleaseConnection() {                       // worker loop, when Fu
 
 static int fetchJson(WiFiClientSecure &client, bool keep, const char *url, PsramBuffer &body,
                      JsonDocument &doc, JsonDocument &filter) {
-  if (!tlsMemoryAvailable("futebol")) { snprintf(net->msg, sizeof net->msg, "mem\xC3\xB3ria baixa p/ conex\xC3\xA3o"); return -1; }
+  if (!tlsMemoryAvailable("futebol")) { snprintf(net->msg, sizeof net->msg, T("mem\xC3\xB3ria baixa p/ conex\xC3\xA3o", "low memory for the connection")); return -1; }
   static bool cfg = false;
   if (!cfg) { espn.setInsecure(); espn.setHandshakeTimeout(10); cfg = true; }
   if (!client.connected()) client.stop();
@@ -106,7 +106,7 @@ static int fetchJson(WiFiClientSecure &client, bool keep, const char *url, Psram
   LogV.printf("Futebol: %.70s -> HTTP %d, %u bytes, %lums\n", url + 8, st, (unsigned)body.length(), (unsigned long)(millis() - t0));
   if (st != 200 || body.overflowed()) {
     client.stop(); if (keep) espnOpen = false;
-    snprintf(net->msg, sizeof net->msg, "ESPN respondeu %d", st);
+    snprintf(net->msg, sizeof net->msg, T("ESPN respondeu %d", "ESPN answered %d"), st);
     Log.printf("Futebol: %.90s -> HTTP %d%s (%u bytes)\n", url + 8, st, body.overflowed() ? " estourou o buffer" : "",
                (unsigned)body.length());
     return st == 200 ? -2 : st;
@@ -116,7 +116,7 @@ static int fetchJson(WiFiClientSecure &client, bool keep, const char *url, Psram
   const DeserializationError je = deserializeJson(doc, body.c_str(), body.length(), DeserializationOption::Filter(filter),
                                                   DeserializationOption::NestingLimit(40));
   if (je) {
-    snprintf(net->msg, sizeof net->msg, "resposta inv\xC3\xA1lida da ESPN");
+    snprintf(net->msg, sizeof net->msg, T("resposta inv\xC3\xA1lida da ESPN", "invalid answer from ESPN"));
     Log.printf("Futebol: %.90s -> JSON %s (%u bytes)\n", url + 8, je.c_str(), (unsigned)body.length());
     return -3;
   }
@@ -184,10 +184,10 @@ static bool fetchLeague(uint8_t L, PsramBuffer &body) {
     m.state = !strcmp(st, "in") ? ST_IN : !strcmp(st, "post") ? ST_POST : ST_PRE;
     const char *detail = ev["status"]["type"]["shortDetail"] | "";
     if (m.state == ST_IN) {
-      if (!strcmp(detail, "HT") || strstr(detail, "Half")) copyStr("Intervalo", m.clock, sizeof m.clock);
+      if (!strcmp(detail, "HT") || strstr(detail, "Half")) copyStr(T("Intervalo", "Half-time"), m.clock, sizeof m.clock);
       else copyStr(ev["status"]["displayClock"] | detail, m.clock, sizeof m.clock);
       live = true;
-    } else if (m.state == ST_POST) copyStr(strstr(detail, "Pen") ? "P\xC3\xAAnaltis" : "Encerrado", m.clock, sizeof m.clock);
+    } else if (m.state == ST_POST) copyStr(strstr(detail, "Pen") ? T("P\xC3\xAAnaltis", "Penalties") : T("Encerrado", "Full time"), m.clock, sizeof m.clock);
     JsonVariantConst comp = ev["competitions"][0];
     // phase: notes[0].headline (knockout legs); usually empty, then the part of
     // altGameNote after the competition name ("UEFA Champions League, League Phase")

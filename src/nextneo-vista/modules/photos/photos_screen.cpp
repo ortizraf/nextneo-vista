@@ -200,7 +200,7 @@ static void buildPhotosScreen(lv_obj_t *scr) {
   lv_obj_set_hidden(img, true);
 
   emptyLbl = lv_label_create(photosView);
-  lv_label_set_text(emptyLbl, "Nenhuma foto ainda\n\nEnvie até 8 fotos em\nhttp://<ip da placa>/photos");
+  lv_label_set_text(emptyLbl, T("Nenhuma foto ainda\n\nEnvie até 8 fotos em\nhttp://<ip da placa>/photos", "No photos yet\n\nUpload up to 8 photos at\nhttp://<board ip>/photos"));
   lv_obj_set_style_text_align(emptyLbl, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_color(emptyLbl, lv_color_hex(0xB8C6D8), 0);
   lv_obj_set_style_text_font(emptyLbl, &lv_font_weather_14, 0);
@@ -229,7 +229,7 @@ static void buildPhotosScreen(lv_obj_t *scr) {
 static void photosOnEnter() {
   // set the label with the real IP
   char b[96];
-  snprintf(b, sizeof b, "Nenhuma foto ainda\n\nEnvie até %d fotos em\nhttp://%s/photos", PHOTO_SLOTS, WiFi.localIP().toString().c_str());
+  snprintf(b, sizeof b, T("Nenhuma foto ainda\n\nEnvie até %d fotos em\nhttp://%s/photos", "No photos yet\n\nUpload up to %d photos at\nhttp://%s/photos"), PHOTO_SLOTS, WiFi.localIP().toString().c_str());
   lv_label_set_text(emptyLbl, b);
   changed = false;
   showBack(true);                                           // visible for 3 s on entry

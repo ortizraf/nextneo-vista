@@ -446,7 +446,8 @@ Sem chamadas de API: tudo é calculado na placa.
 ```text
 GET https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle
 GET https://celestrak.org/NORAD/elements/gp.php?GROUP=visual&FORMAT=tle
-GET https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=tle
+GET https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=csv
+    (CSV: os lançamentos novos têm número de catálogo de 6 dígitos, que o formato TLE não comporta)
     satélites (no máximo a cada 6 h). Sol, Lua e planetas são calculados na placa.
 ```
 
@@ -581,7 +582,7 @@ nextneo-vista/                     # pasta do projeto (o nome é o que você esc
 - **`ScreenLifecycle`** (em `app_screens.h`) é como uma *interface* Java que toda tela implementa: `build`, `onEnter`, `onExit`, `render`, os intervalos de atualização, a lista de **jobs de rede** (`NetJobDef`: nome + função `run()`) e `netRelease` (fechar conexões quando a tela sai).
 - Cada módulo **define a sua** no fim do `<tela>_screen.cpp` (ex.: `kWeatherScreen`). O `screen_manager` só tem a lista delas, na ordem do `enum ScreenID`. Não existe `switch` nem `enum` central de comandos: um job é "o índice `i` na lista de jobs da tela ativa" (`jobs[JOB_UPDATE]` é sempre a atualização periódica). Só os 3 comandos que não pertencem a uma tela (buscar redes, conectar, geocodificar) ficam no `enum GlobalCmd` do core.
 - **Só a tela ativa** busca dados. Cada job leva a tela e a "visita" (epoch) que o pediu; se o usuário saiu, o resultado é descartado. É assim que o app economiza a pouca RAM.
-- **Cada módulo é dono dos próprios dados.** O `sh` global guarda só o que é do app (Wi-Fi, linha de status, busca de redes); o Clima publica em `wx` (`weather.h`) e Finanças em `fin` (`finance.h`). Sempre com o `mtx`.
+- **Cada módulo é dono dos próprios dados e do próprio lock.** O `sh` global guarda só o que é do app (Wi-Fi, linha de status, busca de redes) e é protegido pelo `mtx`. O Clima publica em `wx` com `wxMtx`, Finanças em `fin` com `finMtx`; Radar, Aeroporto e Servidores têm `radarMtx`, `aptMtx` e `srvMtx` (F1 e Futebol já tinham o seu). Um trecho nunca segura dois locks ao mesmo tempo.
 - Os **widgets** (`lv_obj_t *`) são `static` dentro do `.cpp` da tela, como campos `private`. Outras telas não conseguem mexer neles.
 - **Página web por módulo.** Cada tela que tem ajustes na página web (`http://nextneovista.local`) tem um `<tela>_web.cpp` com o seu card e as suas rotas, registrado como `WebSection` (`core/web_ui.h`). O `core/web_config.cpp` só monta a página na ordem da lista `kSections` e cuida do log e do login.
 - Telas grandes separam **rede** (`*_fetch.cpp`/`*_data.cpp`) de **tela** (`*_screen.cpp`). O que os dois lados compartilham fica num `*_internal.h` com `namespace` próprio (equivale a classes *package-private*).
@@ -603,6 +604,24 @@ nextneo-vista/                     # pasta do projeto (o nome é o que você esc
 4. Ponha o ícone no menu (`modules/menu/menu.cpp`, função `buildMenuScreen`) chamando `switchScreen(SCREEN_NOVA)`.
 5. Se ela tiver ajustes na página web: crie `modules/nova/nova_web.cpp` com uma função que acrescenta o card (`void novaCard(String &html)`), outra que registra as rotas (`void novaRoutes(WebServer &server)`, começando cada handler com `WEB_REQUIRE_LOGIN(server)`) e `const WebSection kNovaWeb = {"nova", novaCard, novaRoutes};`. Declare-a em `core/web_ui.h` e ponha `&kNovaWeb` em `kSections` (`core/web_config.cpp`), na posição em que o card deve aparecer.
 6. Inclua a tela nos testes (seção 10.6) e rode `pio test`. O teste `test_registry_lists_every_screen_in_order` avisa se a ordem estiver errada.
+
+### 7.4 Idiomas (português e inglês)
+
+O app tem **português (padrão)** e **inglês**: as 13 telas, o menu e a página web. Os logs continuam em português.
+
+- **Escolher o idioma:** em **Ajustes → Tela → Idioma**, na placa, ou no card **Idioma / Language** da página web. A placa reinicia ao salvar, e todas as telas são criadas de novo no idioma escolhido. A escolha fica salva (`prefs`, chave `lang`).
+- **Escrever um texto novo:** use `T("português", "English")` (`core/i18n.h`), como num `ResourceBundle` do Java, só que com os dois textos no mesmo lugar:
+
+  ```cpp
+  setLabelIfChanged(lbl, T("Chuva", "Rain"));
+  snprintf(b, sizeof b, T("Rodada %d de %d", "Round %d of %d"), r, n);   // os dois com os mesmos %
+  ```
+- **Dias e meses:** `weekdayShort()`, `weekdayLong()`, `monthShort()`, `monthLong()`.
+- **Cuidados:**
+  - Uma tabela `static` fora de função é montada antes de o idioma ser carregado. Use duas tabelas e escolha pelo `gLang`, como em `statCaption()` de `finance_screen.cpp`.
+  - Não envolva só um pedaço de texto concatenado (`LV_SYMBOL_UP " texto"`): traduza a expressão inteira.
+  - Se o código **compara** um texto (por exemplo, o status que começa com "Falha"), compare com o mesmo `T()`.
+- **Testar em inglês na placa sem mudar o idioma salvo:** `PLATFORMIO_BUILD_FLAGS="-DNNV_FORCE_LANG=1" QUICK=1 ./tools/deploy_nextneo_vista.sh`. Depois, faça um deploy normal para voltar ao firmware de sempre.
 
 **Stack:** PlatformIO Core 6.x, plataforma pioarduino (Arduino-ESP32 3.x), LVGL 9.6 (fixado em `~9.6.0`: o app usa a API por flag, `lv_obj_set_hidden`...), GFX Library for Arduino, ArduinoJson 7, JPEGDEC. A configuração do LVGL vem por flags (`-DLV_CONF_SKIP`), sem `lv_conf.h`.
 
@@ -803,7 +822,8 @@ pio test -e native
 | `test/test_native_servers/` | Link do Beszel (URL + ID) e a regra de "servidor fora do ar não atrasa o outro": servidores saudáveis primeiro, o que falhou só a cada 60 s, inclusive quando o relógio interno dá a volta (~49 dias). | 10 |
 | `test/test_native_radar/` | Distância entre coordenadas, filtro dos aviões mais próximos, projeção na tela e leitura do JSON do ADSB.lol. | 6 |
 | `test/test_native_text/` | Troca de caracteres que as fontes não têm (travessão, aspas curvas, emoji). | 5 |
-| `test/test_native_sky/` | Órbitas do Céu: leitura do formato TLE (com um TLE público da ISS) e o SGP4 colocando a ISS em órbita baixa. | 6 |
+| `test/test_native_sky/` | Órbitas do Céu: leitura dos formatos TLE (com um TLE público da ISS) e CSV (lançamentos novos, catálogo de 6 dígitos) e o SGP4 colocando os satélites em órbita baixa. | 8 |
+| `test/test_native_i18n/` | Português como padrão, inglês quando escolhido, nomes de dias e meses e textos do clima nos dois idiomas. | 6 |
 
 **Como isso funciona:** o ambiente `[env:native]` do `platformio.ini` compila só os arquivos `.cpp` puros (sem `Arduino.h` nem LVGL) com o compilador do computador (`g++`/`clang`). Por isso essas funções ficam em arquivos próprios, como `servers_retry.cpp` e `finance_symbols.cpp`, e o resto do app só as chama.
 

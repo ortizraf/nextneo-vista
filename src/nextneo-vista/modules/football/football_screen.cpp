@@ -28,7 +28,11 @@ using namespace football;
 static lv_obj_t *footballView;
 
 // ================================================================ data
-static const char *const kLeagueName[L_COUNT] = {"CHAMPIONS LEAGUE", "LIBERTADORES", "MUNDIAL DE CLUBES", "COPA DO MUNDO", "SUL-AMERICANA", "EUROPA LEAGUE", "INTERCONTINENTAL"};
+static const char *leagueName(int L) {                    // competition title, current language
+  static const char *const pt[L_COUNT] = {"CHAMPIONS LEAGUE", "LIBERTADORES", "MUNDIAL DE CLUBES", "COPA DO MUNDO", "SUL-AMERICANA", "EUROPA LEAGUE", "INTERCONTINENTAL"};
+  static const char *const en[L_COUNT] = {"CHAMPIONS LEAGUE", "LIBERTADORES", "CLUB WORLD CUP", "WORLD CUP", "SUDAMERICANA", "EUROPA LEAGUE", "INTERCONTINENTAL"};
+  return gLang == LANG_EN ? en[L] : pt[L];
+}
 // importance in "Ao vivo": UCL / Copa / LIB in a tier of their own (a phase bonus of up to +40 never lifts
 // another competition above them); favourites (+1000) still come first
 static const uint8_t kLeagueWeight[L_COUNT] = {220, 210, 60, 230, 40, 40, 60};
@@ -51,9 +55,12 @@ static bool isFavorite(const char *abbr) {
 static int importance(const FMatch &m) {
   int s = kLeagueWeight[m.league];
   if (isFavorite(m.home.abbr) || isFavorite(m.away.abbr)) s += 1000;
-  if (strstr(m.phase, "Final") && !strstr(m.phase, "Quartas") && !strstr(m.phase, "Oitavas")) s += strstr(m.phase, "Semi") ? 25 : 40;
-  else if (strstr(m.phase, "Quartas")) s += 15;
-  else if (strstr(m.phase, "Oitavas")) s += 8;
+  // phase text is Portuguese (translated) or ESPN's English (English UI)
+  const bool qf = strstr(m.phase, "Quartas") || strstr(m.phase, "Quarterfinal");
+  const bool r16 = strstr(m.phase, "Oitavas") || strstr(m.phase, "Round of 16");
+  if (strstr(m.phase, "Final") && !qf && !r16) s += strstr(m.phase, "Semi") ? 25 : 40;
+  else if (qf) s += 15;
+  else if (r16) s += 8;
   return s;
 }
 
@@ -194,10 +201,9 @@ static void fmtWhen(uint32_t start, char *out, size_t n) {
   if (!start) { out[0] = 0; return; }
   const time_t now = time(nullptr), t = (time_t)start;
   struct tm a, b; localtime_r(&t, &a); localtime_r(&now, &b);
-  static const char *const wd[] = {"Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "S\xC3\xA1" "b"};
-  if (a.tm_yday == b.tm_yday && a.tm_year == b.tm_year) snprintf(out, n, "Hoje \xC2\xB7 %02d:%02d", a.tm_hour, a.tm_min);
-  else if (a.tm_yday == b.tm_yday + 1 && a.tm_year == b.tm_year) snprintf(out, n, "Amanh\xC3\xA3 \xC2\xB7 %02d:%02d", a.tm_hour, a.tm_min);
-  else snprintf(out, n, "%s %02d/%02d \xC2\xB7 %02d:%02d", wd[a.tm_wday], a.tm_mday, a.tm_mon + 1, a.tm_hour, a.tm_min);
+  if (a.tm_yday == b.tm_yday && a.tm_year == b.tm_year) snprintf(out, n, T("Hoje \xC2\xB7 %02d:%02d", "Today \xC2\xB7 %02d:%02d"), a.tm_hour, a.tm_min);
+  else if (a.tm_yday == b.tm_yday + 1 && a.tm_year == b.tm_year) snprintf(out, n, T("Amanh\xC3\xA3 \xC2\xB7 %02d:%02d", "Tomorrow \xC2\xB7 %02d:%02d"), a.tm_hour, a.tm_min);
+  else snprintf(out, n, "%s %02d/%02d \xC2\xB7 %02d:%02d", weekdayShort(a.tm_wday), a.tm_mday, a.tm_mon + 1, a.tm_hour, a.tm_min);
 }
 
 static void fillCard(CardUi &c, const FMatch &m, bool top, uint32_t logoVersion) {
@@ -209,7 +215,7 @@ static void fillCard(CardUi &c, const FMatch &m, bool top, uint32_t logoVersion)
   if (lg) { lv_image_set_src(c.lgImg, lg); show(c.lgImg, true); show(c.comp, false); }
   else { show(c.lgImg, false); show(c.comp, true); setLabelIfChanged(c.comp, kLeagueShort[m.league]); }
   lv_obj_set_style_text_color(c.comp, lv_color_hex(hi ? 0xFFCE5A : 0x7DB0FF), 0);
-  setLabelIfChanged(c.phase, m.phase[0] ? m.phase : kLeagueName[m.league]);   // phase, else the competition name
+  setLabelIfChanged(c.phase, m.phase[0] ? m.phase : leagueName(m.league));   // phase, else the competition name
   lv_obj_set_style_text_color(c.phase, lv_color_hex(hi ? 0xFFDB8A : 0x9AA8C0), 0);
   const FTeam *t[2] = {&m.home, &m.away};
   for (int s = 0; s < 2; ++s) {
@@ -234,8 +240,8 @@ static void fillCard(CardUi &c, const FMatch &m, bool top, uint32_t logoVersion)
   lv_obj_set_style_border_width(c.card, hi ? 2 : 1, 0);
   // state pill
   if (m.state == ST_IN) {
-    const bool ht = !strcmp(m.clock, "Intervalo");
-    snprintf(b, sizeof b, "%s%s", ht ? "" : "\xE2\x80\xA2 AO VIVO  ", m.clock);
+    const bool ht = !strcmp(m.clock, T("Intervalo", "Half-time"));
+    snprintf(b, sizeof b, "%s%s", ht ? "" : T("\xE2\x80\xA2 AO VIVO  ", "\xE2\x80\xA2 LIVE  "), m.clock);
     setLabelIfChanged(c.pill, b);
     lv_obj_set_style_bg_opa(c.pill, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(c.pill, lv_color_hex(ht ? 0x7A5A0A : 0xA0141E), 0);
@@ -297,13 +303,13 @@ static void renderList() {
     for (int i = 0; i < nl && n < NCARDS; ++i) pick[n++] = live[i];
     for (int i = 0; i < nn && n < NCARDS; ++i) pick[n++] = next[i];
     for (int i = 0; i < nd && n < NCARDS; ++i) pick[n++] = done[i];
-    static const char *const kWin[3] = {"pr\xC3\xB3ximas 48 h", "pr\xC3\xB3ximos 4 dias", "pr\xC3\xB3ximos 7 dias"};
+    static const char *const kWin[3] = {T("pr\xC3\xB3ximas 48 h", "next 48 h"), T("pr\xC3\xB3ximos 4 dias", "next 4 days"), T("pr\xC3\xB3ximos 7 dias", "next 7 days")};
     char msg[96];
     if (anyLive || !d.updatedMs) msg[0] = 0;
-    else if (nn) snprintf(msg, sizeof msg, "Nenhum jogo ao vivo  \xC2\xB7  %s", kWin[used]);
-    else if (nd) snprintf(msg, sizeof msg, "Sem jogos nos pr\xC3\xB3ximos 7 dias  \xC2\xB7  \xC3\xBAltimos resultados");
-    else snprintf(msg, sizeof msg, "Nenhum jogo ao vivo nem nos pr\xC3\xB3ximos 7 dias");
-    setLabelIfChanged(emptyLbl, !d.updatedMs ? "Carregando jogos..." : msg);
+    else if (nn) snprintf(msg, sizeof msg, T("Nenhum jogo ao vivo  \xC2\xB7  %s", "No live match  \xC2\xB7  %s"), kWin[used]);
+    else if (nd) snprintf(msg, sizeof msg, T("Sem jogos nos pr\xC3\xB3ximos 7 dias  \xC2\xB7  \xC3\xBAltimos resultados", "No matches in the next 7 days  \xC2\xB7  latest results"));
+    else snprintf(msg, sizeof msg, T("Nenhum jogo ao vivo nem nos pr\xC3\xB3ximos 7 dias", "No live match and none in the next 7 days"));
+    setLabelIfChanged(emptyLbl, !d.updatedMs ? T("Carregando jogos...", "Loading matches...") : msg);
   } else {
     const int L1 = kTabLeague[tab], L2 = kTabExtra[tab];
     if (L2 < 0) { for (int i = 0; i < d.n[L1] && n < NCARDS; ++i) pick[n++] = &d.m[L1][i]; }
@@ -320,7 +326,7 @@ static void renderList() {
         for (int j = i; j > 0 && before(all[j], all[j - 1]); --j) { const FMatch *t = all[j]; all[j] = all[j - 1]; all[j - 1] = t; }
       for (int i = 0; i < k && n < NCARDS; ++i) pick[n++] = all[i];
     }
-    setLabelIfChanged(emptyLbl, n ? "" : (d.updatedMs ? "Sem jogos nesta semana" : "Carregando jogos..."));
+    setLabelIfChanged(emptyLbl, n ? "" : (d.updatedMs ? T("Sem jogos nesta semana", "No matches this week") : T("Carregando jogos...", "Loading matches...")));
   }
   show(emptyLbl, lv_label_get_text(emptyLbl)[0] != 0);
   for (int i = 0; i < NCARDS; ++i) {
@@ -385,7 +391,7 @@ static void buildFootballScreen(lv_obj_t *scr) {
   lv_obj_set_style_radius(footballView, 0, 0);
   lv_obj_set_scrollable(footballView, false);
 
-  lv_obj_t *title = makeLabel(footballView, "Futebol", &lv_font_weather_20, 0xFFFFFF);
+  lv_obj_t *title = makeLabel(footballView, T("Futebol", "Football"), &lv_font_weather_20, 0xFFFFFF);
   lv_obj_set_pos(title, 56, 10);
   statusLbl = makeLabel(footballView, "", &lv_font_weather_14, 0x8CA0BE);
   lv_obj_set_width(statusLbl, 250); lv_obj_set_style_text_align(statusLbl, LV_TEXT_ALIGN_RIGHT, 0);
@@ -405,7 +411,7 @@ static void buildFootballScreen(lv_obj_t *scr) {
   lv_obj_set_scrollbar_mode(tabBar, LV_SCROLLBAR_MODE_OFF);
   lv_obj_set_scroll_chain_hor(tabBar, false);
   lv_obj_set_scroll_elastic(tabBar, false);
-  static const char *const kTabTxt[NTAB] = {"Ao vivo", "UCL", "LIB", "MUN", "COPA", "SUL", "UEL"};   // until the logos arrive
+  static const char *const kTabTxt[NTAB] = {T("Ao vivo", "Live"), "UCL", "LIB", "MUN", "COPA", "SUL", "UEL"};   // until the logos arrive
   for (int i = 0; i < NTAB; ++i) {
     lv_obj_t *b = tabBtn[i] = lv_button_create(tabBar);
     lv_obj_set_size(b, i == 0 ? 132 : 98, 34);
@@ -441,7 +447,7 @@ static void buildFootballScreen(lv_obj_t *scr) {
   lv_obj_set_scroll_dir(list, LV_DIR_VER);
   lv_obj_set_style_bg_color(list, lv_color_hex(0x1E4FD8), LV_PART_SCROLLBAR);
 
-  emptyLbl = makeLabel(list, "Carregando jogos...", &lv_font_weather_20, 0x9AAECC);
+  emptyLbl = makeLabel(list, T("Carregando jogos...", "Loading matches..."), &lv_font_weather_20, 0x9AAECC);
   lv_obj_set_width(emptyLbl, CARD_W); lv_obj_set_style_text_align(emptyLbl, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_pad_ver(emptyLbl, 6, 0);
   for (int i = 0; i < NCARDS; ++i) buildCard(i);
@@ -478,11 +484,11 @@ static void footballRender() {
   }
   char b[64];
   if (ui->msg[0] && !ui->updatedMs) snprintf(b, sizeof b, "%s", ui->msg);
-  else if (!ui->updatedMs) snprintf(b, sizeof b, "conectando \xC3\xA0 ESPN...");
+  else if (!ui->updatedMs) snprintf(b, sizeof b, T("conectando \xC3\xA0 ESPN...", "connecting to ESPN..."));
   else {
     const uint32_t s = (millis() - ui->updatedMs) / 1000;
-    if (s < 60) snprintf(b, sizeof b, "\xE2\x80\xA2 atualizado h\xC3\xA1 %lu s", (unsigned long)s);
-    else snprintf(b, sizeof b, "\xE2\x80\xA2 atualizado h\xC3\xA1 %lu min", (unsigned long)(s / 60));
+    if (s < 60) snprintf(b, sizeof b, T("\xE2\x80\xA2 atualizado h\xC3\xA1 %lu s", "\xE2\x80\xA2 updated %lu s ago"), (unsigned long)s);
+    else snprintf(b, sizeof b, T("\xE2\x80\xA2 atualizado h\xC3\xA1 %lu min", "\xE2\x80\xA2 updated %lu min ago"), (unsigned long)(s / 60));
   }
   setLabelIfChanged(statusLbl, b);
   lv_obj_set_style_text_color(statusLbl, lv_color_hex(ui->msg[0] ? 0xFFD477 : 0x8CA0BE), 0);

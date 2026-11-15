@@ -7,6 +7,8 @@
 
 namespace airport {
 
+extern SemaphoreHandle_t aptMtx;             // guards the data below (not the app-wide mtx)
+
 enum FeatType : uint8_t { F_APRON, F_TERMINAL, F_TAXIWAY, F_RUNWAY, F_PARKING, F_HOLDING };
 struct Feature { uint8_t type; bool closed; uint16_t count; uint32_t first; float widthM; char ref[8]; };
 constexpr int MAX_FEATURES = 900, MAX_POINTS = 30000;

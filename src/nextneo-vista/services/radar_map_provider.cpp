@@ -1,3 +1,4 @@
+#include "core/i18n.h"
 #include "app_log.h"
 #include "radar_map_provider.h"
 #include "aircraft_data_provider.h"
@@ -64,7 +65,7 @@ int drawBlock(JPEGDRAW *draw) {
 
 bool fetchRadarMap(double lat, double lon, float radiusKm, uint16_t *out, int size,
                    uint16_t bgColor565, char *error, size_t errorCapacity) {
-  if (WiFi.status() != WL_CONNECTED) { snprintf(error, errorCapacity, "Sem Wi-Fi"); return false; }
+  if (WiFi.status() != WL_CONNECTED) { snprintf(error, errorCapacity, T("Sem Wi-Fi", "No Wi-Fi")); return false; }
   // Square bbox in Web Mercator (EPSG:3857). Mercator stretches by 1/cos(lat),
   // so the ground radius is scaled to keep the same px/km as the radar.
   constexpr double R = 6378137.0, rad = 0.017453292519943295;
@@ -84,7 +85,7 @@ bool fetchRadarMap(double lat, double lon, float radiusKm, uint16_t *out, int si
   const int status = httpsFetch(client, url, jpegBody, 15000, false);
   client.stop();
   if (status != HTTP_CODE_OK) {
-    snprintf(error, errorCapacity, status < 0 ? "Mapa: erro %d" : "Mapa: HTTP %d", status);
+    snprintf(error, errorCapacity, status < 0 ? T("Mapa: erro %d", "Map: error %d") : T("Mapa: HTTP %d", "Map: HTTP %d"), status);
     return false;
   }
   // JPEGDEC keeps ~18 KB of state: put it in PSRAM, never on the task stack.
@@ -93,7 +94,7 @@ bool fetchRadarMap(double lat, double lon, float radiusKm, uint16_t *out, int si
   if (!mem || !target) {
     if (mem) heap_caps_free(mem);
     if (target) heap_caps_free(target);
-    snprintf(error, errorCapacity, "Mapa: sem memória");
+    snprintf(error, errorCapacity, T("Mapa: sem memória", "Map: no memory"));
     return false;
   }
   JPEGDEC *jpeg = new (mem) JPEGDEC();
@@ -108,10 +109,10 @@ bool fetchRadarMap(double lat, double lon, float radiusKm, uint16_t *out, int si
     jpeg->setPixelType(RGB565_LITTLE_ENDIAN);
     jpeg->setUserPointer(target);
     ok = jpeg->decode(0, 0, 0) == 1;
-    if (!ok) snprintf(error, errorCapacity, "Mapa: JPEG erro %d", jpeg->getLastError());
+    if (!ok) snprintf(error, errorCapacity, T("Mapa: JPEG erro %d", "Map: JPEG error %d"), jpeg->getLastError());
     jpeg->close();
   } else {
-    snprintf(error, errorCapacity, "Mapa: JPEG inválido");
+    snprintf(error, errorCapacity, T("Mapa: JPEG inválido", "Map: invalid JPEG"));
   }
   jpeg->~JPEGDEC();
   heap_caps_free(mem);

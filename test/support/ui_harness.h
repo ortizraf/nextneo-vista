@@ -16,24 +16,26 @@ namespace ui {
 // NONE and MENU). `caption` is the text under the menu icon.
 struct ScreenCase {
   ScreenID id;
-  const char *caption;
+  const char *pt, *en;               // menu caption in each language
+  // In the current UI language (chosen at boot), so the tests work with either.
+  const char *caption() const { return T(pt, en); }
   lv_obj_t *view() const { return screenView(id); }   // container owned by the screen's module
 };
 
 static const ScreenCase kScreens[] = {
-  {SCREEN_WEATHER,      "Clima"},
-  {SCREEN_FINANCE,      "Finanças"},
-  {SCREEN_CALENDARIO,   "Calendário"},
-  {SCREEN_FLIGHT_RADAR, "Radar"},
-  {SCREEN_SETTINGS,     "Ajustes"},
-  {SCREEN_SERVERS,      "Servidores"},
-  {SCREEN_CLOCK,        "Relógio"},
-  {SCREEN_AIRPORT,      "Aeroporto"},
-  {SCREEN_PHOTOS,       "Fotos"},
-  {SCREEN_SKY,          "C\xC3\xA9u"},
-  {SCREEN_F1,           "F1"},
-  {SCREEN_ART,          "Arte"},
-  {SCREEN_FOOTBALL,     "Futebol"},
+  {SCREEN_WEATHER,      "Clima", "Weather"},
+  {SCREEN_FINANCE,      "Finanças", "Finance"},
+  {SCREEN_CALENDARIO,   "Calendário", "Calendar"},
+  {SCREEN_FLIGHT_RADAR, "Radar", "Radar"},
+  {SCREEN_SETTINGS,     "Ajustes", "Settings"},
+  {SCREEN_SERVERS,      "Servidores", "Servers"},
+  {SCREEN_CLOCK,        "Relógio", "Clock"},
+  {SCREEN_AIRPORT,      "Aeroporto", "Airport"},
+  {SCREEN_PHOTOS,       "Fotos", "Photos"},
+  {SCREEN_SKY,          "C\xC3\xA9u", "Sky"},
+  {SCREEN_F1,           "F1", "F1"},
+  {SCREEN_ART,          "Arte", "Art"},
+  {SCREEN_FOOTBALL,     "Futebol", "Football"},
 };
 static constexpr int kScreenCount = sizeof(kScreens) / sizeof(kScreens[0]);
 static_assert(kScreenCount == SCREEN_COUNT - 2, "every app screen needs a test case");
@@ -146,8 +148,8 @@ inline void assertOnMenu() {
 }
 
 inline void assertOnScreen(const ScreenCase &c) {
-  TEST_ASSERT_EQUAL_MESSAGE(c.id, activeScreenId(), c.caption);
-  assertOnlyVisible(c.view(), c.caption);
+  TEST_ASSERT_EQUAL_MESSAGE(c.id, activeScreenId(), c.caption());
+  assertOnlyVisible(c.view(), c.caption());
 }
 
 // ---- memory

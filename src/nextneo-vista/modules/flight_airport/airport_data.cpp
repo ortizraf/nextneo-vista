@@ -21,6 +21,8 @@
 
 namespace airport {
 
+SemaphoreHandle_t aptMtx = xSemaphoreCreateMutex();
+
 // ---------------------------------------------------------------- map model (PSRAM)
 Feature *feats;
 int16_t *pts;                 // x,y pairs, local metres (east, north) around the airport centre
@@ -236,7 +238,7 @@ static bool fetchMap(const char *code, double lat, double lon) {
   if (!feats) {
     feats = (Feature *)psramCalloc(MAX_FEATURES, sizeof(Feature));
     pts = (int16_t *)psramMalloc(MAX_POINTS * 2 * sizeof(int16_t));
-    if (!feats || !pts) { snprintf(mapMessage, sizeof mapMessage, "Sem memória para o mapa"); return false; }
+    if (!feats || !pts) { snprintf(mapMessage, sizeof mapMessage, T("Sem memória para o mapa", "No memory for the map")); return false; }
   }
   // ~2.4 km around the reference point covers the airfield of the airports in the list
   char q[640];
@@ -254,7 +256,7 @@ static bool fetchMap(const char *code, double lat, double lon) {
   WiFiClientSecure client;
   client.setInsecure();                 // public read-only data
   client.setHandshakeTimeout(15);
-  if (!tlsMemoryAvailable("overpass")) { snprintf(mapMessage, sizeof mapMessage, "Memória baixa p/ TLS"); return false; }
+  if (!tlsMemoryAvailable("overpass")) { snprintf(mapMessage, sizeof mapMessage, T("Memória baixa p/ TLS", "Low memory for TLS")); return false; }
   const uint32_t t0 = millis();
   // main instance first, then public mirrors (the main one answers 406/429 to some clients)
   static const char *kEndpoints[] = {"https://overpass-api.de/api/interpreter",
@@ -275,7 +277,7 @@ static bool fetchMap(const char *code, double lat, double lon) {
     if (status == 200) status = -2;    // 200 with an HTML error page
   }
   if (status != 200 || resp.overflowed()) {
-    snprintf(mapMessage, sizeof mapMessage, "Servidor do mapa ocupado (%d), tentando outro em 30 s", status);
+    snprintf(mapMessage, sizeof mapMessage, T("Servidor do mapa ocupado (%d), tentando outro em 30 s", "Map server busy (%d), trying another in 30 s"), status);
     Log.printf("Airport: Overpass HTTP %d (%u bytes)\n", status, (unsigned)resp.length());
     return false;
   }
@@ -584,19 +586,19 @@ static void fetchDetailsInto(AptDetails &out) {
 // on a tap; the icons keep gliding by prediction meanwhile.
 static void fetchTappedDetails() {
   AptDetails job = {};
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(aptMtx, portMAX_DELAY);
   const bool pending = det.hex[0] && det.state == DET_PENDING;
   if (pending) { snprintf(job.hex, sizeof job.hex, "%s", det.hex); snprintf(job.cs, sizeof job.cs, "%s", det.cs); }
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(aptMtx);
   if (!pending) return;
   lolClient.stop();                                       // one TLS context at a time
   fetchDetailsInto(job);
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(aptMtx, portMAX_DELAY);
   int k = detFind(job.hex);
   if (k < 0 && detCacheN < DET_CACHE) { k = detCacheN++; detTries[k] = 0; detRetryAt[k] = 0; }
   if (k >= 0) { detCache[k] = job; if (job.state == DET_FAILED) ++detTries[k]; }
   if (!strcmp(det.hex, job.hex)) det = job;               // shown now (failure shows "—")
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(aptMtx);
 }
 
 // ---------------------------------------------------------------- Aena board (CGH only)
@@ -699,7 +701,7 @@ static bool fetchAenaBoard(bool arrivals, AenaStand *out, int &outN) {
 // Network task: refresh one board when due, then merge (one aircraft per stand; a boarding
 // departure wins over the arrival that brought the aircraft there).
 static void updateAena(const char *code) {
-  if (!isCgh(code)) { if (aenaN) { xSemaphoreTake(mtx, portMAX_DELAY); aenaN = 0; xSemaphoreGive(mtx); } return; }
+  if (!isCgh(code)) { if (aenaN) { xSemaphoreTake(aptMtx, portMAX_DELAY); aenaN = 0; xSemaphoreGive(aptMtx); } return; }
   const uint32_t now = millis();
   const bool depDue = !aenaDepMs || now - aenaDepMs >= 180000UL, arrDue = !aenaArrMs || now - aenaArrMs >= 180000UL;
   if (!depDue && !arrDue) return;
@@ -718,9 +720,9 @@ static void updateAena(const char *code) {
     for (int k = 0; k < m && !skip; ++k) skip = !strcmp(merged[k].box, a.box);   // boarding departure wins
     if (!skip) merged[m++] = a;
   }
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(aptMtx, portMAX_DELAY);
   memcpy(aenaStands, merged, m * sizeof(AenaStand)); aenaN = m;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(aptMtx);
 }
 
 // Stand position from the OSM map: parking_position line (nose towards the terminal) or gate node.
@@ -871,13 +873,13 @@ bool airportFetch() {
     // adsb.fi closes the connection after every answer (measured: always a new one), so a
     // kept session would only hold a TLS context in internal RAM for nothing.
     if (fetchExtra(fiUrl, SRC_ADSBFI, lat, lon, radiusNm, fetchBuf, fetchSrc, fetchGeom, n)) { okMask |= SRC_ADSBFI; okAgain(fi); }
-    else { got429 = lastFetchStatus == 429; rest(fi, "adsb.fi", lastFetchStatus); snprintf(err, sizeof err, "adsb.fi sem resposta"); }
+    else { got429 = lastFetchStatus == 429; rest(fi, "adsb.fi", lastFetchStatus); snprintf(err, sizeof err, T("adsb.fi sem resposta", "adsb.fi not answering")); }
   }
   // fallback: ADSB.lol, only while adsb.fi is resting (or just failed in this cycle)
   if (!okMask && (fi.backoffMs || got429) && due(lol, LOL_GAP) && screenJobStillCurrent()) {
     tried = true; lol.lastMs = millis(); lolOpen = true; n = 0;
     if (fetchExtra(lolUrl, SRC_ADSBLOL, lat, lon, radiusNm, fetchBuf, fetchSrc, fetchGeom, n, &lolClient)) { okMask |= SRC_ADSBLOL; okAgain(lol); }
-    else { if (lastFetchStatus == 429) got429 = true; rest(lol, "ADSB.lol", lastFetchStatus); snprintf(err, sizeof err, "ADSB.lol sem resposta"); }
+    else { if (lastFetchStatus == 429) got429 = true; rest(lol, "ADSB.lol", lastFetchStatus); snprintf(err, sizeof err, T("ADSB.lol sem resposta", "ADSB.lol not answering")); }
     lastLolStatus = lastFetchStatus;
   }
   if (!tried) return true;                                  // too soon: keep the current positions
@@ -919,9 +921,9 @@ bool airportFetch() {
   // Aena: aircraft at a stand that ADS-B does not see (CGH only). Fetched AFTER positions.
   if (ok && screenJobStillCurrent()) {
     updateAena(code);
-    xSemaphoreTake(mtx, portMAX_DELAY);
+    xSemaphoreTake(aptMtx, portMAX_DELAY);
     static AenaStand st[AENA_MAX]; const int sn = aenaN; memcpy(st, aenaStands, sn * sizeof(AenaStand));
-    xSemaphoreGive(mtx);
+    xSemaphoreGive(aptMtx);
     for (int k = 0; k < sn && n < MAX_AC; ++k) {
       bool live = false;                                   // already flying/taxiing in ADS-B: real position wins
       for (int i = 0; i < n; ++i) {
@@ -949,13 +951,13 @@ bool airportFetch() {
   if (ok) LogV.printf("Airport: %u aeronaves (%d em solo) | fontes %c%c%c | em >1 fonte %d, so ADSB.lol %d, so airplanes.live %d, so adsb.fi %d\n",
                      n, g, okMask & SRC_ADSBLOL ? 'L' : '-', okMask & SRC_AIRPLANES ? 'A' : '-', okMask & SRC_ADSBFI ? 'F' : '-',
                      multi, byOnly[0], byOnly[1], byOnly[2]);
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(aptMtx, portMAX_DELAY);
   if (ok) {
     memcpy(traffic->ac, fetchBuf, n * sizeof(Aircraft)); memcpy(traffic->src, fetchSrc, n); memcpy(traffic->geomFt, fetchGeom, n * sizeof(float)); memcpy(traffic->memoS, memo, n * sizeof(uint16_t));
     traffic->count = n; traffic->sourcesOk = okMask; traffic->okMs = millis(); traffic->failed = false;
   } else { traffic->failed = true; snprintf(traffic->error, sizeof traffic->error, "%s", err); }
   traffic->version++;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(aptMtx);
   if (lastCycleStart && cycleStart - lastCycleStart > 8000)
     Log.printf("Airport: atualização lenta: intervalo %lums (ciclo %lums, fontes %c%c, ADSB.lol %d)\n",
                (unsigned long)(cycleStart - lastCycleStart), (unsigned long)(millis() - cycleStart),

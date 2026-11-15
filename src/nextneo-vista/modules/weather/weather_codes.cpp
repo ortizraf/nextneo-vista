@@ -1,19 +1,20 @@
 // WMO weather codes (Open-Meteo) -> Portuguese text and rain helpers. Pure functions.
 #include "modules/weather/weather_codes.h"
+#include "core/i18n.h"
 
 const char *weatherText(int c, bool night) {
-  if (c == 0) return night ? "C\xC3\xA9u limpo" : "Ensolarado";
-  if (c == 1) return "Poucas nuvens";
-  if (c == 2) return "Parcialmente nublado";
-  if (c == 3) return "Nublado";
-  if (c == 45 || c == 48) return "Neblina";
-  if (c >= 51 && c <= 57) return "Garoa";
-  if (c >= 61 && c <= 67) return "Chuva";
-  if (c >= 71 && c <= 77) return "Neve";
-  if (c >= 80 && c <= 82) return "Pancadas";
-  if (c == 85 || c == 86) return "Neve fraca";
-  if (c >= 95) return "Tempestade";
-  return "Sem dados";
+  if (c == 0) return night ? T("C\xC3\xA9u limpo", "Clear sky") : T("Ensolarado", "Sunny");
+  if (c == 1) return T("Poucas nuvens", "Mostly clear");
+  if (c == 2) return T("Parcialmente nublado", "Partly cloudy");
+  if (c == 3) return T("Nublado", "Overcast");
+  if (c == 45 || c == 48) return T("Neblina", "Fog");
+  if (c >= 51 && c <= 57) return T("Garoa", "Drizzle");
+  if (c >= 61 && c <= 67) return T("Chuva", "Rain");
+  if (c >= 71 && c <= 77) return T("Neve", "Snow");
+  if (c >= 80 && c <= 82) return T("Pancadas", "Showers");
+  if (c == 85 || c == 86) return T("Neve fraca", "Light snow");
+  if (c >= 95) return T("Tempestade", "Thunderstorm");
+  return T("Sem dados", "No data");
 }
 
 bool isRainCode(int c) {

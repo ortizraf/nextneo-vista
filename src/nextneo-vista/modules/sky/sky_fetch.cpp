@@ -18,7 +18,9 @@ bool skyFetch() {
   if (satEverFetched && millis() - satFetchedMs < 6UL * 3600UL * 1000UL) return true;
   static const char *kUrl[3] = {"https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle",
                                 "https://celestrak.org/NORAD/elements/gp.php?GROUP=visual&FORMAT=tle",
-                                "https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=tle"};
+                                // CSV: new launches have 6-digit catalog numbers, which TLE cannot hold
+                                // (FORMAT=tle answers 404 "No GP data found" for this group)
+                                "https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=csv"};
   satFetching = true;
   Sat *list = (Sat *)heap_caps_malloc(sizeof(Sat) * MAX_SATS, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!list) { satFetching = false; return false; }
@@ -33,7 +35,10 @@ bool skyFetch() {
     const uint32_t t0 = millis();
     const int status = httpsFetch(client, kUrl[k], body, 15000, true);
     const int before = n;
-    if (status == 200 && !body.overflowed()) { n = parseTle(body.c_str(), list, n, MAX_SATS, k); ++okCount; }
+    if (status == 200 && !body.overflowed()) {
+      n = k == 2 ? parseOmmCsv(body.c_str(), list, n, MAX_SATS, k) : parseTle(body.c_str(), list, n, MAX_SATS, k);
+      ++okCount;
+    }
     Log.printf("C\xC3\xA9u: CelesTrak %s HTTP %d, %u bytes, +%d sat\xC3\xA9lites (%lums)\n",
                k == 0 ? "stations" : k == 1 ? "visual" : "last-30-days", status, (unsigned)body.length(), n - before,
                (unsigned long)(millis() - t0));

@@ -41,10 +41,10 @@ static void web_auth_save_event(lv_event_t *) {
   const char *p = lv_textarea_get_text(taWebPass);
   if (webAuthSet(u, p)) {
     lv_textarea_set_text(taWebPass, "");
-    lv_label_set_text(webAuthStatus, "Acesso salvo. Entre de novo na p\xC3\xA1gina com os dados novos.");
+    lv_label_set_text(webAuthStatus, T("Acesso salvo. Entre de novo na p\xC3\xA1gina com os dados novos.", "Access saved. Log in to the page again with the new details."));
     lv_obj_set_style_text_color(webAuthStatus, lv_color_hex(0x8FE0B6), 0);
   } else {
-    lv_label_set_text(webAuthStatus, "Preencha o usu\xC3\xA1rio e uma senha de 4 a 64 caracteres.");
+    lv_label_set_text(webAuthStatus, T("Preencha o usu\xC3\xA1rio e uma senha de 4 a 64 caracteres.", "Fill in the user and a password of 4 to 64 characters."));
     lv_obj_set_style_text_color(webAuthStatus, lv_color_hex(0xFFD477), 0);
   }
   if (kb) lv_obj_set_hidden(kb, true);
@@ -54,7 +54,7 @@ static void web_auth_save_event(lv_event_t *) {
 // manual location ("Nome @ lat,lon", prefs "cityRaw"), otherwise the geocoded name.
 static String cityFieldText() {
   if (prefs.isKey("cityRaw")) return prefs.getString("cityRaw", "");
-  xSemaphoreTake(mtx, portMAX_DELAY); String c = wx.cityName; xSemaphoreGive(mtx);
+  xSemaphoreTake(wxMtx, portMAX_DELAY); String c = wx.cityName; xSemaphoreGive(wxMtx);
   return c;
 }
 
@@ -63,7 +63,7 @@ static String cityFieldText() {
 static void configSyncCityUi() {
   static uint32_t seen = UINT32_MAX;
   if (!taCity) return;
-  xSemaphoreTake(mtx, portMAX_DELAY); const uint32_t v = wx.weatherVersion; xSemaphoreGive(mtx);
+  xSemaphoreTake(wxMtx, portMAX_DELAY); const uint32_t v = wx.weatherVersion; xSemaphoreGive(wxMtx);
   if (v == seen || lv_obj_has_state(taCity, LV_STATE_FOCUSED)) return;
   seen = v;
   const String t = cityFieldText();
@@ -107,12 +107,12 @@ static void kb_event(lv_event_t *e) {
   if (c == LV_EVENT_READY && ta == taCity) {
     xSemaphoreTake(mtx, portMAX_DELAY);
     sh.pendingCity = lv_textarea_get_text(taCity);
-    sh.status = "Buscando cidade...";
+    sh.status = T("Buscando cidade...", "Searching city...");
     xSemaphoreGive(mtx);
     post(CMD_GEOCODE);
   } else if (c == LV_EVENT_READY && ta == taAirport) {
     const bool ok = setFlightRadarAirportCode(lv_textarea_get_text(taAirport));
-    lv_label_set_text(airportConfigStatus, ok ? "Aeroporto salvo para o radar." : "Código não reconhecido. Confira o código IATA/ICAO.");
+    lv_label_set_text(airportConfigStatus, ok ? T("Aeroporto salvo para o radar.", "Airport saved for the radar.") : T("Código não reconhecido. Confira o código IATA/ICAO.", "Code not recognized. Check the IATA/ICAO code."));
   }
 }
 
@@ -124,13 +124,27 @@ static void connect_event(lv_event_t *) {
   xSemaphoreTake(mtx, portMAX_DELAY);
   sh.pendingSsid = ssid;
   sh.pendingPass = lv_textarea_get_text(taPass);
+  // Empty field on the saved network = keep the saved password (it is never loaded
+  // into the screen, so nothing on the device shows or holds it in a widget).
+  if (sh.pendingPass.isEmpty() && prefs.getString("ssid", "") == ssid) sh.pendingPass = prefs.getString("pass", "");
   xSemaphoreGive(mtx);
   post(CMD_CONNECT);
 }
 
+// Language: saved, then the board restarts so every fixed text is created again (core/i18n.h).
+static void restartCb(lv_timer_t *) { ESP.restart(); }
+static void lang_event(lv_event_t *e) {
+  lv_obj_t *dd = (lv_obj_t *)lv_event_get_target(e);
+  const uint8_t lang = (uint8_t)lv_dropdown_get_selected(dd);
+  if (lang == gLang || lang >= LANG_COUNT) return;
+  prefs.putUChar("lang", lang);
+  setLabelIfChanged(setStatusLbl, lang == LANG_EN ? "Language saved. Restarting..." : "Idioma salvo. Reiniciando...");
+  lv_timer_set_repeat_count(lv_timer_create(restartCb, 600, NULL), 1);
+}
+
 static void apply_airport_event(lv_event_t *) {
   const bool ok = setFlightRadarAirportCode(lv_textarea_get_text(taAirport));
-  lv_label_set_text(airportConfigStatus, ok ? "Aeroporto salvo para o radar." : "Código não reconhecido. Confira o código IATA/ICAO.");
+  lv_label_set_text(airportConfigStatus, ok ? T("Aeroporto salvo para o radar.", "Airport saved for the radar.") : T("Código não reconhecido. Confira o código IATA/ICAO.", "Code not recognized. Check the IATA/ICAO code."));
 }
 
 static void radar_radius_event(lv_event_t *e) {
@@ -139,7 +153,7 @@ static void radar_radius_event(lv_event_t *e) {
   const uint32_t selected = lv_dropdown_get_selected(dropdown);
   const uint8_t radiusKm = radii[selected < 4 ? selected : 1];
   setFlightRadarRadiusKm(radiusKm);
-  lv_label_set_text_fmt(airportConfigStatus, "Raio salvo: %u km", radiusKm);
+  lv_label_set_text_fmt(airportConfigStatus, T("Raio salvo: %u km", "Radius saved: %u km"), radiusKm);
 }
 
 static void h24_event(lv_event_t *e) {
@@ -210,7 +224,7 @@ static void build_settings(lv_obj_t *t) {
   lv_obj_set_flex_flow(r1, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(r1, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   ddSsid = lv_dropdown_create(r1);
-  lv_dropdown_set_options(ddSsid, "(toque em Buscar redes)");
+  lv_dropdown_set_options(ddSsid, T("(toque em Buscar redes)", "(tap Search)"));
   lv_obj_set_width(ddSsid, 320);
   lv_obj_set_style_bg_color(ddSsid, lv_color_hex(0x17243A), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(ddSsid, LV_OPA_COVER, LV_PART_MAIN);
@@ -227,15 +241,14 @@ static void build_settings(lv_obj_t *t) {
   lv_obj_set_size(bScan, 96, 44);
   lv_obj_add_event_cb(bScan, scan_event, LV_EVENT_CLICKED, NULL);
   lv_obj_center(lv_label_create(bScan));
-  lv_label_set_text(lv_obj_get_child(bScan, 0), "Buscar");
+  lv_label_set_text(lv_obj_get_child(bScan, 0), T("Buscar", "Search"));
 
   taPass = lv_textarea_create(t);
-  String savedPassword = prefs.getString("pass", "");
-  if (!savedPassword.isEmpty()) lv_textarea_set_text(taPass, savedPassword.c_str());
+  const bool hasSavedPassword = !prefs.getString("pass", "").isEmpty();   // never put it in the widget
   lv_obj_set_width(taPass, 430);
   lv_textarea_set_one_line(taPass, true);
   lv_textarea_set_password_mode(taPass, true);
-  lv_textarea_set_placeholder_text(taPass, "Senha do Wi-Fi");
+  lv_textarea_set_placeholder_text(taPass, hasSavedPassword ? T("Senha salva (deixe vazio para manter)", "Saved password (leave empty to keep)") : T("Senha do Wi-Fi", "Wi-Fi password"));
   lv_obj_set_style_bg_color(taPass, lv_color_hex(0x17243A), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(taPass, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_text_color(taPass, lv_color_hex(0xEAF2FF), LV_PART_MAIN);
@@ -248,16 +261,16 @@ static void build_settings(lv_obj_t *t) {
   lv_obj_t *bConn = lv_button_create(t);
   lv_obj_set_size(bConn, 430, 44);
   lv_obj_add_event_cb(bConn, connect_event, LV_EVENT_CLICKED, NULL);
-  lv_label_set_text(lv_label_create(bConn), "Conectar");
+  lv_label_set_text(lv_label_create(bConn), T("Conectar", "Connect"));
   lv_obj_center(lv_obj_get_child(bConn, 0));
 
   setStatusLbl = makeLabel(t, "", &lv_font_weather_14, 0x8FB0D0);
-  wifiInfoLbl = makeLabel(t, "Wi-Fi: verificando...", &lv_font_weather_14, 0x8FE0B6);
+  wifiInfoLbl = makeLabel(t, T("Wi-Fi: verificando...", "Wi-Fi: checking..."), &lv_font_weather_14, 0x8FE0B6);
   lv_obj_set_width(wifiInfoLbl, 430);
   lv_label_set_long_mode(wifiInfoLbl, LV_LABEL_LONG_DOT);
 
-  t = settingsBlock(content, LV_SYMBOL_HOME, "Localiza\xC3\xA7\xC3\xA3o");
-  makeLabel(t, "Cidade (Enter para aplicar)", &lv_font_weather_14, 0xFFFFFF);
+  t = settingsBlock(content, LV_SYMBOL_HOME, T("Localiza\xC3\xA7\xC3\xA3o", "Location"));
+  makeLabel(t, T("Cidade (Enter para aplicar)", "City (Enter to apply)"), &lv_font_weather_14, 0xFFFFFF);
   taCity = lv_textarea_create(t);
   lv_obj_set_width(taCity, 430);
   lv_textarea_set_one_line(taCity, true);
@@ -270,10 +283,10 @@ static void build_settings(lv_obj_t *t) {
   lv_obj_set_style_border_width(taCity, 1, LV_PART_MAIN);
   lv_obj_set_style_radius(taCity, 12, LV_PART_MAIN);
   lv_obj_add_event_cb(taCity, ta_event, LV_EVENT_FOCUSED, NULL);
-  makeLabel(t, "Ex.: São Paulo, BR  ou  Nome @ lat,lon", &lv_font_weather_14, 0x8FB0D0);
+  makeLabel(t, T("Ex.: São Paulo, BR  ou  Nome @ lat,lon", "E.g. London, GB  or  Name @ lat,lon"), &lv_font_weather_14, 0x8FB0D0);
 
-  t = settingsBlock(content, LV_SYMBOL_GPS, "Radar e aeroporto");
-  makeLabel(t, "Aeroporto do radar (IATA/ICAO)", &lv_font_weather_14, 0xFFFFFF);
+  t = settingsBlock(content, LV_SYMBOL_GPS, T("Radar e aeroporto", "Radar and airport"));
+  makeLabel(t, T("Aeroporto do radar (IATA/ICAO)", "Radar airport (IATA/ICAO)"), &lv_font_weather_14, 0xFFFFFF);
   taAirport = lv_textarea_create(t);
   String airport = prefs.getString("radarAirport", "CGH");
   lv_textarea_set_text(taAirport, airport.c_str());
@@ -291,12 +304,12 @@ static void build_settings(lv_obj_t *t) {
   lv_obj_t *bAirport = lv_button_create(t);
   lv_obj_set_size(bAirport, 430, 40);
   lv_obj_add_event_cb(bAirport, apply_airport_event, LV_EVENT_CLICKED, NULL);
-  lv_label_set_text(lv_label_create(bAirport), "Aplicar aeroporto");
+  lv_label_set_text(lv_label_create(bAirport), T("Aplicar aeroporto", "Apply airport"));
   lv_obj_center(lv_obj_get_child(bAirport, 0));
-  airportConfigStatus = makeLabel(t, "Padrão: Congonhas (CGH), raio 10 km", &lv_font_weather_14, 0x8FE0B6);
-  makeLabel(t, "Raio do radar", &lv_font_weather_14, 0xFFFFFF);
+  airportConfigStatus = makeLabel(t, T("Padrão: Congonhas (CGH), raio 10 km", "Default: Congonhas (CGH), 10 km radius"), &lv_font_weather_14, 0x8FE0B6);
+  makeLabel(t, T("Raio do radar", "Radar radius"), &lv_font_weather_14, 0xFFFFFF);
   radarRadiusDropdown = lv_dropdown_create(t);
-  lv_dropdown_set_options(radarRadiusDropdown, "5 km\n10 km (padrão)\n25 km\n50 km");
+  lv_dropdown_set_options(radarRadiusDropdown, T("5 km\n10 km (padrão)\n25 km\n50 km", "5 km\n10 km (default)\n25 km\n50 km"));
   {
     const uint8_t saved = prefs.getUChar("radarRadiusKm", 10);
     lv_dropdown_set_selected(radarRadiusDropdown, saved == 5 ? 0 : saved == 25 ? 2 : saved == 50 ? 3 : 1);
@@ -311,7 +324,7 @@ static void build_settings(lv_obj_t *t) {
   lv_obj_add_event_cb(radarRadiusDropdown, radar_radius_event, LV_EVENT_VALUE_CHANGED, NULL);
 
 
-  t = settingsBlock(content, LV_SYMBOL_IMAGE, "Tela");
+  t = settingsBlock(content, LV_SYMBOL_IMAGE, T("Tela", "Display"));
   lv_obj_t *r2 = lv_obj_create(t);
   lv_obj_set_size(r2, 430, 44);
   lv_obj_set_style_bg_opa(r2, LV_OPA_TRANSP, 0);
@@ -320,12 +333,29 @@ static void build_settings(lv_obj_t *t) {
   lv_obj_set_scrollable(r2, false);
   lv_obj_set_flex_flow(r2, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(r2, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  makeLabel(r2, "Relógio 24 horas", &lv_font_weather_20, 0xFFFFFF);
+  makeLabel(r2, T("Relógio 24 horas", "24-hour clock"), &lv_font_weather_20, 0xFFFFFF);
   swH24 = lv_switch_create(r2);
   if (cfg.h24) lv_obj_add_state(swH24, LV_STATE_CHECKED);
   lv_obj_add_event_cb(swH24, h24_event, LV_EVENT_VALUE_CHANGED, NULL);
 
-  makeLabel(t, "Brilho", &lv_font_weather_14, 0xFFFFFF);
+  makeLabel(t, T("Idioma (a placa reinicia)", "Language (the board restarts)"), &lv_font_weather_14, 0xFFFFFF);
+  {
+    lv_obj_t *ddLang = lv_dropdown_create(t);
+    String opts;
+    for (uint8_t l = 0; l < LANG_COUNT; ++l) { if (l) opts += "\n"; opts += langName(l); }
+    lv_dropdown_set_options(ddLang, opts.c_str());
+    lv_dropdown_set_selected(ddLang, gLang);
+    lv_obj_set_width(ddLang, 430);
+    lv_obj_set_style_bg_color(ddLang, lv_color_hex(0x17243A), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ddLang, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_text_color(ddLang, lv_color_hex(0xEAF2FF), LV_PART_MAIN);
+    lv_obj_set_style_border_color(ddLang, lv_color_hex(0x3A506D), LV_PART_MAIN);
+    lv_obj_set_style_border_width(ddLang, 1, LV_PART_MAIN);
+    lv_obj_set_style_radius(ddLang, 12, LV_PART_MAIN);
+    lv_obj_add_event_cb(ddLang, lang_event, LV_EVENT_VALUE_CHANGED, NULL);
+  }
+
+  makeLabel(t, T("Brilho", "Brightness"), &lv_font_weather_14, 0xFFFFFF);
   lv_obj_t *sl = lv_slider_create(t);
   lv_obj_set_width(sl, 410);
   lv_slider_set_range(sl, 0, 100);
@@ -333,19 +363,19 @@ static void build_settings(lv_obj_t *t) {
   lv_obj_add_event_cb(sl, bright_event, LV_EVENT_VALUE_CHANGED, NULL);
 
   // ---- web page login (services/web_auth): user + password asked at http://nextneovista.local
-  t = settingsBlock(content, LV_SYMBOL_EYE_CLOSE, "Acesso \xC3\xA0 p\xC3\xA1gina web");
-  makeLabel(t, "Usu\xC3\xA1rio", &lv_font_weather_14, 0xFFFFFF);
+  t = settingsBlock(content, LV_SYMBOL_EYE_CLOSE, T("Acesso \xC3\xA0 p\xC3\xA1gina web", "Web page access"));
+  makeLabel(t, T("Usu\xC3\xA1rio", "User"), &lv_font_weather_14, 0xFFFFFF);
   taWebUser = styledField(t, webAuthUser().c_str(), false);
-  makeLabel(t, "Nova senha (m\xC3\xADnimo 4 caracteres)", &lv_font_weather_14, 0xFFFFFF);
+  makeLabel(t, T("Nova senha (m\xC3\xADnimo 4 caracteres)", "New password (at least 4 characters)"), &lv_font_weather_14, 0xFFFFFF);
   taWebPass = styledField(t, "", true);
   lv_obj_t *bWeb = lv_button_create(t);
   lv_obj_set_size(bWeb, 430, 42);
   lv_obj_set_style_radius(bWeb, 12, 0);
   lv_obj_set_style_shadow_width(bWeb, 0, 0);
   lv_obj_add_event_cb(bWeb, web_auth_save_event, LV_EVENT_CLICKED, NULL);
-  lv_label_set_text(lv_label_create(bWeb), "Salvar acesso");
+  lv_label_set_text(lv_label_create(bWeb), T("Salvar acesso", "Save access"));
   lv_obj_center(lv_obj_get_child(bWeb, 0));
-  webAuthStatus = makeLabel(t, "Padr\xC3\xA3o: admin / admin  \xC2\xB7  a sess\xC3\xA3o expira ap\xC3\xB3s 10 min sem uso",
+  webAuthStatus = makeLabel(t, T("Padr\xC3\xA3o: admin / admin  \xC2\xB7  a sess\xC3\xA3o expira ap\xC3\xB3s 10 min sem uso", "Default: admin / admin  Â·  the session expires after 10 min without use"),
                             &lv_font_weather_14, 0x8FB0D0);
   lv_obj_set_width(webAuthStatus, 430);
 }
@@ -457,9 +487,9 @@ static void renderSettings() {
   uint32_t scanVersion = sh.scanVersion;
   xSemaphoreGive(mtx);
   setLabelIfChanged(setStatusLbl, status.c_str());
-  String wifiInfo = up ? "Conectado: " + WiFi.SSID() + "  |  IP " + WiFi.localIP().toString() +
-                           "\nP\xC3\xA1gina: http://" DEVICE_HOSTNAME ".local"
-                       : "Desconectado  |  aguardando reconexão";
+  String wifiInfo = up ? T("Conectado: ", "Connected: ") + WiFi.SSID() + "  |  IP " + WiFi.localIP().toString() +
+                           T("\nP\xC3\xA1gina: http://" DEVICE_HOSTNAME ".local", "\nPage: http://" DEVICE_HOSTNAME ".local")
+                       : T("Desconectado  |  aguardando reconexão", "Disconnected  |  waiting to reconnect");
   setLabelIfChanged(wifiInfoLbl, wifiInfo.c_str());
   if (scanVersion != seenScan) {
     seenScan = scanVersion;

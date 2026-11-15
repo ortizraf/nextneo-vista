@@ -11,7 +11,7 @@
 #include "services/app_log.h"
 
 static void doScan() {
-  setStatus("Buscando redes...");
+  setStatus(T("Buscando redes...", "Searching networks..."));
   int n = WiFi.scanNetworks();
   String list;
   for (int i = 0; i < n; i++) {
@@ -24,7 +24,7 @@ static void doScan() {
   xSemaphoreTake(mtx, portMAX_DELAY);
   sh.ssidList = list;
   sh.scanVersion++;
-  sh.status = n > 0 ? String(n) + (n == 1 ? " rede encontrada" : " redes encontradas") : "Nenhuma rede encontrada";
+  sh.status = n > 0 ? String(n) + (n == 1 ? T(" rede encontrada", " network found") : T(" redes encontradas", " networks found")) : T("Nenhuma rede encontrada", "No network found");
   xSemaphoreGive(mtx);
 }
 
@@ -32,18 +32,18 @@ static void doConnect() {
   xSemaphoreTake(mtx, portMAX_DELAY);
   String ssid = sh.pendingSsid, pass = sh.pendingPass;
   xSemaphoreGive(mtx);
-  if (ssid.isEmpty()) { setStatus("Selecione uma rede"); return; }
-  setStatus("Conectando a " + ssid + "...");
+  if (ssid.isEmpty()) { setStatus(T("Selecione uma rede", "Select a network")); return; }
+  setStatus(T("Conectando a ", "Connecting to ") + ssid + "...");
   WiFi.disconnect();
   WiFi.begin(ssid.c_str(), pass.c_str());
   for (int i = 0; i < 30 && WiFi.status() != WL_CONNECTED; i++) vTaskDelay(pdMS_TO_TICKS(500));
   if (WiFi.status() == WL_CONNECTED) {
     prefs.putString("ssid", ssid);
     prefs.putString("pass", pass);
-    setStatus("Conectado: " + WiFi.localIP().toString());
+    setStatus(T("Conectado: ", "Connected: ") + WiFi.localIP().toString());
     applyTime();
   } else {
-    setStatus("Falha ao conectar (verifique a senha)");
+    setStatus(T("Falha ao conectar (verifique a senha)", "Failed to connect (check the password)"));
   }
 }
 
@@ -133,7 +133,7 @@ static void workerTask(void *) {
     if (up && !wasConnected) {
       // Housekeeping only (no screen API): sync the clock once per connection.
       applyTime();
-      setStatus("Conectado: " + WiFi.localIP().toString());
+      setStatus(T("Conectado: ", "Connected: ") + WiFi.localIP().toString());
     }
     wasConnected = up;
     if (up) {

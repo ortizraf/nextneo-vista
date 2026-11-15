@@ -100,7 +100,7 @@ static void buildCard(int i) {
   lv_obj_set_pos(financeSub[i], 14, 36);
   lv_obj_set_width(financeSub[i], 170);
   lv_label_set_long_mode(financeSub[i], LV_LABEL_LONG_DOT);
-  financeAgeLabel[i] = makeLabel(c, "hora n/d", &lv_font_weather_14, 0x9299A5);
+  financeAgeLabel[i] = makeLabel(c, T("hora n/d", "time n/a"), &lv_font_weather_14, 0x9299A5);
   lv_obj_set_size(financeAgeLabel[i], 72, 18); lv_obj_set_pos(financeAgeLabel[i], 110, 12);
   lv_obj_set_style_text_align(financeAgeLabel[i], LV_TEXT_ALIGN_RIGHT, 0);
   financePlot[i] = lv_obj_create(c);
@@ -159,12 +159,12 @@ static void rebuildFinanceCards() {
   FinanceAsset assets[FINANCE_MAX_ASSETS];
   char currency[FINANCE_MAX_ASSETS][4];
   uint8_t count;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(finMtx, portMAX_DELAY);
   count = fin.assetCount;
   memcpy(assets, fin.assets, sizeof assets);
   memcpy(currency, fin.currency, sizeof currency);
   builtConfigVersion = fin.configVersion;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(finMtx);
   lv_obj_clean(financeStrip);
   for (int i = 0; i < FINANCE_MAX_ASSETS; ++i) financeCard[i] = nullptr;
   for (int i = 0; i < count; ++i) buildCard(i);
@@ -182,7 +182,7 @@ static void buildFinanceScreen(lv_obj_t *scr) {
   lv_obj_set_style_pad_bottom(financeStrip,14,0);
   rebuildFinanceCards();
   lv_obj_t *financeTitle=makeLabel(financeView,"Finance",&lv_font_weather_20,0xFFFFFF); lv_obj_align(financeTitle,LV_ALIGN_TOP_LEFT,62,8);
-  financeStatusLabel=makeLabel(financeView,"Aguardando cotações da API",&lv_font_weather_14,0xAEB0B8); lv_obj_set_size(financeStatusLabel,250,20); lv_obj_set_pos(financeStatusLabel,218,13); lv_obj_set_style_text_align(financeStatusLabel,LV_TEXT_ALIGN_RIGHT,0);
+  financeStatusLabel=makeLabel(financeView,T("Aguardando cotações da API", "Waiting for API quotes"),&lv_font_weather_14,0xAEB0B8); lv_obj_set_size(financeStatusLabel,250,20); lv_obj_set_pos(financeStatusLabel,218,13); lv_obj_set_style_text_align(financeStatusLabel,LV_TEXT_ALIGN_RIGHT,0);
   addBackButton(financeView); lv_obj_move_foreground(lv_obj_get_child(financeView,lv_obj_get_child_cnt(financeView)-1));
   buildDetailPanel();
 }
@@ -204,12 +204,12 @@ static void updateFinanceScreen() {
   uint8_t financeSuccessCount, count;
   bool financeRefreshing;
   uint32_t financeLastSuccessMs, financeVersion, configVersion;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(finMtx, portMAX_DELAY);
   configVersion = fin.configVersion;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(finMtx);
   if (configVersion != builtConfigVersion) rebuildFinanceCards();
 
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(finMtx, portMAX_DELAY);
   count = fin.assetCount;
   memcpy(assets, fin.assets, sizeof assets);
   memcpy(currency, fin.currency, sizeof currency);
@@ -225,7 +225,7 @@ static void updateFinanceScreen() {
   financeLastSuccessMs = fin.lastSuccessMs;
   financeVersion = fin.version;
   memcpy(financeQuoteEpoch, fin.quoteEpoch, sizeof financeQuoteEpoch);
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(finMtx);
   if (count > builtCount) count = builtCount;
 
   bool anyOk = false;
@@ -241,7 +241,7 @@ static void updateFinanceScreen() {
       else snprintf(header, sizeof header, "%s", name);
       setLabelIfChanged(financeHeader[i], header);
       if (assets[i].label[0]) setLabelIfChanged(financeSub[i], assets[i].label);
-      else if (currency[i][0]) { snprintf(text, sizeof text, "Cotação em %s", currency[i]); setLabelIfChanged(financeSub[i], text); }
+      else if (currency[i][0]) { snprintf(text, sizeof text, T("Cotação em %s", "Quote at %s"), currency[i]); setLabelIfChanged(financeSub[i], text); }
       else setLabelIfChanged(financeSub[i], assets[i].symbol);
       if (fxok[i]) { formatPrice(fx[i], text, sizeof text); setFinanceValue(financeValue[i], text); }
       else setLabelIfChanged(financeValue[i], "");
@@ -293,11 +293,11 @@ static void updateFinanceScreen() {
   char financeStatus[48];
   uint32_t financeAgeMin = financeLastSuccessMs ? (millis() - financeLastSuccessMs) / 60000UL : 0;
   time_t nowEpoch = time(nullptr);
-  if (financeRefreshing) snprintf(financeStatus, sizeof financeStatus, "Atualizando cotações...");
-  else if (!anyOk) snprintf(financeStatus, sizeof financeStatus, "Aguardando cotações da API");
-  else if (financeSuccessCount < count) snprintf(financeStatus, sizeof financeStatus, "Falha parcial da API · dados mantidos");
-  else if (financeAgeMin == 0) snprintf(financeStatus, sizeof financeStatus, "Consulta à API: agora");
-  else snprintf(financeStatus, sizeof financeStatus, "Consulta à API: há %lu min", (unsigned long)financeAgeMin);
+  if (financeRefreshing) snprintf(financeStatus, sizeof financeStatus, T("Atualizando cotações...", "Updating quotes..."));
+  else if (!anyOk) snprintf(financeStatus, sizeof financeStatus, T("Aguardando cotações da API", "Waiting for API quotes"));
+  else if (financeSuccessCount < count) snprintf(financeStatus, sizeof financeStatus, T("Falha parcial da API · dados mantidos", "Partial API failure · data kept"));
+  else if (financeAgeMin == 0) snprintf(financeStatus, sizeof financeStatus, T("Consulta à API: agora", "API checked: now"));
+  else snprintf(financeStatus, sizeof financeStatus, T("Consulta à API: há %lu min", "API checked: %lu min ago"), (unsigned long)financeAgeMin);
   setLabelIfChanged(financeStatusLabel, financeStatus);
   const uint32_t statusColor = financeRefreshing ? 0x78D7FF : (financeSuccessCount < count && anyOk ? 0xFFD477 : 0xAEB0B8);
   static uint32_t renderedStatusColor = 0xFFFFFFFF;
@@ -310,14 +310,14 @@ static void updateFinanceScreen() {
     for (int i=0; i<count; ++i) {
       char ageText[20];
       uint32_t quoteEpoch = financeQuoteEpoch[i];
-      if (!fxok[i]) snprintf(ageText, sizeof ageText, "n/d");   // "sem cotação" wrapped in 72 px and showed only "sem"
-      else if (!quoteEpoch || nowEpoch < 1700000000 || nowEpoch < (time_t)quoteEpoch) snprintf(ageText, sizeof ageText, "hora n/d");
+      if (!fxok[i]) snprintf(ageText, sizeof ageText, "%s", T("n/d", "n/a"));   // "sem cotação" wrapped in 72 px and showed only "sem"
+      else if (!quoteEpoch || nowEpoch < 1700000000 || nowEpoch < (time_t)quoteEpoch) snprintf(ageText, sizeof ageText, T("hora n/d", "time n/a"));
       else {
         uint32_t ageSec = (uint32_t)(nowEpoch - (time_t)quoteEpoch);
-        if (ageSec < 60) snprintf(ageText, sizeof ageText, "agora");
-        else if (ageSec < 3600) snprintf(ageText, sizeof ageText, "há %lum", (unsigned long)(ageSec/60));
-        else if (ageSec < 86400) snprintf(ageText, sizeof ageText, "há %luh", (unsigned long)(ageSec/3600));   // short: fits the 72 px label
-        else snprintf(ageText, sizeof ageText, "há %lud", (unsigned long)(ageSec/86400));
+        if (ageSec < 60) snprintf(ageText, sizeof ageText, T("agora", "now"));
+        else if (ageSec < 3600) snprintf(ageText, sizeof ageText, T("há %lum", "%lum ago"), (unsigned long)(ageSec/60));
+        else if (ageSec < 86400) snprintf(ageText, sizeof ageText, T("há %luh", "%luh ago"), (unsigned long)(ageSec/3600));   // short: fits the 72 px label
+        else snprintf(ageText, sizeof ageText, T("há %lud", "%lud ago"), (unsigned long)(ageSec/86400));
       }
       setLabelIfChanged(financeAgeLabel[i], ageText);
       uint32_t ageSec = quoteEpoch && nowEpoch > (time_t)quoteEpoch ? (uint32_t)(nowEpoch - (time_t)quoteEpoch) : 0;
@@ -344,8 +344,12 @@ static uint8_t dRange = 0;
 static uint32_t dShownVersion = UINT32_MAX, dRequestedMs = 0;
 static float dPrev = NAN;                                     // previous close of the asset (card data)
 static FinanceDetail dData;                                   // UI copy
-static const char *const kStatCaption[8] = {"Fech. anterior", "Abertura", "M\xC3\xA1x. do dia", "M\xC3\xADn. do dia",
-                                            "M\xC3\xA1x. per\xC3\xADodo", "M\xC3\xADn. per\xC3\xADodo", "M\xC3\xA1x. 52 sem.", "M\xC3\xADn. 52 sem."};
+static const char *statCaption(int i) {                      // detail statistics, current language
+  static const char *const pt[8] = {"Fech. anterior", "Abertura", "M\xC3\xA1x. do dia", "M\xC3\xADn. do dia",
+                                    "M\xC3\xA1x. per\xC3\xADodo", "M\xC3\xADn. per\xC3\xADodo", "M\xC3\xA1x. 52 sem.", "M\xC3\xADn. 52 sem."};
+  static const char *const en[8] = {"Prev. close", "Open", "Day high", "Day low", "Period high", "Period low", "52-wk high", "52-wk low"};
+  return gLang == LANG_EN ? en[i] : pt[i];
+}
 
 static bool detailOpen() { return dPanel && !lv_obj_is_hidden(dPanel); }
 
@@ -357,12 +361,12 @@ static void closeDetail() {
 
 static void requestDetail() {
   if (dIndex < 0) return;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(finMtx, portMAX_DELAY);
   snprintf(financeDetailWant.symbol, sizeof financeDetailWant.symbol, "%s", fin.assets[dIndex].symbol);
   financeDetailWant.range = dRange;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(finMtx);
   dRequestedMs = millis();
-  lv_label_set_text(dLoading, "carregando...");
+  lv_label_set_text(dLoading, T("carregando...", "loading..."));
   lv_obj_set_hidden(dLoading, false);
   postScreenJob(FIN_JOB_DETAIL);       // deduplicated; detailRender re-posts if the answer is for an older request
 }
@@ -413,12 +417,12 @@ static void drawDetailChart(uint32_t lineHex) {
 static void detailHeader() {
   if (dIndex < 0) return;
   char name[24], sub[48], b[48];
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(finMtx, portMAX_DELAY);
   const FinanceAsset a = fin.assets[dIndex];
   const float price = fin.price[dIndex], prev = fin.previousClose[dIndex], pct = fin.changePct[dIndex];
   const bool have = fin.havePrice[dIndex], haveCh = fin.haveChange[dIndex];
   char cur[4]; memcpy(cur, fin.currency[dIndex], sizeof cur);
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(finMtx);
   dPrev = prev > 0 ? prev : NAN;
   financeDisplayName(a.symbol, name, sizeof name);
   setLabelIfChanged(dName, a.label[0] ? a.label : name);
@@ -440,7 +444,8 @@ static void detailFill() {
   drawDetailChart(up ? 0x35D879 : 0xFF5555);
   char b[40];
   // market state chip
-  static const char *const kState[] = {"", "Aberto", "Fechado", "Pr\xC3\xA9-mercado", "P\xC3\xB3s-mercado", "24h"};
+  const char *const kState[] = {"", T("Aberto", "Open"), T("Fechado", "Closed"), T("Pr\xC3\xA9-mercado", "Pre-market"),
+                                 T("P\xC3\xB3s-mercado", "After hours"), "24h"};
   static const uint32_t kStateCol[] = {0, 0x35D879, 0x9299A5, 0xFFD477, 0xFFD477, 0x38D6F5};
   const uint8_t ms = dData.ok && dData.market <= FIN_MKT_24H ? dData.market : FIN_MKT_UNKNOWN;
   setLabelIfChanged(dState, kState[ms]);
@@ -453,7 +458,8 @@ static void detailFill() {
   const float ref = dData.range == 0 ? dPrev : dData.rangeRef;
   if (dData.ok && dData.count && isfinite(ref) && ref > 0) {
     const float pc = (dData.series[dData.count - 1] - ref) * 100.0f / ref;
-    static const char *const kRangeName[FIN_RANGES] = {"hoje", "5 dias", "1 m\xC3\xAAs", "6 meses", "1 ano"};
+    const char *const kRangeName[FIN_RANGES] = {T("hoje", "today"), T("5 dias", "5 days"), T("1 m\xC3\xAAs", "1 month"),
+                                                T("6 meses", "6 months"), T("1 ano", "1 year")};
     snprintf(b, sizeof b, "%s: %+.2f%%", kRangeName[dData.range], pc);
     setLabelIfChanged(dPeriod, b);
     lv_obj_set_style_text_color(dPeriod, lv_color_hex(pc >= 0 ? 0x35D879 : 0xFF5555), 0);
@@ -466,7 +472,7 @@ static void detailFill() {
     setLabelIfChanged(dStatVal[k], b);
   }
   if (dData.ok) lv_obj_set_hidden(dLoading, true);
-  else { lv_label_set_text(dLoading, "sem dados para este per\xC3\xADodo"); lv_obj_set_hidden(dLoading, false); }
+  else { lv_label_set_text(dLoading, T("sem dados para este per\xC3\xADodo", "no data for this period")); lv_obj_set_hidden(dLoading, false); }
 }
 
 // 500 ms UI tick (from updateFinanceScreen) while the detail is open.
@@ -474,14 +480,14 @@ static void detailRender(bool financeChanged) {
   if (!detailOpen()) return;
   if (financeChanged) detailHeader();
   bool fresh = false, matches = false;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(finMtx, portMAX_DELAY);
   if (financeDetail.version != dShownVersion) {
     matches = !strcmp(financeDetail.symbol, financeDetailWant.symbol) && financeDetail.range == financeDetailWant.range;
     if (matches) { dData = financeDetail; dShownVersion = financeDetail.version; fresh = true; }
   }
   const bool answered = !strcmp(financeDetail.symbol, financeDetailWant.symbol) && financeDetail.range == financeDetailWant.range &&
                         financeDetail.version == dShownVersion;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(finMtx);
   if (fresh) detailFill();
   // answer still for an older tab (dedup dropped our post while a job ran): ask again, at most every 2 s
   else if (!answered && millis() - dRequestedMs > 2000) { dRequestedMs = millis(); postScreenJob(FIN_JOB_DETAIL); }
@@ -501,7 +507,7 @@ static void openDetail(int index) {
   detailHeader();
   lv_obj_set_hidden(dPanel, false);
   lv_obj_move_foreground(dPanel);
-  xSemaphoreTake(mtx, portMAX_DELAY); dShownVersion = financeDetail.version; xSemaphoreGive(mtx);   // ignore older answers
+  xSemaphoreTake(finMtx, portMAX_DELAY); dShownVersion = financeDetail.version; xSemaphoreGive(finMtx);   // ignore older answers
   requestDetail();
 }
 
@@ -597,7 +603,7 @@ static void buildDetailPanel() {
 
   for (int k = 0; k < 8; ++k) {                                         // key figures column
     const int y = 98 + k * 26;
-    lv_obj_t *cap = makeLabel(dPanel, kStatCaption[k], &lv_font_weather_14, 0x6F7F9C);
+    lv_obj_t *cap = makeLabel(dPanel, statCaption(k), &lv_font_weather_14, 0x6F7F9C);
     lv_obj_set_pos(cap, 328, y);
     dStatVal[k] = makeLabel(dPanel, "-", &lv_font_weather_14, 0xEAF2FF);
     lv_obj_set_width(dStatVal[k], 146); lv_obj_set_style_text_align(dStatVal[k], LV_TEXT_ALIGN_RIGHT, 0);

@@ -471,7 +471,7 @@ static void clockRender() {
   setLabelIfChanged(clkTime, b); setLabelIfChanged(clkTimeSh, b);
   if (expanded && lv_tick_elaps(expandedAtMs) > 15000) setExpanded(false);   // auto-collapse
 
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(wxMtx, portMAX_DELAY);
   const bool have = wx.haveWeather;
   const int code = wx.code, rain = wx.dayRain[0], hcount = wx.hourCount;
   const float temp = wx.temp, tmax = wx.tmax[0], tmin = wx.tmin[0];
@@ -479,7 +479,7 @@ static void clockRender() {
   for (int i = 0; i < HOURS; ++i) { memcpy(hl[i], wx.hourLabel[i], 6); ht[i] = wx.hourTemp[i]; hc[i] = wx.hourCode[i]; hd[i] = wx.hourIsDay[i]; }
   const bool liveDay = wx.isDay;
   const uint32_t wv = wx.weatherVersion;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(wxMtx);
   WxCache wc = {};
   bool cached = false;
   if (have) {                                  // remember for the next boot (only when it changed)
@@ -500,10 +500,8 @@ static void clockRender() {
   renderedMinute = key; seenWv = wv;
   wxCode = have || cached ? wc.code : -1;           // -1: no data at all -> black
 
-  static const char *days[] = {"Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"};
-  static const char *months[] = {"janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho",
-                                 "agosto", "setembro", "outubro", "novembro", "dezembro"};
-  snprintf(b, sizeof b, "%s, %d de %s", days[ti.tm_wday], ti.tm_mday, months[ti.tm_mon]);
+  if (gLang == LANG_EN) snprintf(b, sizeof b, "%s, %s %d", weekdayLong(ti.tm_wday), monthLong(ti.tm_mon), ti.tm_mday);
+  else snprintf(b, sizeof b, "%s, %d de %s", weekdayLong(ti.tm_wday), ti.tm_mday, monthLong(ti.tm_mon));
   setLabelIfChanged(clkDate, b); setLabelIfChanged(clkDateSh, b);
   updateScene(ti);
 
@@ -511,7 +509,7 @@ static void clockRender() {
   snprintf(b, sizeof b, "%.0f\xC2\xB0", wc.temp); setLabelIfChanged(nowTemp, b);
   const bool nowNight = have ? !liveDay : night;           // Open-Meteo is_day when live, clock hours otherwise
   setLabelIfChanged(nowCond, weatherText(wc.code, nowNight));   // "Céu limpo" at night
-  snprintf(b, sizeof b, "%.0f\xC2\xB0 / %.0f\xC2\xB0  \xC2\xB7  chuva %d%%", wc.tmax, wc.tmin, wc.rain);
+  snprintf(b, sizeof b, T("%.0f\xC2\xB0 / %.0f\xC2\xB0  \xC2\xB7  chuva %d%%", "%.0f\xC2\xB0 / %.0f\xC2\xB0  \xC2\xB7  rain %d%%"), wc.tmax, wc.tmin, wc.rain);
   setLabelIfChanged(nowRange, b);
   if (iconCodes[0] != wc.code * 2 + nowNight) { iconCodes[0] = wc.code * 2 + nowNight; drawMiniIcon(nowIcon, wc.code, nowNight, 1.15f); }
   showCard(true);
@@ -521,7 +519,7 @@ static void clockRender() {
     const bool ok = i < hcount;
     show(hourCol[i], ok);
     if (!ok) continue;
-    setLabelIfChanged(hourLbl[i], i == 0 ? "Agora" : hl[i]);
+    setLabelIfChanged(hourLbl[i], i == 0 ? T("Agora", "Now") : hl[i]);
     snprintf(b, sizeof b, "%.0f\xC2\xB0", ht[i]); setLabelIfChanged(hourTmp[i], b);
     const bool hn = !hd[i];                                   // Open-Meteo is_day (sunrise/sunset of the place)
     if (iconCodes[i + 1] != hc[i] * 2 + hn) { iconCodes[i + 1] = hc[i] * 2 + hn; drawMiniIcon(hourIco[i], hc[i], hn); }

@@ -338,28 +338,29 @@ static void buildPanel() {
   lv_obj_set_style_border_width(head, 0, 0);
   lv_obj_set_style_pad_all(head, 0, 0);
   lv_obj_set_scrollable(head, false);
-  lv_obj_t *t = makeLabel(head, "Arte generativa", &lv_font_weather_20, 0xEAF2FF);
+  lv_obj_t *t = makeLabel(head, T("Arte generativa", "Generative art"), &lv_font_weather_20, 0xEAF2FF);
   lv_obj_align(t, LV_ALIGN_LEFT_MID, 0, 0);
   lv_obj_t *close = glassButton(head, LV_SYMBOL_OK, closePanelEvent);
   lv_obj_align(close, LV_ALIGN_RIGHT_MID, 0, 0);
 
-  static const char *kPatternMap[] = {"Ondas", "Part\xC3\xAD" "culas", "Fluxo", "Natal", ""};
-  static const char *kPaletteMap[] = {"Oceano", "Aurora", "El\xC3\xA9trico", ""};
+  static const char *kPatternMap[] = {T("Ondas", "Waves"), T("Part\xC3\xAD" "culas", "Particles"), T("Fluxo", "Flow"),
+                                      T("Natal", "Christmas"), ""};
+  static const char *kPaletteMap[] = {T("Oceano", "Ocean"), "Aurora", T("El\xC3\xA9trico", "Electric"), ""};
   static const char *kAutoMap[] = {"1 min", "5 min", "15 min", ""};
 
-  panelRow("Padr\xC3\xA3o");
+  panelRow(T("Padr\xC3\xA3o", "Pattern"));
   bmPattern = panelButtons(kPatternMap, savedPattern, bmPatternEvent);
-  panelRow("Paleta");
+  panelRow(T("Paleta", "Palette"));
   bmPalette = panelButtons(kPaletteMap, params.palette, bmPaletteEvent);
-  panelRow("Velocidade");
+  panelRow(T("Velocidade", "Speed"));
   slSpeed = panelSlider(25, 200, (int)(params.speed * 100 + 0.5f), speedEvent, LV_EVENT_VALUE_CHANGED);
-  panelRow("Densidade");
+  panelRow(T("Densidade", "Density"));
   slDensity = panelSlider(25, 100, params.density, densityEvent, LV_EVENT_RELEASED);
-  swRepel = panelSwitch("Toque repele part\xC3\xAD" "culas", params.touchRepels, repelEvent);
-  swAuto = panelSwitch("Troca autom\xC3\xA1tica", autoCycle, autoEvent);
-  panelRow("Intervalo da troca");
+  swRepel = panelSwitch(T("Toque repele part\xC3\xAD" "culas", "Touch repels particles"), params.touchRepels, repelEvent);
+  swAuto = panelSwitch(T("Troca autom\xC3\xA1tica", "Automatic change"), autoCycle, autoEvent);
+  panelRow(T("Intervalo da troca", "Change interval"));
   bmAuto = panelButtons(kAutoMap, autoIdx, bmAutoEvent);
-  panelRow("Brilho no modo ambiente");
+  panelRow(T("Brilho no modo ambiente", "Brightness in ambient mode"));
   slAmbient = panelSlider(10, 60, ambientBl, ambientBlEvent, LV_EVENT_VALUE_CHANGED);
 
   show(panel, false);
@@ -388,7 +389,7 @@ static void buildArtScreen(lv_obj_t *screen) {
   lv_obj_set_size(frameImg, SCR_W, SCR_H);
   lv_obj_set_clickable(frameImg, false);
 
-  errLbl = makeLabel(artView, "Mem\xC3\xB3ria insuficiente para a arte", &lv_font_weather_14, 0x8FB8F0);
+  errLbl = makeLabel(artView, T("Mem\xC3\xB3ria insuficiente para a arte", "Not enough memory for the art"), &lv_font_weather_14, 0x8FB8F0);
   lv_obj_center(errLbl);
   show(errLbl, false);
 

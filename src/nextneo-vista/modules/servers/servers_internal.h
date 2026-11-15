@@ -6,6 +6,8 @@
 
 namespace servers {
 
+extern SemaphoreHandle_t srvMtx;             // guards gCfg / gData (not the app-wide mtx)
+
 static constexpr int HIST = 60;
 
 struct ServerCfg { char label[24]; char url[64]; char id[24]; };
