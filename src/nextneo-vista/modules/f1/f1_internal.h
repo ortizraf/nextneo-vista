@@ -7,12 +7,16 @@
 #include <freertos/semphr.h>
 #include <time.h>
 #include <stdio.h>
+#include "core/i18n.h"
 
 namespace f1 {
 
 struct CircuitInfo {
   const char *cid, *track, *gp, *country;   // Jolpica circuitId, bacinger id, GP name, country (pt)
+  const char *gpEn, *countryEn;             // same in English
 };
+inline const char *gpName(const CircuitInfo *c) { return gLang == LANG_EN ? c->gpEn : c->gp; }
+inline const char *countryName(const CircuitInfo *c) { return gLang == LANG_EN ? c->countryEn : c->country; }
 const CircuitInfo *circuitInfo(const char *cid);
 
 enum { S_FP1, S_FP2, S_FP3, S_SQ, S_SPRINT, S_QUALI, S_RACE, S_COUNT };

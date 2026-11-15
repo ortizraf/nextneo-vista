@@ -1,3 +1,4 @@
+#include "core/i18n.h"
 #include "app_log.h"
 #include "aircraft_data_provider.h"
 #include "https_fetch.h"
@@ -45,7 +46,7 @@ class ReadsbProvider final : public AircraftDataProvider {
              bool (*shouldContinue)()) override {
     count = 0;
     if (WiFi.status() != WL_CONNECTED) {
-      snprintf(error, errorCapacity, "Sem conexão Wi-Fi");
+      snprintf(error, errorCapacity, T("Sem conexão Wi-Fi", "No Wi-Fi connection"));
       return false;
     }
     char url[128];
@@ -64,7 +65,7 @@ class ReadsbProvider final : public AircraftDataProvider {
     connectionOpen = true;
     const int status = httpsFetch(secureClient, url, body, 9000, true);
     if (status != HTTP_CODE_OK) {
-      if (status == HTTPC_ERROR_TOO_LESS_RAM) snprintf(error, errorCapacity, "Memória baixa p/ TLS");
+      if (status == HTTPC_ERROR_TOO_LESS_RAM) snprintf(error, errorCapacity, T("Memória baixa p/ TLS", "Low memory for TLS"));
       else if (status < 0) snprintf(error, errorCapacity, "%s", HTTPClient::errorToString(status).c_str());
       else snprintf(error, errorCapacity, "HTTP %d", status);
       Log.printf("%s: %s\n", name_, error);
@@ -74,21 +75,21 @@ class ReadsbProvider final : public AircraftDataProvider {
     }
     const uint32_t downloaded = millis();
     if (shouldContinue && !shouldContinue()) {
-      snprintf(error, errorCapacity, "Cancelado");
+      snprintf(error, errorCapacity, T("Cancelado", "Cancelled"));
       return false;
     }
     JsonDocument doc(SpiRamJsonAllocator::instance());
     DeserializationError jsonError = deserializeJson(doc, body.c_str(), body.length(),
         DeserializationOption::Filter(aircraftFilter()), DeserializationOption::NestingLimit(8));
     if (jsonError) {
-      snprintf(error, errorCapacity, "JSON inválido: %s", jsonError.c_str());
+      snprintf(error, errorCapacity, T("JSON inválido: %s", "invalid JSON: %s"), jsonError.c_str());
       return false;
     }
     // ADSB.lol's v2 response uses "ac" (like readsb); accept "aircraft" too.
     JsonArrayConst list = doc["ac"].as<JsonArrayConst>();
     if (list.isNull()) list = doc["aircraft"].as<JsonArrayConst>();
     if (list.isNull()) {
-      const char *message = doc["msg"] | "Resposta sem lista ac";
+      const char *message = doc["msg"] | T("Resposta sem lista ac", "Answer without an ac list");
       snprintf(error, errorCapacity, "API: %.36s", message);
       return false;
     }

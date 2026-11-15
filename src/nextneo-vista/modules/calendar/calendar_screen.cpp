@@ -11,14 +11,19 @@ static lv_point_t calTouchStart;
 #include <stdlib.h>
 
 static int drawnYear = -1, drawnYday = -1;
-static const char *calMonths[] = {"JAN.","FEV.","MAR.","ABR.","MAI.","JUN.","JUL.","AGO.","SET.","OUT.","NOV.","DEZ."};
+static const char *calMonth(int m) {
+  static const char *const pt[] = {"JAN.","FEV.","MAR.","ABR.","MAI.","JUN.","JUL.","AGO.","SET.","OUT.","NOV.","DEZ."};
+  static const char *const en[] = {"JAN.","FEB.","MAR.","APR.","MAY","JUN.","JUL.","AUG.","SEP.","OCT.","NOV.","DEC."};
+  return gLang == LANG_EN ? en[m] : pt[m];
+}
 static void drawCalendar() {
   lv_obj_clean(calendarGrid);
   time_t now = time(nullptr); struct tm today; localtime_r(&now, &today); struct tm base=today;
   drawnYear = today.tm_year; drawnYday = today.tm_yday;
   base.tm_mday = 1; base.tm_mon += calendarOffset; mktime(&base);
-  char title[20]; snprintf(title,sizeof(title),"%s %d",calMonths[base.tm_mon],base.tm_year+1900); lv_label_set_text(calendarTitle,title);
-  const char *wd[] = {"D","S","T","Q","Q","S","S"};
+  char title[20]; snprintf(title,sizeof(title),"%s %d",calMonth(base.tm_mon),base.tm_year+1900); lv_label_set_text(calendarTitle,title);
+  const char *const wdPt[] = {"D","S","T","Q","Q","S","S"}, *const wdEn[] = {"S","M","T","W","T","F","S"};
+  const char *const *wd = gLang == LANG_EN ? wdEn : wdPt;
   for(int i=0;i<7;i++){ auto l=makeLabel(calendarGrid,wd[i],&lv_font_weather_20,i==0?0xF04B54:0xFFFFFF); lv_obj_set_size(l,52,32); lv_obj_set_pos(l,i*60,0); lv_obj_set_style_text_align(l,LV_TEXT_ALIGN_CENTER,0); }
   int first=base.tm_wday; struct tm next=base; next.tm_mon++; next.tm_mday=0; mktime(&next); int days=next.tm_mday;
   for(int d=1;d<=days;d++){int cell=first+d-1,row=cell/7,col=cell%7; bool selected=(d==today.tm_mday && calendarOffset==0); lv_obj_t *cellBox=lv_obj_create(calendarGrid); lv_obj_set_size(cellBox,44,36); lv_obj_set_pos(cellBox,col*60+4,row*35+34); lv_obj_set_style_bg_opa(cellBox,selected?LV_OPA_COVER:LV_OPA_TRANSP,0); lv_obj_set_style_bg_color(cellBox,lv_color_hex(0xF04B54),0); lv_obj_set_style_border_width(cellBox,0,0); lv_obj_set_style_radius(cellBox,7,0); lv_obj_set_style_pad_all(cellBox,0,0); lv_obj_set_scrollable(cellBox, false); char n[4];snprintf(n,sizeof(n),"%d",d); lv_obj_t *num=lv_label_create(cellBox); lv_label_set_text(num,n); lv_obj_set_style_text_font(num,&lv_font_weather_20,0); lv_obj_set_style_text_color(num,lv_color_hex((col==0&&!selected)?0xF04B54:0xFFFFFF),0); lv_obj_center(num);}

@@ -16,6 +16,8 @@
 
 namespace servers {
 
+SemaphoreHandle_t srvMtx = xSemaphoreCreateMutex();
+
 ServerCfg gCfg[SERVERS_MAX];
 ServerData gData[SERVERS_MAX];
 static char gUser[64] = "", gPass[64] = "";
@@ -36,7 +38,7 @@ static const char *DEF_URL[SERVERS_MAX]   = {"http://nextneo.local:8090", "http:
 static const char *DEF_ID[SERVERS_MAX]    = {"naap07gfucfyv19", "utrz2p5k7xtymho"};
 
 void loadServersConfig() {
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(srvMtx, portMAX_DELAY);
   for (int i = 0; i < SERVERS_MAX; ++i) {
     char k[12];
     snprintf(k, sizeof k, "bzLbl%d", i); snprintf(gCfg[i].label, sizeof gCfg[i].label, "%s", prefs.getString(k, DEF_LABEL[i]).c_str());
@@ -46,7 +48,7 @@ void loadServersConfig() {
   snprintf(gUser, sizeof gUser, "%s", prefs.getString("bzUser", "").c_str());
   snprintf(gPass, sizeof gPass, "%s", prefs.getString("bzPass", "").c_str());
   gCfgVersion++;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(srvMtx);
 }
 
 // Accepts "http://host:8090/system/<id>" (link copied from Beszel) or just a base URL.
@@ -54,46 +56,46 @@ void loadServersConfig() {
 void serversSetServer(uint8_t i, const char *label, const char *url, const char *id) {
   if (i >= SERVERS_MAX) return;
   char k[12];
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(srvMtx, portMAX_DELAY);
   if (label && *label) { snprintf(gCfg[i].label, sizeof gCfg[i].label, "%s", label); snprintf(k, sizeof k, "bzLbl%d", i); prefs.putString(k, gCfg[i].label); }
   if (url && *url)     { snprintf(gCfg[i].url, sizeof gCfg[i].url, "%s", url);       snprintf(k, sizeof k, "bzUrl%d", i); prefs.putString(k, gCfg[i].url); }
   if (id && *id)       { snprintf(gCfg[i].id, sizeof gCfg[i].id, "%s", id);          snprintf(k, sizeof k, "bzId%d", i);  prefs.putString(k, gCfg[i].id); }
   gToken[i] = ""; gData[i] = ServerData(); gRetry.reset(i); gCfgVersion++; gDataVersion++;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(srvMtx);
 }
 
 void serversSetCredentials(const char *user, const char *pass) {
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(srvMtx, portMAX_DELAY);
   if (user) { snprintf(gUser, sizeof gUser, "%s", user); prefs.putString("bzUser", gUser); }
   if (pass && *pass) { snprintf(gPass, sizeof gPass, "%s", pass); prefs.putString("bzPass", gPass); }
   for (int i = 0; i < SERVERS_MAX; ++i) gToken[i] = "";
   gCfgVersion++;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(srvMtx);
 }
 
 void serversGetConfig(uint8_t i, char *label, char *url, char *id, size_t n) {
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(srvMtx, portMAX_DELAY);
   snprintf(label, n, "%s", gCfg[i].label); snprintf(url, n, "%s", gCfg[i].url); snprintf(id, n, "%s", gCfg[i].id);
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(srvMtx);
 }
-String serversUser() { xSemaphoreTake(mtx, portMAX_DELAY); String u = gUser; xSemaphoreGive(mtx); return u; }
+String serversUser() { xSemaphoreTake(srvMtx, portMAX_DELAY); String u = gUser; xSemaphoreGive(srvMtx); return u; }
 bool serversHasPassword() { return gPass[0] != 0; }
 
 String serversStatusText(uint8_t i) {
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(srvMtx, portMAX_DELAY);
   const ServerData d = gData[i];
-  xSemaphoreGive(mtx);
-  if (!d.known) return "aguardando consulta (abra a tela Servers)";
-  if (!d.reachable) return String("erro: ") + d.error;
+  xSemaphoreGive(srvMtx);
+  if (!d.known) return T("aguardando consulta (abra a tela Servers)", "waiting for a check (open the Servers screen)");
+  if (!d.reachable) return String(T("erro: ", "error: ")) + d.error;
   return String(d.name) + (d.up ? " · online" : " · offline");
 }
 
 // true when any server looked offline/unreachable on the last check (menu badge)
 bool serversAlert() {
   bool a = false;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(srvMtx, portMAX_DELAY);
   for (int i = 0; i < SERVERS_MAX; ++i) if (gData[i].known && (!gData[i].reachable || !gData[i].up)) a = true;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(srvMtx);
   return a;
 }
 
@@ -136,7 +138,7 @@ static bool login(uint8_t i, const String &base, const char *user, const char *p
   HTTPClient http;
   http.setConnectTimeout(CONNECT_TIMEOUT_MS);
   http.setTimeout(6000);
-  if (!http.begin(base + "/api/collections/users/auth-with-password")) { strcpy(err, "URL inválida"); return false; }
+  if (!http.begin(base + "/api/collections/users/auth-with-password")) { strcpy(err, T("URL inválida", "invalid URL")); return false; }
   http.addHeader("Content-Type", "application/json");
   JsonDocument body; body["identity"] = user; body["password"] = pass;
   String payload; serializeJson(body, payload);
@@ -147,9 +149,9 @@ static bool login(uint8_t i, const String &base, const char *user, const char *p
     JsonDocument e; String msg;
     if (!deserializeJson(e, resp)) msg = e["message"] | "";
     Log.printf("Beszel login HTTP %d: %s\n", code, msg.c_str());
-    if (code == 403) snprintf(err, 48, "login 403: usuário não verificado?");
-    else if (code < 0) snprintf(err, 48, "sem conexão com o hub");
-    else snprintf(err, 48, code == 400 ? "e-mail ou senha incorretos" : "login HTTP %d", code);
+    if (code == 403) snprintf(err, 48, T("login 403: usuário não verificado?", "login 403: user not verified?"));
+    else if (code < 0) snprintf(err, 48, T("sem conexão com o hub", "no connection to the hub"));
+    else snprintf(err, 48, code == 400 ? T("e-mail ou senha incorretos", "wrong e-mail or password") : "login HTTP %d", code);
     return false;
   }
   JsonDocument filter; filter["token"] = true;
@@ -157,7 +159,7 @@ static bool login(uint8_t i, const String &base, const char *user, const char *p
   deserializeJson(doc, http.getString(), DeserializationOption::Filter(filter));
   http.end();
   gToken[i] = doc["token"] | "";
-  if (gToken[i].isEmpty()) { strcpy(err, "token vazio"); return false; }
+  if (gToken[i].isEmpty()) { strcpy(err, T("token vazio", "empty token")); return false; }
   return true;
 }
 
@@ -192,9 +194,9 @@ static uint32_t parsePbDate(const char *s) {
 // (Beszel only writes a new 1-minute sample every 60 s, status polls run every 10 s).
 static bool fetchOne(uint8_t i, const ServerCfg &c, const char *user, const char *pass, ServerData &out, const ServerData &prev) {
   out = ServerData(); out.known = true;
-  if (!user[0] || !pass[0]) { strcpy(out.error, "configure usuário/senha"); return false; }
+  if (!user[0] || !pass[0]) { strcpy(out.error, T("configure usuário/senha", "set user/password")); return false; }
   const String base = resolveBase(c.url);
-  if (base.isEmpty()) { strcpy(out.error, "nome .local não encontrado"); return false; }
+  if (base.isEmpty()) { strcpy(out.error, T("nome .local não encontrado", ".local name not found")); return false; }
   if (gToken[i].isEmpty() && !login(i, base, user, pass, out.error)) { forgetMdns(c.url); return false; }
   if (!screenJobStillCurrent()) return false;
 
@@ -210,8 +212,8 @@ static bool fetchOne(uint8_t i, const ServerCfg &c, const char *user, const char
     code = getJson(url, gToken[i], doc, f1);
   }
   if (code != 200) {
-    snprintf(out.error, sizeof out.error, code == 404 ? "sistema não encontrado (ID/permissão)" :
-             code < 0 ? "sem conexão com o hub" : "HTTP %d", code);
+    snprintf(out.error, sizeof out.error, code == 404 ? T("sistema não encontrado (ID/permissão)", "system not found (ID/permission)") :
+             code < 0 ? T("sem conexão com o hub", "no connection to the hub") : "HTTP %d", code);
     if (code < 0) forgetMdns(c.url);                // IP may have changed: resolve again next time
     return false;
   }
@@ -263,10 +265,10 @@ static bool fetchOne(uint8_t i, const ServerCfg &c, const char *user, const char
 bool serversFetch() {
   if (WiFi.status() != WL_CONNECTED) return false;
   ServerCfg cfgCopy[SERVERS_MAX]; char user[64], pass[64];
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(srvMtx, portMAX_DELAY);
   memcpy(cfgCopy, gCfg, sizeof cfgCopy); memcpy(user, gUser, sizeof user); memcpy(pass, gPass, sizeof pass);
   const uint32_t ver = gCfgVersion;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(srvMtx);
   bool any = false;
   static ServerData tmp, prev;
   uint8_t order[SERVERS_MAX];
@@ -274,15 +276,15 @@ bool serversFetch() {
   for (uint8_t k = 0; k < n; ++k) {
     const uint8_t i = order[k];
     if (!screenJobStillCurrent()) return any;
-    xSemaphoreTake(mtx, portMAX_DELAY); prev = gData[i]; xSemaphoreGive(mtx);
+    xSemaphoreTake(srvMtx, portMAX_DELAY); prev = gData[i]; xSemaphoreGive(srvMtx);
     const uint32_t t0 = millis();
     const bool ok = fetchOne(i, cfgCopy[i], user, pass, tmp, prev);
     if (!ok) Log.printf("Servers %s: %s (%lums)\n", cfgCopy[i].label, tmp.error, (unsigned long)(millis() - t0));
     gRetry.record(i, ok, millis());
     any |= ok;
-    xSemaphoreTake(mtx, portMAX_DELAY);
+    xSemaphoreTake(srvMtx, portMAX_DELAY);
     if (ver == gCfgVersion) { gData[i] = tmp; gDataVersion++; }
-    xSemaphoreGive(mtx);
+    xSemaphoreGive(srvMtx);
   }
   return any;
 }

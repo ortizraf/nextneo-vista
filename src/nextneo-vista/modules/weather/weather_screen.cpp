@@ -231,7 +231,7 @@ static void build_home(lv_obj_t *t) {
   // Big temperature + condition: same font/size and emphasis as before.
   lblTemp = makeLabel(t, "--°", &lv_font_montserrat_48, 0xFFFFFF);
   lv_obj_set_pos(lblTemp, 20, 60);
-  lblCond = makeLabel(t, "Aguardando clima", &lv_font_weather_20, 0xEAF2FF);
+  lblCond = makeLabel(t, T("Aguardando clima", "Waiting for weather"), &lv_font_weather_20, 0xEAF2FF);
   lv_obj_set_pos(lblCond, 24, 118);
   lblRange = makeLabel(t, "", &lv_font_weather_14, 0xF2F6FB);
   lv_obj_set_pos(lblRange, 24, 148);
@@ -246,10 +246,10 @@ static void build_home(lv_obj_t *t) {
   lv_obj_set_scrollable(weatherArt, false);
   lv_obj_set_clickable(weatherArt, false);
 
-  detailCard(t, 0, "Chuva", &lblRainNow, true);
-  detailCard(t, 1, "Umidade", &lblHumidity, false);
-  detailCard(t, 2, "Vento", &lblWind, false);
-  detailCard(t, 3, "Índice UV", &lblUv, false);
+  detailCard(t, 0, T("Chuva", "Rain"), &lblRainNow, true);
+  detailCard(t, 1, T("Umidade", "Humidity"), &lblHumidity, false);
+  detailCard(t, 2, T("Vento", "Wind"), &lblWind, false);
+  detailCard(t, 3, T("Índice UV", "UV index"), &lblUv, false);
 
   // Only shown when something needs attention (see renderWeather in main.cpp).
   lblStatus = makeLabel(t, "", &lv_font_weather_14, 0xFFD477);
@@ -331,9 +331,9 @@ static void build_hours(lv_obj_t *t) {
   lv_obj_set_style_bg_color(t, lv_color_hex(0x050A14), 0);      // very light veil: lists stay readable
   lv_obj_set_style_bg_opa(t, LV_OPA_20, 0);
   lv_obj_set_scrollable(t, false);
-  lv_obj_t *title = makeLabel(t, "Previsão por hora", &lv_font_weather_20, 0xEAF2FF);
+  lv_obj_t *title = makeLabel(t, T("Previsão por hora", "Hourly forecast"), &lv_font_weather_20, 0xEAF2FF);
   lv_obj_set_pos(title, 82, 8);
-  lv_obj_t *every = makeLabel(t, "a cada 3 h", &lv_font_weather_14, 0x8FA6C2);
+  lv_obj_t *every = makeLabel(t, T("a cada 3 h", "every 3 h"), &lv_font_weather_14, 0x8FA6C2);
   lv_obj_align(every, LV_ALIGN_TOP_RIGHT, -16, 13);
 
   lv_obj_t *strip = lv_obj_create(t);
@@ -355,7 +355,7 @@ static void build_days(lv_obj_t *t) {
   lv_obj_set_style_bg_color(t, lv_color_hex(0x050A14), 0);
   lv_obj_set_style_bg_opa(t, LV_OPA_20, 0);
   lv_obj_set_scrollable(t, false);
-  lv_obj_t *title = makeLabel(t, "Próximos 7 dias", &lv_font_weather_20, 0xEAF2FF);
+  lv_obj_t *title = makeLabel(t, T("Próximos 7 dias", "Next 7 days"), &lv_font_weather_20, 0xEAF2FF);
   lv_obj_set_pos(title, 82, 8);
   lv_obj_t *strip = lv_obj_create(t);
   lv_obj_set_size(strip, 452, 226);
@@ -440,9 +440,9 @@ static void buildWeatherScreen(lv_obj_t *scr) {
   lv_obj_set_style_border_color(tabBar, lv_color_hex(0x20A7F2), (lv_style_selector_t)LV_PART_ITEMS | LV_STATE_CHECKED);
   lv_obj_set_style_border_width(tabBar, 2, (lv_style_selector_t)LV_PART_ITEMS | LV_STATE_CHECKED);
   lv_obj_set_scroll_chain_hor(lv_tabview_get_content(weatherTabs), false);
-  lv_obj_t *home = lv_tabview_add_tab(weatherTabs, "Agora");
-  lv_obj_t *hours = lv_tabview_add_tab(weatherTabs, "Horas");
-  lv_obj_t *days = lv_tabview_add_tab(weatherTabs, "Dias");
+  lv_obj_t *home = lv_tabview_add_tab(weatherTabs, T("Agora", "Now"));
+  lv_obj_t *hours = lv_tabview_add_tab(weatherTabs, T("Horas", "Hours"));
+  lv_obj_t *days = lv_tabview_add_tab(weatherTabs, T("Dias", "Days"));
   // Tab buttons are created by add_tab(), so apply their visible idle style afterwards.
   lv_obj_t *tabs = lv_tabview_get_tab_bar(weatherTabs);
   for (int i = 0; i < 3; i++) {
@@ -476,8 +476,10 @@ static void updateWeatherScreen() {
   int code, humidity, hourCount, hcode[8], hrain[8], dc[7], drain[7];
   char hours[8][6], dn[7][6];
   xSemaphoreTake(mtx, portMAX_DELAY);
-  city = wx.cityName;
   up = sh.wifiUp;
+  xSemaphoreGive(mtx);
+  xSemaphoreTake(wxMtx, portMAX_DELAY);
+  city = wx.cityName;
   have = wx.haveWeather;
   temp = wx.temp;
   code = wx.code;
@@ -497,7 +499,7 @@ static void updateWeatherScreen() {
   memcpy(dc, wx.dcode, sizeof dc);
   memcpy(drain, wx.dayRain, sizeof drain);
   version = wx.weatherVersion;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(wxMtx);
   // sky only with a known condition: live, else the cached one; nothing -> black
   { int c = code; if (have || cachedWeatherCode(c)) refreshSky(c, false); }
   if (version == renderedWeatherVersion && renderedWifiState == (int)up) return;
@@ -507,7 +509,8 @@ static void updateWeatherScreen() {
   if (have) {
     lv_label_set_text_fmt(lblTemp, "%.0f°C", temp);
     lv_label_set_text(lblCond, weatherText(code, !isDay));
-    lv_label_set_text_fmt(lblRange, LV_SYMBOL_UP " %.0f°   " LV_SYMBOL_DOWN " %.0f°   ·   sensação %.0f°", mx[0], mn[0], feels);
+    lv_label_set_text_fmt(lblRange, T(LV_SYMBOL_UP " %.0f°   " LV_SYMBOL_DOWN " %.0f°   ·   sensação %.0f°",
+                                      LV_SYMBOL_UP " %.0f°   " LV_SYMBOL_DOWN " %.0f°   ·   feels %.0f°"), mx[0], mn[0], feels);
     lv_label_set_text_fmt(lblHumidity, "%d%%", humidity);
     lv_label_set_text_fmt(lblWind, "%.0f km/h", wind);
     lv_label_set_text_fmt(lblRainNow, "%d%%", hourCount ? hrain[0] : 0);
@@ -517,10 +520,10 @@ static void updateWeatherScreen() {
     for (int i = 1; i < 7; i++) { weekLo = min(weekLo, mn[i]); weekHi = max(weekHi, mx[i]); }
     if (weekHi - weekLo < 1) weekHi = weekLo + 1;
     for (int i = 0; i < 7; i++) {
-      lv_label_set_text(fcDay[i], i == 0 ? "Hoje" : dn[i]);
+      lv_label_set_text(fcDay[i], i == 0 ? T("Hoje", "Today") : dn[i]);
       lv_label_set_text(fcCond[i], weatherText(dc[i]));
       lv_label_set_text_fmt(fcTemp[i], "%.0f°", mx[i]);
-      lv_label_set_text_fmt(fcMin[i], "mín %.0f°", mn[i]);
+      lv_label_set_text_fmt(fcMin[i], T("mín %.0f°", "min %.0f°"), mn[i]);
       const int x0 = (int)((mn[i] - weekLo) * FC_BAR_W / (weekHi - weekLo));
       const int x1 = (int)((mx[i] - weekLo) * FC_BAR_W / (weekHi - weekLo));
       lv_obj_set_pos(fcBarFill[i], x0, 0);
@@ -536,7 +539,7 @@ static void updateWeatherScreen() {
     }
     for (int i = 0; i < 8; i++) {
       if (i < hourCount) {
-        if (i == 0) lv_label_set_text(hourTime[i], "Agora");
+        if (i == 0) lv_label_set_text(hourTime[i], T("Agora", "Now"));
         else lv_label_set_text_fmt(hourTime[i], "%sh", hours[i]);
         lv_label_set_text(hourCond[i], weatherText(hcode[i], !hday[i]));
         lv_label_set_text_fmt(hourTemp[i], "%.0f°", htemp[i]);
@@ -595,7 +598,7 @@ static void updateWeatherScreen() {
     }
   } else {
     lv_label_set_text(lblTemp, "--");
-    lv_label_set_text(lblCond, up ? "Carregando previsão..." : "Configure o Wi-Fi em Ajustes");
+    lv_label_set_text(lblCond, up ? T("Carregando previsão...", "Loading forecast...") : T("Configure o Wi-Fi em Ajustes", "Set up Wi-Fi in Settings"));
   }
 
 }
@@ -606,21 +609,19 @@ static void renderWeather() {
   if (localNow(&ti)) {
     strftime(b, sizeof b, cfg.h24 ? "%H:%M" : "%I:%M %p", &ti);
     setLabelIfChanged(lblClock, b);
-    static const char *days[] = {"Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"};
-    static const char *months[] = {"Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"};
-    snprintf(b, sizeof b, "%s, %02d %s", days[ti.tm_wday], ti.tm_mday, months[ti.tm_mon]);
+    snprintf(b, sizeof b, "%s, %02d %s", weekdayShort(ti.tm_wday), ti.tm_mday, monthShort(ti.tm_mon));
     setLabelIfChanged(lblDate, b);
   } else {
     setLabelIfChanged(lblClock, "--:--");
-    setLabelIfChanged(lblDate, "Aguardando hora...");
+    setLabelIfChanged(lblDate, T("Aguardando hora...", "Waiting for the time..."));
   }
   xSemaphoreTake(mtx, portMAX_DELAY);
   String status = sh.status;
   bool up = sh.wifiUp;
   xSemaphoreGive(mtx);
   // Agora tab: only show the status when something needs attention (errors,
-  // searching); "Previsão atualizada" / "Conectado" stay hidden.
-  const bool showStatus = status.startsWith("Falha") || status.startsWith("Buscando") || !up;
+  // searching: they start with T("Falha","Failed") / T("Buscando","Searching")); others stay hidden.
+  const bool showStatus = status.startsWith(T("Falha", "Failed")) || status.startsWith(T("Buscando", "Searching")) || !up;
   setLabelIfChanged(lblStatus, showStatus ? status.c_str() : "");
   static int renderedDot = -1;
   if (renderedDot != (int)up) { renderWifiIndicator(lblWifiDot, up); renderedDot = up; }

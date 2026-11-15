@@ -6,11 +6,17 @@
 #include <string.h>
 
 namespace {
-const FinanceAsset kDefaults[] = {
-  {"USDBRL=X", "Dólar para real"},
-  {"EURBRL=X", "Euro para real"},
-  {"BTC-USD", "Bitcoin em dólar"},
-};
+// Default list (first boot / empty list), captions in the current language.
+FinanceAsset defaultAsset(int i) {
+  static const char *const kSym[] = {"USDBRL=X", "EURBRL=X", "BTC-USD"};
+  const char *const label[] = {T("Dólar para real", "US dollar to real"), T("Euro para real", "Euro to real"),
+                               T("Bitcoin em dólar", "Bitcoin in dollars")};
+  FinanceAsset a;
+  snprintf(a.symbol, sizeof a.symbol, "%s", kSym[i]);
+  snprintf(a.label, sizeof a.label, "%s", label[i]);
+  return a;
+}
+constexpr int kDefaultCount = 3;
 
 uint8_t parseAssets(const String &text, FinanceAsset *out) {
   uint8_t count = 0;
@@ -47,7 +53,7 @@ String serialize(const FinanceAsset *assets, uint8_t count) {
 // Publishes a new list: quotes of symbols that stay in the list are kept,
 // new ones start empty.
 void apply(const FinanceAsset *assets, uint8_t count) {
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(finMtx, portMAX_DELAY);
   static FinanceData old;  // static: keeps the ~3 KB copy off the loop task stack
   old = fin;
   for (uint8_t i = 0; i < FINANCE_MAX_ASSETS; ++i) {
@@ -79,7 +85,7 @@ void apply(const FinanceAsset *assets, uint8_t count) {
   fin.assetCount = count;
   ++fin.configVersion;
   ++fin.version;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(finMtx);
 }
 }  // namespace
 
@@ -87,8 +93,8 @@ void loadFinanceAssets() {
   FinanceAsset assets[FINANCE_MAX_ASSETS];
   uint8_t count = parseAssets(prefs.getString("finAssets", ""), assets);
   if (!count) {
-    count = sizeof kDefaults / sizeof *kDefaults;
-    for (uint8_t i = 0; i < count; ++i) assets[i] = kDefaults[i];
+    count = kDefaultCount;
+    for (uint8_t i = 0; i < count; ++i) assets[i] = defaultAsset(i);
   }
   apply(assets, count);
 }

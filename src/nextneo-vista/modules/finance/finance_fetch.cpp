@@ -13,7 +13,8 @@
 #include "services/psram_alloc.h"
 #include "services/app_log.h"
 
-FinanceData fin;  // owned by this module; read by the Finance screen / web page (under mtx)
+FinanceData fin;  // owned by this module; read by the Finance screen / web page (under finMtx)
+SemaphoreHandle_t finMtx = xSemaphoreCreateMutex();
 
 static uint32_t financeRetryAfterMs[FINANCE_MAX_ASSETS] = {};
 volatile int8_t financeSingleIndex = -1;
@@ -189,12 +190,12 @@ static bool doFinance(int onlyIndex) {
   }
   static FinanceAsset assets[FINANCE_MAX_ASSETS];
   static Quote quotes[FINANCE_MAX_ASSETS];
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(finMtx, portMAX_DELAY);
   const uint8_t count = fin.assetCount;
   const uint32_t configVersion = fin.configVersion;
   memcpy(assets, fin.assets, sizeof assets);
   fin.refreshing = true;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(finMtx);
   for (uint8_t i = 0; i < FINANCE_MAX_ASSETS; ++i) quotes[i] = Quote();
   if (onlyIndex >= count) onlyIndex = -1;
 
@@ -206,7 +207,7 @@ static bool doFinance(int onlyIndex) {
   }
 
   bool anySuccess = false;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(finMtx, portMAX_DELAY);
   // Discard results if the asset list was edited while downloading.
   if (fin.configVersion == configVersion) {
     for (uint8_t i = 0; i < count; ++i) {
@@ -233,7 +234,7 @@ static bool doFinance(int onlyIndex) {
   fin.successCount = totalSuccesses;
   if (anySuccess) fin.lastSuccessMs = millis();
   fin.version++;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(finMtx);
 
   uint32_t retryAfter = 0;
   for (uint8_t i = 0; i < FINANCE_MAX_ASSETS; ++i) { retryAfter = max(retryAfter, financeRetryAfterMs[i]); financeRetryAfterMs[i] = 0; }
@@ -242,8 +243,8 @@ static bool doFinance(int onlyIndex) {
 }
 
 // ---------------------------------------------------------------- Finance detail (on demand)
-FinanceDetail financeDetail;                  // network task -> UI (mtx)
-FinanceDetailRequest financeDetailWant;       // UI -> network task (mtx)
+FinanceDetail financeDetail;                  // network task -> UI (finMtx)
+FinanceDetailRequest financeDetailWant;       // UI -> network task (finMtx)
 static const char *const kFinRange[FIN_RANGES][2] = {{"1d", "5m"}, {"5d", "15m"}, {"1mo", "1d"}, {"6mo", "1d"}, {"1y", "1d"}};
 static const uint32_t kFinRangeTtlMs[FIN_RANGES] = {60000UL, 300000UL, 1800000UL, 3600000UL, 3600000UL};
 
@@ -294,7 +295,7 @@ static bool parseFinanceDetail(JsonVariantConst r, uint8_t range, FinanceDetail 
 // so the UI never re-posts in a loop.
 static bool doFinanceDetail() {
   FinanceDetailRequest want;
-  xSemaphoreTake(mtx, portMAX_DELAY); want = financeDetailWant; xSemaphoreGive(mtx);
+  xSemaphoreTake(finMtx, portMAX_DELAY); want = financeDetailWant; xSemaphoreGive(finMtx);
   if (!want.symbol[0] || want.range >= FIN_RANGES) return false;
   static FinanceDetail *cache = nullptr;                 // FIN_RANGES entries, PSRAM, allocated once
   static FinanceDetail *work = nullptr;
@@ -334,14 +335,14 @@ static bool doFinanceDetail() {
     if (retryAfterMs) financeBlockedUntilMs = millis() + retryAfterMs;
   }
   if (!screenJobStillCurrent()) return false;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(finMtx, portMAX_DELAY);
   const uint32_t v = financeDetail.version + 1;
   if (ok) financeDetail = e;
   else { financeDetail = FinanceDetail(); financeDetail.ok = false; }
   snprintf(financeDetail.symbol, sizeof financeDetail.symbol, "%s", want.symbol);
   financeDetail.range = want.range;
   financeDetail.version = v;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(finMtx);
   return ok;
 }
 

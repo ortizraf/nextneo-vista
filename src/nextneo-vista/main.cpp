@@ -30,6 +30,11 @@ static void loadConfig() {
     prefs.putString("city", wx.cityName);
   }
   gLogVerbose = prefs.getBool("logVerbose", false);   // off by default
+  gLang = prefs.getUChar("lang", LANG_PT);             // before the screens are built (core/i18n.h)
+  if (gLang >= LANG_COUNT) gLang = LANG_PT;
+#ifdef NNV_FORCE_LANG   // test builds only (e.g. PLATFORMIO_BUILD_FLAGS=-DNNV_FORCE_LANG=1): nothing is saved
+  gLang = NNV_FORCE_LANG;
+#endif
   loadFinanceAssets();   // Finance symbols (editable on the web page)
   loadServersConfig();   // Beszel hubs + login (Settings / web page)
 }
@@ -46,7 +51,7 @@ static void startWifi() {
   String ssid = prefs.getString("ssid", "");
   if (ssid.length()) {
     WiFi.begin(ssid.c_str(), prefs.getString("pass", "").c_str());
-    setStatus("Connecting to " + ssid + "...");
+    setStatus(T("Conectando a ", "Connecting to ") + ssid + "...");
   }
 }
 

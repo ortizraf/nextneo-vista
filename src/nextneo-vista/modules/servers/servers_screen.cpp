@@ -52,9 +52,9 @@ static void fmtAge(uint32_t epoch, char *b, size_t n) {
   time_t now = time(nullptr);
   if (!epoch || now < 1700000000) { snprintf(b, n, "--"); return; }
   long a = (long)now - (long)epoch; if (a < 0) a = 0;
-  if (a < 90) snprintf(b, n, "há %lds", a);
-  else if (a < 5400) snprintf(b, n, "há %ldmin", a / 60);
-  else snprintf(b, n, "há %ldh", a / 3600);
+  if (a < 90) snprintf(b, n, T("há %lds", "%lds ago"), a);
+  else if (a < 5400) snprintf(b, n, T("há %ldmin", "%ldmin ago"), a / 60);
+  else snprintf(b, n, T("há %ldh", "%ldh ago"), a / 3600);
 }
 // bytes/s -> "0", "850B", "12K", "1.2M"  (compact, for the card footer)
 static void fmtRate(float v, char *b, size_t n, bool unit = false) {
@@ -145,7 +145,7 @@ static void buildCard(int i, int x) {
   lv_obj_set_width(u.state, 110); lv_obj_set_pos(u.state, 104, 36);
   lv_obj_set_style_text_align(u.state, LV_TEXT_ALIGN_RIGHT, 0);
 
-  static const char *caps[3] = {"CPU", "RAM", "Disco"};
+  static const char *caps[3] = {"CPU", "RAM", T("Disco", "Disk")};
   for (int k = 0; k < 3; ++k) {
     lv_obj_t *a = u.arc[k] = lv_arc_create(c);
     lv_obj_set_size(a, 64, 64); lv_obj_set_pos(a, 12 + k * 70, 62);
@@ -206,7 +206,7 @@ static void buildMini(int k, int x, int y, const char *title, uint32_t color) {
     lv_obj_set_style_text_align(*ax[j], LV_TEXT_ALIGN_RIGHT, 0);
   }
   lv_obj_set_pos(makeLabel(m.box, "-60m", &lv_font_weather_14, 0x5C6676), 38, 92);
-  lv_obj_t *now = makeLabel(m.box, "agora", &lv_font_weather_14, 0x5C6676);
+  lv_obj_t *now = makeLabel(m.box, T("agora", "now"), &lv_font_weather_14, 0x5C6676);
   lv_obj_align(now, LV_ALIGN_TOP_RIGHT, -8, 92);
 }
 
@@ -218,8 +218,8 @@ static void buildServersScreen(lv_obj_t *scr) {
   lv_obj_set_style_border_width(serversView, 0, 0); lv_obj_set_style_pad_all(serversView, 0, 0);
   lv_obj_set_scrollable(serversView, false);
   addBackButton(serversView);
-  lv_obj_t *t = makeLabel(serversView, "Servidores", &lv_font_weather_20, 0xFFFFFF); lv_obj_align(t, LV_ALIGN_TOP_LEFT, 52, 6);
-  statusLbl = makeLabel(serversView, "conectando...", &lv_font_weather_14, C_MUTED);
+  lv_obj_t *t = makeLabel(serversView, T("Servidores", "Servers"), &lv_font_weather_20, 0xFFFFFF); lv_obj_align(t, LV_ALIGN_TOP_LEFT, 52, 6);
+  statusLbl = makeLabel(serversView, T("conectando...", "connecting..."), &lv_font_weather_14, C_MUTED);
   lv_obj_set_width(statusLbl, 260); lv_obj_set_pos(statusLbl, 212, 10);
   lv_obj_set_style_text_align(statusLbl, LV_TEXT_ALIGN_RIGHT, 0);
 
@@ -236,13 +236,13 @@ static void buildServersScreen(lv_obj_t *scr) {
   lv_obj_set_size(back, 120, 30); lv_obj_set_pos(back, 352, 0);
   lv_obj_set_style_bg_color(back, lv_color_hex(0x1C2430), 0); lv_obj_set_style_radius(back, 10, 0);
   lv_obj_set_style_shadow_width(back, 0, 0);
-  lv_obj_t *bl = makeLabel(back, LV_SYMBOL_LEFT " Visão geral", &lv_font_weather_14, 0xFFFFFF); lv_obj_center(bl);
+  lv_obj_t *bl = makeLabel(back, T(LV_SYMBOL_LEFT " Visão geral", LV_SYMBOL_LEFT " Overview"), &lv_font_weather_14, 0xFFFFFF); lv_obj_center(bl);
   lv_obj_add_event_cb(back, closeDetail, LV_EVENT_CLICKED, NULL);
 
   buildMini(0, 8, 48, "CPU", C_GREEN);
   buildMini(1, 180, 48, "RAM", C_BLUE);
-  buildMini(2, 8, 166, "Disco", C_ORANGE);
-  buildMini(3, 180, 166, "Rede", C_PURPLE);
+  buildMini(2, 8, 166, T("Disco", "Disk"), C_ORANGE);
+  buildMini(3, 180, 166, T("Rede", "Network"), C_PURPLE);
 
   // info column: 6 caption/value pairs, 37 px each -> fits the 230 px card
   lv_obj_t *info = cardBox(detailBox, 352, 48, 120, 230);
@@ -280,7 +280,7 @@ static void renderCard(int i, const ServerData &d, const ServerCfg &c) {
     lv_obj_set_style_border_color(u.card, lv_color_hex(d.known && !live ? 0x7A2E2E : C_LINE), 0);
   }
   if (!d.known) setLabelIfChanged(u.state, "...");
-  else if (!d.reachable) setLabelIfChanged(u.state, "sem dados");
+  else if (!d.reachable) setLabelIfChanged(u.state, T("sem dados", "no data"));
   else if (!d.up) setLabelIfChanged(u.state, "OFFLINE");
   else { fmtAge(d.updatedEpoch, b, sizeof b); setLabelIfChanged(u.state, b); }
   if (stateChanged) lv_obj_set_style_text_color(u.state, lv_color_hex(d.known && !live ? C_RED : C_MUTED), 0);
@@ -301,7 +301,7 @@ static void renderCard(int i, const ServerData &d, const ServerCfg &c) {
 
   if (!d.reachable) {
     setLabelIfChanged(u.footVal[0], "--"); setLabelIfChanged(u.footVal[2], "--");
-    setLabelIfChanged(u.footVal[1], d.known ? "erro" : "...");
+    setLabelIfChanged(u.footVal[1], d.known ? T("erro", "error") : "...");
     return;
   }
   if (d.temp >= 0) snprintf(b, sizeof b, "%.0f\xC2\xB0", d.temp); else strcpy(b, "--");
@@ -352,7 +352,7 @@ static void renderDetail(const ServerData &d, const ServerCfg &c) {
   fmtRate(d.netIn, rx, sizeof rx); fmtRate(d.netOut, tx, sizeof tx);
   snprintf(net, sizeof net, LV_SYMBOL_DOWN "%s  " LV_SYMBOL_UP "%s", rx, tx);
   snprintf(agent, sizeof agent, "v%s · %s", d.agent[0] ? d.agent : "?", age);
-  const char *vals[INFO_N] = {!d.reachable ? "sem dados" : d.up ? "online" : "OFFLINE", temp, up, load, net, agent};
+  const char *vals[INFO_N] = {!d.reachable ? T("sem dados", "no data") : d.up ? "online" : "OFFLINE", temp, up, load, net, agent};
   for (int k = 0; k < INFO_N; ++k) setLabelIfChanged(dInfoVal[k], d.reachable || k == 0 ? vals[k] : "--");
   lv_obj_set_style_text_color(dInfoVal[0], lv_color_hex(d.reachable && d.up ? C_GREEN : C_RED), 0);
   lv_obj_set_style_text_color(dInfoVal[1], lv_color_hex(d.temp >= 0 ? tempColor(d.temp) : C_MUTED), 0);
@@ -367,29 +367,29 @@ static void serversOnEnter() {
 
 static void serversRender() {
   const uint32_t nowMs = millis();
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(srvMtx, portMAX_DELAY);
   const uint32_t ver = gDataVersion;
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(srvMtx);
   if (ver == renderedVersion) {                 // no new data: only refresh the "há Xs" labels
     if (nowMs - lastAgeRender < 5000 || detailIndex >= 0) return;
     lastAgeRender = nowMs;
-    xSemaphoreTake(mtx, portMAX_DELAY);
+    xSemaphoreTake(srvMtx, portMAX_DELAY);
     uint32_t ep[SERVERS_MAX]; bool live[SERVERS_MAX];
     for (int i = 0; i < SERVERS_MAX; ++i) { ep[i] = gData[i].updatedEpoch; live[i] = gData[i].reachable && gData[i].up; }
-    xSemaphoreGive(mtx);
+    xSemaphoreGive(srvMtx);
     char b[16];
     for (int i = 0; i < SERVERS_MAX; ++i) if (live[i]) { fmtAge(ep[i], b, sizeof b); setLabelIfChanged(cards[i].state, b); }
     return;
   }
   renderedVersion = ver; lastAgeRender = nowMs;
   static ServerData d[SERVERS_MAX]; static ServerCfg c[SERVERS_MAX];
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(srvMtx, portMAX_DELAY);
   for (int i = 0; i < SERVERS_MAX; ++i) { d[i] = gData[i]; c[i] = gCfg[i]; }
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(srvMtx);
   int online = 0, known = 0;
   for (int i = 0; i < SERVERS_MAX; ++i) { if (d[i].known) known++; if (d[i].reachable && d[i].up) online++; }
   char b[48];
-  if (!known) snprintf(b, sizeof b, "conectando...");
+  if (!known) snprintf(b, sizeof b, T("conectando...", "connecting..."));
   else snprintf(b, sizeof b, "%d/%d online", online, SERVERS_MAX);
   setLabelIfChanged(statusLbl, b);
   lv_obj_set_style_text_color(statusLbl, lv_color_hex(!known ? C_MUTED : online == SERVERS_MAX ? C_GREEN : C_RED), 0);

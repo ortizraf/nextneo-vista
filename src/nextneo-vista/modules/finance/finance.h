@@ -34,6 +34,7 @@ struct FinanceData {
   uint32_t quoteEpoch[FINANCE_MAX_ASSETS] = {};
 };
 extern FinanceData fin;
+extern SemaphoreHandle_t finMtx;             // guards fin, financeDetail(Want) (not the app-wide mtx)
 
 // ---- asset list (finance_assets.cpp). UI thread / web handler.
 void loadFinanceAssets();

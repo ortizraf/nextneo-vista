@@ -82,8 +82,7 @@ static void renderMenu() {
     struct tm ti; char b[12];
     if (localNow(&ti)) {
       strftime(b, sizeof b, cfg.h24 ? "%H:%M" : "%I:%M", &ti); setLabelIfChanged(menuClock, b);
-      static const char *wd[] = {"DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SAB"};
-      if (menuCalWeek) setLabelIfChanged(menuCalWeek, wd[ti.tm_wday]);
+      if (menuCalWeek) setLabelIfChanged(menuCalWeek, weekdayUpper(ti.tm_wday));
       if (menuCalDay) { snprintf(b, sizeof b, "%d", ti.tm_mday); setLabelIfChanged(menuCalDay, b); }
       if (menuSnapKey != ti.tm_mday) refreshMenuSnapshot(ti.tm_mday);
     } else if (menuSnapKey == -100) refreshMenuSnapshot(-1);
@@ -305,6 +304,17 @@ static void menuTileClick(lv_event_t *e) {
   ((lv_event_cb_t)lv_event_get_user_data(e))(e);
 }
 
+// Tile caption in the current language. `key` (the Portuguese name) also picks the
+// hand-drawn icon in drawAppGlyph, so it is never translated itself.
+static const char *menuCaption(const char *key) {
+  static const char *const kNames[][2] = {
+    {"Finan\xC3\xA7" "as", "Finance"}, {"Fotos", "Photos"}, {"Servidores", "Servers"}, {"Ajustes", "Settings"},
+    {"Calend\xC3\xA1rio", "Calendar"}, {"Radar", "Radar"}, {"Clima", "Weather"}, {"Rel\xC3\xB3gio", "Clock"},
+    {"Aeroporto", "Airport"}, {"C\xC3\xA9u", "Sky"}, {"F1", "F1"}, {"Arte", "Art"}, {"Futebol", "Football"}};
+  for (const auto &n : kNames) if (!strcmp(key, n[0])) return T(n[0], n[1]);
+  return key;
+}
+
 static lv_obj_t *menuTile(lv_obj_t *parent, const char *symbol, const char *caption,
                           uint32_t tileColor, lv_event_cb_t callback) {
   lv_obj_t *tile = callback ? lv_button_create(parent) : lv_obj_create(parent);
@@ -350,7 +360,7 @@ static lv_obj_t *menuTile(lv_obj_t *parent, const char *symbol, const char *capt
     lv_obj_add_event_cb(tile, tilePressFx, LV_EVENT_PRESS_LOST, shade);
   }
   lv_obj_t *label = lv_label_create(tile);
-  lv_label_set_text(label, caption);
+  lv_label_set_text(label, menuCaption(caption));
   lv_obj_set_width(label, TILE_W);
   lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
   lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);

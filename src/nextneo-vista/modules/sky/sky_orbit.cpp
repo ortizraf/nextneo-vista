@@ -179,4 +179,76 @@ int parseTle(const char *txt, Sat *out, int n, int cap, uint8_t mode) {
 }
 
 
+
+// ---------------------------------------------------------------- OMM CSV (CelesTrak FORMAT=csv)
+// TLE cannot hold catalog numbers >= 100000, so CelesTrak returns no TLE for newly
+// cataloged objects (e.g. "last-30-days" -> 404 "No GP data found"). CSV carries the same
+// mean elements (OMM) for every object:
+// OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,
+// ARG_OF_PERICENTER,MEAN_ANOMALY,...,NORAD_CAT_ID,...,BSTAR,... (columns found by name).
+static double jdOfIso(const char *s) {                      // "2026-11-14T01:47:00.575808" -> JD
+  int y, mo, d, h = 0, mi = 0; double sec = 0;
+  if (sscanf(s, "%d-%d-%dT%d:%d:%lf", &y, &mo, &d, &h, &mi, &sec) < 3) return 0;
+  const long a = (14 - mo) / 12, Y = y + 4800 - a, m = mo + 12 * a - 3;
+  const long jdn = d + (153 * m + 2) / 5 + 365 * Y + Y / 4 - Y / 100 + Y / 400 - 32045;
+  return jdn - 0.5 + (h + mi / 60.0 + sec / 3600.0) / 24.0;
+}
+
+int parseOmmCsv(const char *txt, Sat *out, int n, int cap, uint8_t mode) {
+  enum { C_NAME, C_EPOCH, C_MM, C_ECC, C_INC, C_RAAN, C_ARGP, C_MA, C_CAT, C_BSTAR, C_COUNT };
+  static const char *const kCols[C_COUNT] = {"OBJECT_NAME", "EPOCH", "MEAN_MOTION", "ECCENTRICITY", "INCLINATION",
+                                             "RA_OF_ASC_NODE", "ARG_OF_PERICENTER", "MEAN_ANOMALY", "NORAD_CAT_ID", "BSTAR"};
+  int col[C_COUNT];
+  for (int &c : col) c = -1;
+  const char *p = txt;
+  char line[320];
+  auto getLine = [&]() -> bool {
+    if (!*p) return false;
+    int k = 0;
+    while (*p && *p != '\n') { if (*p != '\r' && k < (int)sizeof line - 1) line[k++] = *p; ++p; }
+    if (*p) ++p;
+    line[k] = 0; return true;
+  };
+  auto split = [](char *l, char **f, int max) {             // in place, no quoted commas in these fields
+    int nf = 0; f[nf++] = l;
+    for (char *c = l; *c && nf < max; ++c) if (*c == ',') { *c = 0; f[nf++] = c + 1; }
+    return nf;
+  };
+  char *f[24];
+  if (!getLine()) return n;
+  const int nh = split(line, f, 24);
+  for (int i = 0; i < nh; ++i)
+    for (int c = 0; c < C_COUNT; ++c) if (!strcmp(f[i], kCols[c])) col[c] = i;
+  for (int c = 0; c < C_COUNT; ++c) if (col[c] < 0) return n;   // not an OMM CSV (error page...)
+  while (n < cap && getLine()) {
+    const int nf = split(line, f, 24);
+    bool ok = true;
+    for (int c = 0; c < C_COUNT; ++c) if (col[c] >= nf) ok = false;
+    if (!ok) continue;
+    const long cat = atol(f[col[C_CAT]]);
+    const double revDay = atof(f[col[C_MM]]);
+    if (revDay < 6.4) continue;                             // deep space (GEO, Molniya...): skip
+    const char *name = f[col[C_NAME]];
+    uint8_t kind = SAT_VISUAL;
+    if (mode == 0) { if (cat == 25544) kind = SAT_ISS; else if (cat == 48274) kind = SAT_CSS; else continue; }
+    if (mode == 1 && (cat == 25544 || cat == 48274)) continue;   // already from "stations"
+    if (mode == 2) { if (strncmp(name, "STARLINK", 8)) continue; kind = SAT_STARLINK; }
+    Sat &s = out[n];
+    memset(&s, 0, sizeof s);
+    snprintf(s.name, sizeof s.name, "%s", kind == SAT_ISS ? "ISS" : kind == SAT_CSS ? "Tiangong" : name);
+    s.kind = kind;
+    s.epochJd = jdOfIso(f[col[C_EPOCH]]);
+    if (s.epochJd <= 0) continue;
+    s.bstar = atof(f[col[C_BSTAR]]);
+    s.inclo = atof(f[col[C_INC]]) * RAD; s.nodeo = atof(f[col[C_RAAN]]) * RAD;
+    s.ecco = atof(f[col[C_ECC]]);
+    s.argpo = atof(f[col[C_ARGP]]) * RAD; s.mo = atof(f[col[C_MA]]) * RAD;
+    s.no = revDay * K_2PI / 1440.0;
+    s.up = true;
+    sgp4Init(s);
+    ++n;
+  }
+  return n;
+}
+
 }  // namespace sky

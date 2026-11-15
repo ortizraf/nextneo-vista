@@ -410,21 +410,21 @@ static void renderInfo(const AirportTraffic &t) {
   if (sel < 0) { lv_obj_set_hidden(info, true); selectedHex[0] = 0; return; }
   const Aircraft &a = t.ac[sel];
   setLabelIfChanged(infoCall, a.callsign[0] ? a.callsign : (a.registration[0] ? a.registration : a.icao24));
-  setLabelIfChanged(infoState, a.onGround ? "EM SOLO" : a.hasAltitude ? "NO AR" : "DESCONHECIDO");
+  setLabelIfChanged(infoState, a.onGround ? T("EM SOLO", "ON GROUND") : a.hasAltitude ? T("NO AR", "AIRBORNE") : T("DESCONHECIDO", "UNKNOWN"));
   char spd[16], hdg[16], alt[20], age[16], b[96];
   fmtOr(spd, sizeof spd, a.hasSpeed, "%.0f kt", a.speedKnots);
   fmtOr(hdg, sizeof hdg, a.hasHeading, "%03.0f\xC2\xB0", a.headingDegrees);
   char code[5]; double la, lo; currentAirport(code, la, lo);
   const float agl = aglM(a, t.geomFt[sel], fieldElevM(code));
-  if (a.onGround) snprintf(alt, sizeof alt, "solo");
-  else if (!isnan(agl)) snprintf(alt, sizeof alt, "%.0f m acima", agl);
+  if (a.onGround) snprintf(alt, sizeof alt, T("solo", "ground"));
+  else if (!isnan(agl)) snprintf(alt, sizeof alt, T("%.0f m acima", "%.0f m above"), agl);
   else fmtOr(alt, sizeof alt, a.hasAltitude, "%.0f m", a.altitudeFeet * 0.3048f);
   const float ageS = (millis() - t.okMs) / 1000.0f + (a.hasPositionAge ? a.positionAgeSeconds : 0) + t.memoS[sel];
   snprintf(age, sizeof age, "%.0f s", ageS);
-  if (t.memoS[sel]) setLabelIfChanged(infoState, "SEM SINAL (\xC3\xBAltima posi\xC3\xA7\xC3\xA3o)");
-  snprintf(b, sizeof b, "VEL %s    RUMO %s    ALT %s", spd, hdg, alt); setLabelIfChanged(infoLine1, b);
+  if (t.memoS[sel]) setLabelIfChanged(infoState, T("SEM SINAL (\xC3\xBAltima posi\xC3\xA7\xC3\xA3o)", "NO SIGNAL (last position)"));
+  snprintf(b, sizeof b, T("VEL %s    RUMO %s    ALT %s", "SPD %s    HDG %s    ALT %s"), spd, hdg, alt); setLabelIfChanged(infoLine1, b);
   AptDetails d;
-  xSemaphoreTake(mtx, portMAX_DELAY); d = det; xSemaphoreGive(mtx);
+  xSemaphoreTake(aptMtx, portMAX_DELAY); d = det; xSemaphoreGive(aptMtx);
   char rb[120], mb[120];
   const bool mine = !strcmp(d.hex, a.icao24);
   // Details panel: open for 5 s once the details are in, then it closes by itself and the
@@ -434,36 +434,36 @@ static void renderInfo(const AirportTraffic &t) {
       if (strcmp(shownHex, d.hex)) { snprintf(shownHex, sizeof shownHex, "%s", d.hex); shownAt = lv_tick_get(); }
       else if (lv_tick_elaps(shownAt) > 5000) {
         selectedHex[0] = 0; shownHex[0] = 0;
-        xSemaphoreTake(mtx, portMAX_DELAY); det.hex[0] = 0; xSemaphoreGive(mtx);
+        xSemaphoreTake(aptMtx, portMAX_DELAY); det.hex[0] = 0; xSemaphoreGive(aptMtx);
         lv_obj_set_hidden(info, true);
         renderedTrafficVersion = UINT32_MAX;                       // icon back to its normal colour
         return;
       }
     } }
-  if (!mine || d.state == DET_PENDING) { snprintf(rb, sizeof rb, "buscando rota e modelo..."); mb[0] = 0; }
+  if (!mine || d.state == DET_PENDING) { snprintf(rb, sizeof rb, T("buscando rota e modelo...", "searching route and model...")); mb[0] = 0; }
   else if (d.state == DET_READY) {
     if (d.org[0] || d.dst[0]) snprintf(rb, sizeof rb, "%s %s  " LV_SYMBOL_RIGHT "  %s %s%s%s", d.org[0] ? d.org : "?", d.orgCity,
                                        d.dst[0] ? d.dst : "?", d.dstCity, d.airline[0] ? "  \xC2\xB7  " : "", d.airline);
-    else snprintf(rb, sizeof rb, "rota n\xC3\xA3o informada%s%s", d.airline[0] ? "  \xC2\xB7  " : "", d.airline);
+    else snprintf(rb, sizeof rb, T("rota n\xC3\xA3o informada%s%s", "route not reported%s%s"), d.airline[0] ? "  \xC2\xB7  " : "", d.airline);
     snprintf(mb, sizeof mb, "%s%s%s%s%s", d.model[0] ? d.model : a.type, a.registration[0] ? "  \xC2\xB7  " : "", a.registration,
              d.owner[0] ? "  \xC2\xB7  " : "", d.owner);
   } else {
-    snprintf(rb, sizeof rb, d.state == DET_FAILED ? "detalhes indispon\xC3\xADveis" : "rota n\xC3\xA3o encontrada");
+    snprintf(rb, sizeof rb, d.state == DET_FAILED ? T("detalhes indispon\xC3\xADveis", "details unavailable") : T("rota n\xC3\xA3o encontrada", "route not found"));
     snprintf(mb, sizeof mb, "%s%s%s", a.type, a.registration[0] ? "  \xC2\xB7  " : "", a.registration);
   }
   setLabelIfChanged(infoRoute, rb); setLabelIfChanged(infoModel, mb);
   if (a.icao24[0] == '~') {                                 // parked at a stand (Aena board, no ADS-B)
     AenaStand st = {}; bool found = false;
-    xSemaphoreTake(mtx, portMAX_DELAY);
+    xSemaphoreTake(aptMtx, portMAX_DELAY);
     for (int k = 0; k < aenaN; ++k) if (!strcmp(aenaStands[k].hex, a.icao24)) { st = aenaStands[k]; found = true; break; }
-    xSemaphoreGive(mtx);
+    xSemaphoreGive(aptMtx);
     if (found) {
       setLabelIfChanged(infoState, st.status);
-      snprintf(b, sizeof b, "POSI\xC3\x87\xC3\x83O %s    PORT\xC3\x83O %s    %s %s %s", st.box,
-               st.gate[0] && strcmp(st.gate, "-") ? st.gate : "\xE2\x80\x94", st.dep ? "SA\xC3\x8D" "DA" : "CHEGOU", st.when,
+      snprintf(b, sizeof b, T("POSI\xC3\x87\xC3\x83O %s    PORT\xC3\x83O %s    %s %s %s", "STAND %s    GATE %s    %s %s %s"), st.box,
+               st.gate[0] && strcmp(st.gate, "-") ? st.gate : "\xE2\x80\x94", st.dep ? T("SA\xC3\x8D" "DA", "DEPARTED") : T("CHEGOU", "ARRIVED"), st.when,
                st.other);
       setLabelIfChanged(infoLine1, b);
-      setLabelIfChanged(infoLine2, "Aena (painel de voos)  \xC2\xB7  sem sinal ADS-B no p\xC3\xA1tio");
+      setLabelIfChanged(infoLine2, T("Aena (painel de voos)  \xC2\xB7  sem sinal ADS-B no p\xC3\xA1tio", "Aena (flight board)  \xC2\xB7  no ADS-B signal on the apron"));
       lv_obj_set_hidden(info, false);
       return;
     }
@@ -472,7 +472,7 @@ static void renderInfo(const AirportTraffic &t) {
   char srcs[40];
   snprintf(srcs, sizeof srcs, "%s%s%s%s", sm & SRC_ADSBLOL ? "ADSB.lol " : "", sm & SRC_AIRPLANES ? "airplanes.live " : "",
            sm & SRC_ADSBFI ? "adsb.fi " : "", sm & SRC_ADSBONE ? "adsb.one" : "");
-  snprintf(b, sizeof b, "POSI\xC3\x87\xC3\x83O h\xC3\xA1 %s  \xC2\xB7  %s  \xC2\xB7  %s", age, a.icao24, srcs);
+  snprintf(b, sizeof b, T("POSI\xC3\x87\xC3\x83O h\xC3\xA1 %s  \xC2\xB7  %s  \xC2\xB7  %s", "POSITION %s ago  \xC2\xB7  %s  \xC2\xB7  %s"), age, a.icao24, srcs);
   setLabelIfChanged(infoLine2, b);
   lv_obj_set_hidden(info, false);
 }
@@ -580,12 +580,12 @@ static void canvasEvent(lv_event_t *e) {
         const float d = (x - p.x) * (x - p.x) + (y - p.y) * (y - p.y);
         if (d < hitD) { hitD = d; snprintf(hitHex, sizeof hitHex, "%s", glide[i].hex); }
       } }
-    xSemaphoreTake(mtx, portMAX_DELAY);
+    xSemaphoreTake(aptMtx, portMAX_DELAY);
     int best = -1;
     if (hitHex[0]) for (int i = 0; i < traffic->count; ++i) if (!strcmp(traffic->ac[i].icao24, hitHex)) { best = i; break; }
     Log.printf("Airport: toque em %d,%d -> %s\n", (int)p.x, (int)p.y, best >= 0 ? hitHex : "nenhum avião");
     if (best < 0 && lv_tick_elaps(lastTapMs) < 400) {                // double tap on the map: recenter
-      xSemaphoreGive(mtx); lastTapMs = 0; recenter(nullptr); return;
+      xSemaphoreGive(aptMtx); lastTapMs = 0; recenter(nullptr); return;
     }
     lastTapMs = lv_tick_get();
     if (best >= 0) snprintf(selectedHex, sizeof selectedHex, "%s", traffic->ac[best].icao24); else selectedHex[0] = 0;
@@ -600,7 +600,7 @@ static void canvasEvent(lv_event_t *e) {
         det.state = DET_PENDING;                                  // fetched at the start of the next cycle
       }
     }
-    xSemaphoreGive(mtx);
+    xSemaphoreGive(aptMtx);
     if (newSel && det.state == DET_PENDING) postScreenJob(JOB_UPDATE);   // start it now (positions keep their 2.5 s guard)
     renderedTrafficVersion = UINT32_MAX;
   }
@@ -683,13 +683,13 @@ static void buildAirportScreen(lv_obj_t *scr) {
   lv_obj_set_style_bg_color(hdr, lv_color_hex(C_BG2), 0); lv_obj_set_scrollable(hdr, false);
   lv_obj_set_clickable(hdr, false);
   addBackButton(airportView);                           // standard back button (main.cpp)
-  title = makeLabel(airportView, "Aeroporto", &lv_font_weather_14, C_TEXT);
+  title = makeLabel(airportView, T("Aeroporto", "Airport"), &lv_font_weather_14, C_TEXT);
   lv_obj_set_pos(title, 50, 9);
   statusDot = lv_obj_create(airportView);
   lv_obj_set_size(statusDot, 8, 8); lv_obj_set_style_radius(statusDot, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_border_width(statusDot, 0, 0); lv_obj_set_style_bg_color(statusDot, lv_color_hex(C_TEXT2), 0);
   lv_obj_set_clickable(statusDot, false);
-  statusLbl = makeLabel(airportView, "conectando", &lv_font_weather_14, C_TEXT2);
+  statusLbl = makeLabel(airportView, T("conectando", "connecting"), &lv_font_weather_14, C_TEXT2);
   lv_obj_set_width(statusLbl, 150); lv_obj_set_style_text_align(statusLbl, LV_TEXT_ALIGN_RIGHT, 0);
   lv_obj_set_pos(statusLbl, SCR_W - 160, 9);
   lv_obj_set_pos(statusDot, SCR_W - 170, 14);
@@ -703,7 +703,7 @@ static void buildAirportScreen(lv_obj_t *scr) {
   footLbl = makeLabel(ftr, "", &lv_font_weather_14, C_TEXT);      // kept for messages only
   lv_obj_set_hidden(footLbl, true);
   // three clear stats: big number + small caption, separated by thin lines
-  static const char *caps[3] = {"em solo", "at\xC3\xA9 200 m", "na regi\xC3\xA3o"};
+  const char *const caps[3] = {T("em solo", "on ground"), T("at\xC3\xA9 200 m", "up to 200 m"), T("na regi\xC3\xA3o", "in the area")};
   static const uint32_t col[3] = {0xF2B66D, 0x4ADE80, C_TEXT};      // same colours as the aircraft icons
   int x = 12;
   for (int k = 0; k < 3; ++k) {
@@ -754,9 +754,9 @@ static void buildAirportScreen(lv_obj_t *scr) {
 
 // ---------------------------------------------------------------- lifecycle (UI thread)
 static void airportOnEnter() {
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(aptMtx, portMAX_DELAY);
   detCacheN = 0; memset(&det, 0, sizeof det);                     // details are per visit
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(aptMtx);
 
   if (!glideTimer) glideTimer = lv_timer_create(glideCb, 60, NULL);    // ~16 fps (same as the radar sweep), only small icons move
   lv_timer_resume(glideTimer);
@@ -780,7 +780,7 @@ static void airportRender() {
   currentAirport(code, lat, lon);
   char iata[5], icao[5], b[96];
   codePair(code, iata, icao);
-  snprintf(b, sizeof b, "Aeroporto   %s / %s", iata, icao);
+  snprintf(b, sizeof b, T("Aeroporto   %s / %s", "Airport   %s / %s"), iata, icao);
   setLabelIfChanged(title, b);
 
   const bool ready = mapReady && !strcmp(mapCode, code);
@@ -790,29 +790,29 @@ static void airportRender() {
   if (ready && mapDrawn && drawnBase != baseVersion) { drawnBase = baseVersion; drawMap(); renderedTrafficVersion = UINT32_MAX; }
   wasReady = ready;
   if (!ready) {
-    setLabelIfChanged(msgLbl, mapMessage[0] ? mapMessage : "Carregando mapa do OpenStreetMap...");
+    setLabelIfChanged(msgLbl, mapMessage[0] ? mapMessage : T("Carregando mapa do OpenStreetMap...", "Loading the OpenStreetMap map..."));
     lv_obj_set_hidden(msgLbl, false);
   } else if (!featCount) {
-    setLabelIfChanged(msgLbl, "Mapa sem elementos no OpenStreetMap");
+    setLabelIfChanged(msgLbl, T("Mapa sem elementos no OpenStreetMap", "Map without features in OpenStreetMap"));
     lv_obj_set_hidden(msgLbl, false);
   } else lv_obj_set_hidden(msgLbl, true);
 
   if (!traffic) return;
   static AirportTraffic t;
-  xSemaphoreTake(mtx, portMAX_DELAY);
+  xSemaphoreTake(aptMtx, portMAX_DELAY);
   const uint32_t ver = traffic->version;
   const bool changed = ver != renderedTrafficVersion;
   if (changed) t = *traffic;
   else { t.okMs = traffic->okMs; t.failed = traffic->failed; t.sourcesOk = traffic->sourcesOk; }
-  xSemaphoreGive(mtx);
+  xSemaphoreGive(aptMtx);
 
   // header status + footer (age refreshed every render, ~0.5 s)
   const uint32_t ageS = t.okMs ? (millis() - t.okMs) / 1000 : 0;
   const bool stale = t.okMs && ageS > 90;
   uint32_t dot = C_TEXT2;
-  if (!t.okMs) snprintf(b, sizeof b, t.failed ? "DADOS INDISPON\xC3\x8DVEIS" : "conectando");
-  else if (stale) { snprintf(b, sizeof b, "ANTIGO  h\xC3\xA1 %lus", (unsigned long)ageS); dot = C_ALERT; }
-  else { snprintf(b, sizeof b, t.failed ? "falha, h\xC3\xA1 %lus" : "ao vivo  %lus", (unsigned long)ageS); dot = t.failed ? C_ALERT : 0x3FA56E; }
+  if (!t.okMs) snprintf(b, sizeof b, t.failed ? T("DADOS INDISPON\xC3\x8DVEIS", "DATA UNAVAILABLE") : T("conectando", "connecting"));
+  else if (stale) { snprintf(b, sizeof b, T("ANTIGO  h\xC3\xA1 %lus", "OLD  %lus ago"), (unsigned long)ageS); dot = C_ALERT; }
+  else { snprintf(b, sizeof b, t.failed ? T("falha, h\xC3\xA1 %lus", "failed, %lus ago") : T("ao vivo  %lus", "live  %lus"), (unsigned long)ageS); dot = t.failed ? C_ALERT : 0x3FA56E; }
   setLabelIfChanged(statusLbl, b);
   lv_obj_set_style_bg_color(statusDot, lv_color_hex(dot), 0);
   int ground = 0, low = 0;
@@ -822,7 +822,7 @@ static void airportRender() {
   snprintf(b, sizeof b, "%d", low);    setLabelIfChanged(statNum[1], b);
   snprintf(b, sizeof b, "%u", t.count); setLabelIfChanged(statNum[2], b);
   { const int ns = !!(t.sourcesOk & SRC_ADSBLOL) + !!(t.sourcesOk & SRC_AIRPLANES) + !!(t.sourcesOk & SRC_ADSBFI) + !!(t.sourcesOk & SRC_ADSBONE);
-    snprintf(b, sizeof b, "%d fonte%s", ns, ns == 1 ? "" : "s"); }
+    snprintf(b, sizeof b, T("%d fonte%s", "%d source%s"), ns, ns == 1 ? "" : "s"); }
   setLabelIfChanged(srcLbl, b);
 
   // Stale data: refresh the faded markers once per second, not on every UI tick.

@@ -28,6 +28,7 @@ struct WeatherData {
   uint32_t weatherVersion = 0;        // bumped on every new forecast / location
 };
 extern WeatherData wx;
+extern SemaphoreHandle_t wxMtx;              // guards wx (not the app-wide mtx)
 
 #include "modules/weather/weather_codes.h"
 
