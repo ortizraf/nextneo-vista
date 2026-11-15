@@ -608,19 +608,22 @@ static void buildDetailPanel() {
 
 // ================================================================ showcase
 // After 20 s without touching the panel, the strip moves one card every 8 s (only with
-// 3+ assets, never while the detail is open). Any touch pauses it again.
+// 3+ assets, never while the detail is open). Any touch pauses it again. The start
+// position (the first cards) stays longer on screen, also after wrapping back to it.
 static constexpr uint32_t SHOWCASE_IDLE_MS = 20000UL, SHOWCASE_STEP_MS = 8000UL;
+static constexpr uint32_t SHOWCASE_HOME_MS = 30000UL;                    // dwell on the first cards
 static constexpr int CARD_PITCH = 210 + 16;                              // card width + strip pad_column
 static uint32_t showcaseLastMs = 0;
 
 static void showcaseTick() {
   if (detailOpen() || builtCount < 3) return;
   if (lv_display_get_inactive_time(NULL) < SHOWCASE_IDLE_MS) { showcaseLastMs = millis(); return; }
-  if (millis() - showcaseLastMs < SHOWCASE_STEP_MS) return;
+  const int cur = lv_obj_get_scroll_x(financeStrip);
+  const uint32_t dwell = cur <= 2 ? SHOWCASE_HOME_MS : SHOWCASE_STEP_MS;   // first cards: longer
+  if (millis() - showcaseLastMs < dwell) return;
   showcaseLastMs = millis();
   const int maxX = builtCount * CARD_PITCH - 16 - SCR_W;
   if (maxX <= 0) return;
-  const int cur = lv_obj_get_scroll_x(financeStrip);
   int next = (cur + CARD_PITCH / 2) / CARD_PITCH * CARD_PITCH + CARD_PITCH;
   if (cur >= maxX - 2) next = 0;                                        // end reached: back to the first card
   else if (next > maxX) next = maxX;
