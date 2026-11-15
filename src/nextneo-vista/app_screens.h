@@ -63,6 +63,7 @@ enum ScreenID : uint8_t {
   SCREEN_F1,
   SCREEN_ART,
   SCREEN_FOOTBALL,
+  SCREEN_GARDEN,
   SCREEN_COUNT
 };
 

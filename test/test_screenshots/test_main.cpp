@@ -6,6 +6,8 @@
 // screen is skipped, and tools/capture_screenshots.py paints over the Wi-Fi name / IP.
 #include "../support/ui_harness.h"
 #include "modules/weather/weather.h"
+#include "modules/garden/garden.h"
+#include <sys/time.h>
 
 static constexpr uint32_t SETTLE_MS = 9000;      // data of the screen (first API job + render)
 
@@ -54,10 +56,47 @@ void tearDown() {}
 // Not captured: private content (Fotos shows the user's own photos).
 static bool isPrivate(ScreenID id) { return id == SCREEN_PHOTOS; }
 
+// Garden: the plant at each stage (a sample of species), saved as garden-<species>-<stage>.png.
+// The owner's real plant is put back afterwards.
+static void captureGardenStages() {
+  using namespace garden;
+  if (time(nullptr) < 1700000000) { struct timeval tv = {1794700800, 0}; settimeofday(&tv, nullptr); }
+  State owner; const bool had = prefs.getBytes("garden", &owner, sizeof owner) == sizeof owner;
+  static const uint8_t kShots[][2] = {{0, STAGE_SPROUT}, {0, STAGE_YOUNG}, {0, STAGE_BUD}, {0, STAGE_BLOOM},
+                                      {1, STAGE_BLOOM}, {2, STAGE_BLOOM}, {3, STAGE_BLOOM}, {4, STAGE_BLOOM},
+                                      {5, STAGE_BLOOM}, {6, STAGE_BLOOM}, {7, STAGE_BLOOM}, {7, STAGE_GROWN}};
+  static const float kAt[STAGE_COUNT] = {0.04f, 0.16f, 0.4f, 0.62f, 0.86f, 1.02f, 1.5f};
+  for (const auto &k : kShots) {
+    State s; plant(s, k[0], (uint32_t)time(nullptr));
+    s.growDays = kSpecies[k[0]].bloomDays * kAt[k[1]];
+    switchScreen(SCREEN_MENU); ui::pump(200);
+    prefs.putBytes("garden", &s, sizeof s); gardenReload();
+    switchScreen(SCREEN_GARDEN); ui::pump(2500);
+    char n[40]; snprintf(n, sizeof n, "garden-%d-%d", k[0], k[1]);
+    capture(n);
+  }
+  { State s; plant(s, 0, (uint32_t)time(nullptr)); s.growDays = 16; s.water = 5;   // thirsty: wilting
+    switchScreen(SCREEN_MENU); ui::pump(200);
+    prefs.putBytes("garden", &s, sizeof s); gardenReload();
+    switchScreen(SCREEN_GARDEN); ui::pump(2500); capture("garden-wilt");
+    switchScreen(SCREEN_MENU); ui::pump(1500); capture("menu-thirsty"); }
+  { State s; plant(s, 0, (uint32_t)time(nullptr)); s.growDays = 22; s.seenStage = STAGE_BLOOM;
+    switchScreen(SCREEN_MENU); ui::pump(200);
+    prefs.putBytes("garden", &s, sizeof s); gardenReload();
+    switchScreen(SCREEN_GARDEN); ui::pump(800); gardenButterflyGo(); ui::pump(5000); capture("garden-butterfly"); }
+  if (had) prefs.putBytes("garden", &owner, sizeof owner); else prefs.remove("garden");
+  gardenReload();
+  switchScreen(SCREEN_MENU); ui::pump(500);
+}
+
 static void test_capture_all() {
   snap = lv_draw_buf_create(SCR_W, SCR_H, LV_COLOR_FORMAT_RGB565, 0);
   TEST_ASSERT_NOT_NULL_MESSAGE(snap, "sem memória para o buffer da imagem");
   hideRealLocation();
+#ifdef SHOT_GARDEN
+  captureGardenStages();          // ONLY=garden ./tools/capture_screenshots.sh
+  return;
+#endif
   ui::goToMenu();
   ui::pump(3000);
   capture("menu");
