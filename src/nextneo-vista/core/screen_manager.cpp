@@ -28,6 +28,7 @@ static const ScreenLifecycle *const kScreens[SCREEN_COUNT] = {
   &kF1Screen,
   &kArtScreen,
   &kFootballScreen,
+  &kGardenScreen,
 };
 
 const ScreenLifecycle *screenLifecycle(ScreenID id) {

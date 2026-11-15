@@ -36,6 +36,7 @@ static const ScreenCase kScreens[] = {
   {SCREEN_F1,           "F1", "F1"},
   {SCREEN_ART,          "Arte", "Art"},
   {SCREEN_FOOTBALL,     "Futebol", "Football"},
+  {SCREEN_GARDEN,       "Jardim", "Garden"},
 };
 static constexpr int kScreenCount = sizeof(kScreens) / sizeof(kScreens[0]);
 static_assert(kScreenCount == SCREEN_COUNT - 2, "every app screen needs a test case");
@@ -176,7 +177,8 @@ inline HeapSnapshot heapNow() {
   static void prefix##_sky()          { body(ui::screenCase(SCREEN_SKY)); }          \
   static void prefix##_f1()           { body(ui::screenCase(SCREEN_F1)); }           \
   static void prefix##_art()          { body(ui::screenCase(SCREEN_ART)); }          \
-  static void prefix##_football()     { body(ui::screenCase(SCREEN_FOOTBALL)); }
+  static void prefix##_football()     { body(ui::screenCase(SCREEN_FOOTBALL)); }     \
+  static void prefix##_garden()       { body(ui::screenCase(SCREEN_GARDEN)); }
 
 #define UI_RUN_PER_SCREEN(prefix)   \
   RUN_TEST(prefix##_weather);       \
@@ -191,4 +193,5 @@ inline HeapSnapshot heapNow() {
   RUN_TEST(prefix##_sky);           \
   RUN_TEST(prefix##_f1);            \
   RUN_TEST(prefix##_art);           \
-  RUN_TEST(prefix##_football)
+  RUN_TEST(prefix##_football);      \
+  RUN_TEST(prefix##_garden)

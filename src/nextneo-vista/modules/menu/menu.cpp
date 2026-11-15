@@ -4,6 +4,7 @@
 #include <string.h>
 #include <lvgl.h>
 #include "app_screens.h"
+#include "modules/garden/garden.h"
 #include "core/screen_registry.h"
 #include "modules/servers/servers.h"
 #include "services/app_log.h"
@@ -11,6 +12,7 @@
 static lv_obj_t *mainMenu;
 static lv_obj_t *menuWifiIcon;
 static lv_obj_t *menuServersBadge;
+static lv_obj_t *menuGardenBadge;   // blue drop when the plant is thirsty
 static lv_obj_t *menuClock;
 static lv_obj_t *menuCalDay, *menuCalWeek;
 static constexpr int MENU_ART_MAX = 32;
@@ -18,7 +20,7 @@ static lv_obj_t *menuArt[MENU_ART_MAX];
 static uint8_t menuArtPage[MENU_ART_MAX];
 static int menuArtN = 0;
 static int menuSnapKey = -100;
-// Menu pages: page 0 = the original 12 apps, page 1 = new apps (Futebol, ...).
+// Menu pages: page 0 = 12 apps (Jardim took F1's place), page 1 = F1, Futebol.
 // Each page is its own 480x320 object, rendered once into its own picture; a long
 // horizontal swipe (MENU_PAGE_SWIPE_PCT of the width) moves the strip between pages.
 static constexpr int MENU_PAGES = 2;
@@ -42,7 +44,9 @@ static void refreshMenuSnapshot(int key) {
   menuSnapKey = key;
   const uint32_t t0 = millis();
   const bool badge = menuServersBadge && !lv_obj_is_hidden(menuServersBadge);
-  if (badge) lv_obj_set_hidden(menuServersBadge, true);   // live overlay, not baked in
+  if (badge) lv_obj_set_hidden(menuServersBadge, true);   // live overlays, not baked in
+  const bool gBadge = menuGardenBadge && !lv_obj_is_hidden(menuGardenBadge);
+  if (gBadge) lv_obj_set_hidden(menuGardenBadge, true);
   bool allOk = true;
   for (int p = 0; p < MENU_PAGES; ++p) {
     if (menuSnapImg[p]) lv_obj_set_hidden(menuSnapImg[p], true);
@@ -64,6 +68,7 @@ static void refreshMenuSnapshot(int key) {
     } else allOk = false;                                       // no memory: keep that page's live icons
   }
   if (badge) lv_obj_set_hidden(menuServersBadge, false);
+  if (gBadge) lv_obj_set_hidden(menuGardenBadge, false);
   LogV.printf("Menu: imagens %s em %lums\n", allOk ? "geradas" : "FALHARAM", (unsigned long)(millis() - t0));
 }
 
@@ -94,6 +99,11 @@ static void renderMenu() {
       else lv_obj_set_hidden(menuServersBadge, true);
     }
   }
+  // Only reads a cached flag: the plant is recomputed at most every 10 min (gardenNeedsWater).
+  if (menuGardenBadge) {
+    const bool thirsty = gardenNeedsWater();
+    if (thirsty == lv_obj_is_hidden(menuGardenBadge)) lv_obj_set_hidden(menuGardenBadge, !thirsty);
+  }
 }
 
 static void showWeatherEvent(lv_event_t *) { switchScreen(SCREEN_WEATHER); }
@@ -110,6 +120,7 @@ static void showSkyEvent(lv_event_t *) { switchScreen(SCREEN_SKY); }
 static void showF1Event(lv_event_t *) { switchScreen(SCREEN_F1); }
 static void showArtEvent(lv_event_t *) { switchScreen(SCREEN_ART); }
 static void showFootballEvent(lv_event_t *) { switchScreen(SCREEN_FOOTBALL); }
+static void showGardenEvent(lv_event_t *) { switchScreen(SCREEN_GARDEN); }
 
 // iOS-style app icon: 64 px squircle-ish tile, vertical gradient (lighter on top),
 // 1 px top highlight, soft drop shadow, press = shrink to 92 % + darken.
@@ -155,6 +166,21 @@ static void drawAppGlyph(lv_obj_t *box, const char *app, const char *symbol) {
     polyline(box, w1, 7, 3, 0x38D6F5);
     blob(box, 16, 14, 5, 5, 0x9FEFFF); blob(box, 34, 18, 4, 4, 0x38D6F5);
     blob(box, 50, 12, 6, 6, 0x9FEFFF); blob(box, 26, 22, 3, 3, 0x1E90FF);
+  } else if (!strcmp(app, "Jardim")) {                      // terracotta pot + leaves + a flower
+    iconBg(box, 0x9ED8F5, 0x4FA8DA);
+    blob(box, 4, 50, 64, 18, 0x3E8A3A);                              // lawn (hill)
+    static const lv_point_precise_t st[] = {{36, 48}, {36, 22}};
+    polyline(box, st, 2, 4, 0x2F6A1E);
+    lv_obj_t *l1 = blob(box, 16, 30, 20, 10, 0x5FB04A); lv_obj_set_style_transform_rotation(l1, 250, 0);
+    lv_obj_t *l2 = blob(box, 37, 34, 20, 10, 0x5FB04A); lv_obj_set_style_transform_rotation(l2, -250, 0);
+    for (int k = 0; k < 8; ++k) {
+      const float a = k * 0.7853982f;
+      blob(box, 31 + (int)lroundf(sinf(a) * 8), 13 - (int)lroundf(cosf(a) * 8), 10, 10, 0xFFC21E);
+    }
+    blob(box, 30, 12, 12, 12, 0x5A3212);
+    lv_obj_t *pot = blob(box, 22, 46, 28, 20, 0xD0743F, 4);
+    lv_obj_set_style_bg_grad_color(pot, lv_color_hex(0x7A3A1C), 0); lv_obj_set_style_bg_grad_dir(pot, LV_GRAD_DIR_HOR, 0);
+    blob(box, 19, 42, 34, 7, 0xE08A58, 3);
   } else if (!strcmp(app, "Futebol")) {                     // pitch + ball
     iconBg(box, 0x2FB55A, 0x167A36);
     blob(box, 8, 10, 56, 2, 0xFFFFFF, 0, LV_OPA_60); blob(box, 8, 60, 56, 2, 0xFFFFFF, 0, LV_OPA_60);
@@ -310,7 +336,7 @@ static const char *menuCaption(const char *key) {
   static const char *const kNames[][2] = {
     {"Finan\xC3\xA7" "as", "Finance"}, {"Fotos", "Photos"}, {"Servidores", "Servers"}, {"Ajustes", "Settings"},
     {"Calend\xC3\xA1rio", "Calendar"}, {"Radar", "Radar"}, {"Clima", "Weather"}, {"Rel\xC3\xB3gio", "Clock"},
-    {"Aeroporto", "Airport"}, {"C\xC3\xA9u", "Sky"}, {"F1", "F1"}, {"Arte", "Art"}, {"Futebol", "Football"}};
+    {"Aeroporto", "Airport"}, {"C\xC3\xA9u", "Sky"}, {"F1", "F1"}, {"Arte", "Art"}, {"Futebol", "Football"}, {"Jardim", "Garden"}};
   for (const auto &n : kNames) if (!strcmp(key, n[0])) return T(n[0], n[1]);
   return key;
 }
@@ -510,10 +536,25 @@ static void buildMenuScreen(lv_obj_t *scr) {
   menuTile(gridA, LV_SYMBOL_HOME, "Relógio", 0x22252B, showClockEvent);
   menuTile(gridA, "", "Aeroporto", 0x0B1A2E, showAirportEvent);
   menuTile(gridA, LV_SYMBOL_EYE_OPEN, "C\xC3\xA9u", 0x1B2C5E, showSkyEvent);
-  menuTile(gridA, "", "F1", 0x15171D, showF1Event);
+  {
+    lv_obj_t *gdn = menuTile(gridA, "", "Jardim", 0x2E7A3A, showGardenEvent);
+    menuGardenBadge = lv_obj_create(gdn);    // blue drop: the plant needs water
+    lv_obj_set_size(menuGardenBadge, 22, 22); lv_obj_align(menuGardenBadge, LV_ALIGN_TOP_RIGHT, -9, -6);
+    lv_obj_set_style_radius(menuGardenBadge, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(menuGardenBadge, lv_color_hex(0x2A9BF0), 0);
+    lv_obj_set_style_border_color(menuGardenBadge, lv_color_hex(0x06163C), 0);
+    lv_obj_set_style_border_width(menuGardenBadge, 2, 0);
+    lv_obj_set_style_pad_all(menuGardenBadge, 0, 0);
+    lv_obj_set_scrollable(menuGardenBadge, false);
+    lv_obj_set_clickable(menuGardenBadge, false);
+    lv_obj_t *drop = makeLabel(menuGardenBadge, LV_SYMBOL_TINT, &lv_font_montserrat_14, 0xFFFFFF);
+    lv_obj_center(drop);
+    lv_obj_set_hidden(menuGardenBadge, true);
+  }
   menuTile(gridA, "", "Arte", 0x07112A, showArtEvent);
-  // ---- page 2: new apps
+  // ---- page 2: F1 (13th app), Futebol (14th)
   menuBuildPage = 1;
+  menuTile(grid[1], "", "F1", 0x15171D, showF1Event);
   menuTile(grid[1], "", "Futebol", 0x167A36, showFootballEvent);
   menuBuildPage = 0;
   // page dots (live objects over the pictures; tap a dot to jump)

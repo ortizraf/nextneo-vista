@@ -47,7 +47,7 @@ else
   grep -E "test cases" logs/native.log | tail -1
   # Default: the full board suites. QUICK=1: the smoke suite only (small changes).
   if [[ -z "${SUITES:-}" ]]; then
-    if [[ "${QUICK:-0}" == "1" ]]; then SUITES="test_smoke"; else SUITES="test_menu test_screens test_lifecycle"; fi
+    if [[ "${QUICK:-0}" == "1" ]]; then SUITES="test_smoke"; else SUITES="test_menu test_screens test_lifecycle test_garden"; fi
   fi
   FILTER=()
   for s in $SUITES; do FILTER+=(-f "$s"); done

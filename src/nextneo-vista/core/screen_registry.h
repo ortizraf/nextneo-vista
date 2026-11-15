@@ -17,3 +17,4 @@ extern const ScreenLifecycle kSkyScreen;
 extern const ScreenLifecycle kF1Screen;
 extern const ScreenLifecycle kArtScreen;
 extern const ScreenLifecycle kFootballScreen;
+extern const ScreenLifecycle kGardenScreen;
