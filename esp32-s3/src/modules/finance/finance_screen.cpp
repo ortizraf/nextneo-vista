@@ -191,6 +191,7 @@ static void buildFinanceScreen(lv_obj_t *scr) {
 static void financeOnEnter() {
   renderedFinanceVersion = UINT32_MAX;
   lastFinanceAgeRender = 0;
+  if (financeStrip) lv_obj_scroll_to_x(financeStrip, 0, LV_ANIM_OFF);   // always start at the first cards
 }
 
 // UI thread, active Finance screen only.
