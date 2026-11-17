@@ -12,6 +12,7 @@ O app principal fica em `src/nextneo-vista/` (ambiente PlatformIO `nextneo-vista
 
 0. [Comece aqui: guia para quem vem do Java](#0-comece-aqui-guia-para-quem-vem-do-java)
 1. [Compilar e gravar (início rápido)](#1-compilar-e-gravar-início-rápido)
+   - [Build e gravação via Docker (padrão, sem instalar nada)](#11-build-e-gravação-via-docker-padrão-sem-instalar-nada)
 2. [Comandos úteis](#2-comandos-úteis)
 3. [Por que não usar `-t upload`](#3-por-que-não-usar--t-upload-nesta-placa)
 4. [Solução de problemas](#4-solução-de-problemas)
@@ -64,6 +65,8 @@ Três diferenças que pegam quem vem do Java:
 3. **Só a thread da tela pode mexer na tela.** É como a regra do Swing (EDT): a task de rede só grava dados (em `sh` ou nos dados do módulo, como `wx` do Clima) e a tela redesenha depois.
 
 ### 0.3 Instalar as ferramentas (uma vez só)
+
+> **Caminho padrão: só o Docker.** Com o [Docker Desktop](https://www.docker.com/products/docker-desktop/) (macOS) ou o Docker Engine (Linux) instalado e aberto, `./tools/firmware.sh` compila e grava a placa sem PlatformIO, Python ou toolchain no computador (seção 1.1). Os passos abaixo são a **segunda opção** (`--local`), para quem prefere o PlatformIO instalado.
 
 1. Instale o **VS Code** e, dentro dele, a extensão **PlatformIO IDE** (menu Extensions, busque "PlatformIO"). Ela instala o `pio` e o Python que ele usa.
    - Alternativa só com terminal: instale o [PlatformIO Core](https://platformio.org/install/cli).
@@ -138,7 +141,7 @@ Dicas:
 
 ## 1. Compilar e gravar (início rápido)
 
-**Pré-requisitos:** macOS ou Linux com [PlatformIO Core](https://platformio.org/install/cli) (`pio`) e a placa conectada por USB (seção 0.3). A placa aparece como `/dev/cu.usbmodem*` no macOS e `/dev/ttyACM*` no Linux; não precisa de driver.
+**Pré-requisitos:** Docker (seção 1.1, padrão) **ou** macOS/Linux com [PlatformIO Core](https://platformio.org/install/cli) (`pio`) e a placa conectada por USB (seção 0.3). A placa aparece como `/dev/cu.usbmodem*` no macOS e `/dev/ttyACM*` no Linux; não precisa de driver.
 
 Abra o Terminal na pasta do projeto:
 
@@ -146,12 +149,57 @@ Abra o Terminal na pasta do projeto:
 cd caminho/para/nextneo-vista     # a pasta onde você clonou o repositório
 ```
 
+### 1.1 Build e gravação via Docker (padrão, sem instalar nada)
+
+Único requisito: **Docker** rodando (Docker Desktop no macOS; Docker Engine no Linux). Todo o resto (Python, PlatformIO, toolchain do ESP32, `esptool`) fica dentro da imagem [`docker/Dockerfile`](docker/Dockerfile).
+
+```sh
+./tools/firmware.sh build      # compila o app (env nextneo-vista)
+./tools/firmware.sh deploy     # testes + gravação, o mesmo da Opção A abaixo (padrão do projeto)
+./tools/firmware.sh upload     # compila e grava na placa SEM testes (porta detectada sozinha)
+./tools/firmware.sh monitor    # monitor serial, 115200 (Ctrl+C sai)
+./tools/firmware.sh clean      # limpa o build
+./tools/firmware.sh image      # (re)constrói só a imagem Docker
+./tools/firmware.sh pio test -e native        # qualquer comando do pio, dentro do Docker
+./tools/firmware.sh esptool --port /dev/cu.usbmodem1201 chip-id   # esptool, dentro do Docker
+```
+
+Opções: `-e <env>` (outro ambiente do `platformio.ini`, ex. `-e snake`), `-p <porta>` (ex. `-p /dev/cu.usbmodem1201`).
+
+**Segunda opção, sem Docker:** acrescente `--local` (ou `USE_DOCKER=0`) e o script usa o `pio` instalado no computador (seção 0.3):
+
+```sh
+./tools/firmware.sh --local upload
+```
+
+Como funciona:
+
+| Item | Detalhe |
+|---|---|
+| Imagem | `nextneo-vista-pio:<hash do Dockerfile>`. Construída sozinha no primeiro uso e reconstruída quando o `Dockerfile` muda. PlatformIO Core 6.2.0 (exigido pela plataforma pioarduino). |
+| Cache | Toolchain, framework e bibliotecas ficam no volume Docker `nnv-platformio`: baixados só na primeira vez (~2–3 GB). Apagar: `docker volume rm nnv-platformio`. |
+| Saída do build | `.pio-docker/build/<env>/` (no Docker) e `.pio/build/<env>/` (no `--local`). São pastas separadas para os dois builds não se misturarem; `.pio-docker/` está no `.gitignore`. |
+| Gravação no Linux | A porta (`/dev/ttyACM0`) é repassada ao container com `--device`. |
+| Gravação no macOS | O Docker no Mac não acessa USB. O script sobe [`tools/serial_bridge.pl`](tools/serial_bridge.pl), uma ponte **RFC 2217** (serial por TCP) escrita em Perl, que já vem no macOS. Ela escuta só em `127.0.0.1`, numa porta livre, repassa dados e os sinais DTR/RTS (que o `esptool` usa para entrar no modo de gravação) e é encerrada no fim do comando. O container grava por `rfc2217://host.docker.internal:<porta>`. |
+| Reset de gravação | `platformio.ini` fixa `board_upload.before_reset = usb-reset` (seção `[esp32]`). Pela ponte RFC 2217 o `esptool` não consegue ler o VID/PID da placa e usaria o reset de placas com chip USB-UART, que falha com *"Wrong boot mode detected (0x28)"*. O aviso *"Failed to get VID/PID ... Using standard reset sequence"* no log é esperado e inofensivo. |
+| Monitor | `./tools/firmware.sh monitor` precisa de um terminal interativo (não funciona com saída redirecionada). |
+| Arquivos criados | O container roda com o seu usuário (`--user`), então os arquivos do build são seus, não do root. |
+
+> `upload` usa `pio run -t upload`: grava bootloader, tabela de partições (a mesma `default_8MB.csv`, seção 3) e o app, **sem rodar os testes**. Para o fluxo com testes, use a Opção A abaixo.
+> Precisa de espaço livre: a imagem + o volume ocupam alguns GB no disco do Docker. Com o disco do Mac cheio o Docker Desktop pode travar (*"no space left on device"*); libere espaço e reinicie o Docker Desktop.
+>
+> **Verificado em 2026-11-16 (macOS, Apple Silicon, Docker Desktop 4.82):** `build` (~5 min na primeira vez, baixando o toolchain) e `upload` para `/dev/cu.usbmodem1201` com *Hash of data verified* em todos os blocos.
+>
+> O deploy com testes (Opção A) também roda no Docker por padrão: chama `tools/firmware.sh pio` e `tools/firmware.sh esptool`, e o build vai para `.pio-docker/`. Verificado com `QUICK=1`: 53 testes no computador, `test_smoke` na placa (a leitura dos resultados também passa pela ponte serial), compilação e gravação verificada. Só o `tools/flash_hub.sh` (hub de jogos, seção 9) ainda exige o PlatformIO instalado.
+
 ### Opção A: deploy com testes (padrão)
 
 ```sh
 chmod +x tools/deploy_nextneo_vista.sh     # só na primeira vez
-./tools/deploy_nextneo_vista.sh
+./tools/deploy_nextneo_vista.sh            # ou: ./tools/firmware.sh deploy
 ```
+
+Roda **no Docker por padrão** (seção 1.1): não precisa de PlatformIO instalado. Para usar o PlatformIO do computador: `USE_DOCKER=0 ./tools/deploy_nextneo_vista.sh` (ou `./tools/firmware.sh --local deploy`).
 
 O script faz quatro coisas, nesta ordem, e **para no primeiro erro**:
 
@@ -170,6 +218,7 @@ SUITES="test_screens" ./tools/deploy_nextneo_vista.sh       # testar só uma su�
 CLEAN=1 ./tools/deploy_nextneo_vista.sh                     # limpar o build antes
 MONITOR=1 ./tools/deploy_nextneo_vista.sh                   # abrir o monitor serial no final
 SKIP_TESTS=1 ./tools/deploy_nextneo_vista.sh                # EMERGÊNCIA: gravar sem testar
+USE_DOCKER=0 ./tools/deploy_nextneo_vista.sh                # sem Docker (PlatformIO instalado)
 ```
 
 ### Opção B: passo a passo
@@ -510,6 +559,17 @@ Com o celular ou computador na mesma rede, abra `http://IP-DO-APARELHO`. O IP ap
 | **Servidores (Beszel)** | Login somente leitura do Beszel e o link de cada sistema monitorado |
 
 Credenciais de Wi-Fi só são digitadas no próprio aparelho.
+
+**Versão gravada:** o primeiro cartão da página mostra a **versão** e o **horário do build** do firmware que está na placa, como em "Sobre" de um aplicativo:
+
+```text
+Versão: v1.2.0 · branch main
+Gravado (build): 16/11/2026, 21:31:04
+```
+
+- A versão vem de `git describe --tags --always --dirty` no momento do build: `v1.2.0` (exatamente numa tag), `v1.2.0-3-gabc1234` (3 commits depois da tag), `ebd329f` (sem tags, só o commit) e `-dirty` (havia alterações não commitadas). Para versões com nome, crie tags: `git tag v1.0.0`.
+- O horário é o do **build**, que no deploy acontece logo antes da gravação. Ele é guardado em UTC e o navegador mostra no fuso local (sem JavaScript aparece em UTC).
+- Gerado a cada build por `tools/pio_progname.py` em `src/nextneo-vista/core/build_info.cpp` (fora do git; só esse arquivo é recompilado). Declarações em `core/build_info.h`. Funciona igual no Docker e no `--local`.
 
 ### Regras gerais de rede
 As URLs exatas de cada tela estão nos blocos **APIs consultadas** acima; `{lat}`/`{lon}` são as coordenadas configuradas em Ajustes. Nenhuma dessas APIs exige chave ou cadastro. Só a tela ativa faz chamadas de API, em uma tarefa de rede dedicada (núcleo 0) que nunca mexe na interface. Ao trocar de tela, pedidos pendentes da tela anterior são descartados e conexões keep-alive são fechadas. O Wi-Fi é verificado a cada minuto, com reconexão automática.
