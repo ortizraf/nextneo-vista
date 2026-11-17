@@ -31,7 +31,7 @@ static void drawCalendar() {
 static void calendarGesture(lv_event_t *e){lv_event_code_t c=lv_event_get_code(e);lv_indev_t *in=lv_indev_active();if(!in)return;lv_point_t p;lv_indev_get_point(in,&p);if(c==LV_EVENT_PRESSED){calTouchStart=p;return;}if(c==LV_EVENT_RELEASED){int dx=p.x-calTouchStart.x;if(abs(dx)>45){calendarOffset+=dx<0?1:-1;drawCalendar();}}}
 
 // On-Enter: redraw the month (the calendar has no remote API).
-static void calendarOnEnter() { drawCalendar(); }
+static void calendarOnEnter() { calendarOffset = 0; drawCalendar(); }   // always the current month
 
 // Periodic refresh while the calendar stays open: redraw only when the day
 // changed (midnight rollover or NTP sync after boot).

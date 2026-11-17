@@ -83,6 +83,7 @@ static void weatherOnEnter() {
   lv_obj_set_hidden(wxSky, true);   // never show a stale picture
   if (lblClock) lv_obj_set_style_text_color(lblClock, lv_color_hex(CLOCK_LIGHT), 0);
   renderedWifiState = -1;
+  if (weatherTabs) lv_tabview_set_active(weatherTabs, 0, LV_ANIM_OFF);   // always start on "Agora"
 }
 
 // Rain under the cloud, by intensity. Upright rounded capsules with a soft vertical
