@@ -1,6 +1,6 @@
 # PlatformIO pre-script:
 #  1. names the firmware after the app (nextneo-vista.bin / .elf) instead of firmware.bin;
-#  2. writes src/nextneo-vista/core/build_info.cpp (gitignored) with the version
+#  2. writes <placa>/src/core/build_info.cpp (gitignored) with the version
 #     (`git describe --tags --always --dirty`) and the build time (Unix epoch, UTC).
 #     Only that small file is recompiled on each build. Shown on the web settings page.
 import subprocess
@@ -32,7 +32,7 @@ const char *const kBuildVersion = "{version}";
 const char *const kBuildBranch = "{branch}";
 const unsigned long kBuildEpoch = {epoch}UL;
 """
-out = root / "src" / "nextneo-vista" / "core" / "build_info.cpp"
+out = root / "src" / "core" / "build_info.cpp"   # <placa>/src/core (header em shared/)
 if not out.exists() or out.read_text() != src:
     out.write_text(src)
 print(f"Build info: {version} ({branch}) epoch {epoch}")

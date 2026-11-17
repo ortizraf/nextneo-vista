@@ -1,8 +1,13 @@
 # NextNeo Vista
 
-Firmware do sistema **NextNeo Vista** para a placa **Guition JC3248W535C** (ESP32-S3, tela 3,5" touch, usada na horizontal 480×320). O nome identifica o projeto e não aparece na interface do aparelho.
+Firmware do **NextNeo Vista**, um painel de informações com tela touch (clima, finanças, radar de aviões, aeroporto, F1, futebol, céu, relógio, fotos, jardim e mais), para placas ESP32. O nome identifica o projeto e não aparece na interface do aparelho.
 
-O app principal fica em `src/nextneo-vista/` (ambiente PlatformIO `nextneo-vista`). Ele tem menu inicial, **Clima**, **Finanças**, **Calendário**, **Radar aéreo** e **Ajustes**. Exemplos e jogos ficam em `examples/`.
+| Placa | Pasta | Estado |
+|---|---|---|
+| **Guition JC3248W535C**: ESP32-S3, tela 3,5" 480×320 | [`esp32-s3/`](esp32-s3/) | completa (14 telas), em **modo manutenção** |
+| **Waveshare ESP32-P4-WIFI6-Touch-LCD-5**: ESP32-P4, tela 5" 720×1280 | [`esp32-p4/`](esp32-p4/) | **esqueleto** pronto para a chegada da placa (seção 11) |
+
+O código comum às placas (APIs, dados, página web, infraestrutura) fica em [`shared/`](shared/). Build e gravação rodam no Docker, sem instalar nada (seção 1.1).
 
 > Especificação completa do produto: [`docs/index.html`](docs/index.html). É uma página única com hardware, mapa de pinos, catálogo de firmwares e arquitetura do hub.
 
@@ -10,7 +15,7 @@ O app principal fica em `src/nextneo-vista/` (ambiente PlatformIO `nextneo-vista
 
 ## Sumário
 
-0. [Comece aqui: guia para quem vem do Java](#0-comece-aqui-guia-para-quem-vem-do-java)
+0. [Primeiros passos](#0-primeiros-passos)
 1. [Compilar e gravar (início rápido)](#1-compilar-e-gravar-início-rápido)
    - [Build e gravação via Docker (padrão, sem instalar nada)](#11-build-e-gravação-via-docker-padrão-sem-instalar-nada)
 2. [Comandos úteis](#2-comandos-úteis)
@@ -22,47 +27,41 @@ O app principal fica em `src/nextneo-vista/` (ambiente PlatformIO `nextneo-vista
 8. [Hardware](#8-hardware)
 9. [Exemplos e hub de jogos](#9-exemplos-e-hub-de-jogos)
 10. [Testes automáticos](#10-testes-automáticos)
+11. [Placas: S3, P4 e como criar uma nova](#11-placas-s3-p4-e-como-criar-uma-nova)
 
 ---
 
-## 0. Comece aqui: guia para quem vem do Java
+## 0. Primeiros passos
 
-Esta seção é para quem programa em Java (ou outra linguagem de servidor) e nunca mexeu com C++ nem com placas. Se você já conhece o mundo embarcado, pule para a seção 1.
+Para quem nunca mexeu com C++ nem com placas. Se você já conhece o mundo embarcado, pule para a seção 1.
 
 ### 0.1 O que é este projeto, em uma frase
 
-É **um único programa** (o *firmware*) que roda sozinho na placa, sem sistema operacional como Linux ou Windows por baixo. Ligou a placa, o programa começa; ele desenha a tela, lê o toque, conecta no Wi-Fi e chama APIs na internet.
+É **um único programa** (o *firmware*) que roda sozinho na placa, sem sistema operacional como Linux ou Windows por baixo. Ligou a placa, o programa começa; ele desenha a tela, lê o toque, conecta no Wi-Fi e chama APIs na internet. Não existe "instalar outro app" na placa: para mudar qualquer coisa, você edita o código, compila e grava o programa novo por cima.
 
-Pense num `.jar` executável que **é** o computador inteiro: não existe "instalar outro app" nem "abrir o terminal" na placa. Para mudar qualquer coisa, você edita o código no Mac, compila e grava o programa novo por cima.
+### 0.2 Termos do projeto
 
-### 0.2 Dicionário Java → este projeto
-
-| Aqui | Equivalente no Java | Observação |
+| Termo | O que é | (em Java) |
 |---|---|---|
-| **ESP32-S3** | a "máquina" onde roda | Processador da placa: 2 núcleos, Wi-Fi, ~512 KB de RAM interna + 8 MB de PSRAM. |
-| **Firmware** | o `.jar` da aplicação | O arquivo final é `nextneo-vista.bin`. |
-| **PlatformIO** (`pio`) | Maven/Gradle | Baixa dependências, compila e grava. |
-| **`platformio.ini`** | `pom.xml` / `build.gradle` | Define bibliotecas (`lib_deps`), flags de compilação e os "ambientes" (`[env:nextneo-vista]` ≈ um *profile*). |
-| **`lib_deps`** | `<dependencies>` | Ex.: `lvgl`, `ArduinoJson`. Baixadas na 1ª compilação. |
-| **Compilar** (`pio run`) | `mvn package` | Gera `.pio/build/nextneo-vista/nextneo-vista.bin`. |
-| **Gravar / flash** | *deploy* | Copia o `nextneo-vista.bin` para a memória da placa pelo cabo USB. |
-| **Monitor serial** | console / `System.out` | Os `Log.printf(...)` do código aparecem aqui. Também dá para ver em `http://IP-DA-PLACA/log`. |
-| **`.h` e `.cpp`** | `interface` e `class` | O `.h` declara o que existe; o `.cpp` implementa. `#include "x.h"` ≈ `import`. |
-| **`setup()` e `loop()`** | `main()` + `while (true)` | O Arduino chama `setup()` uma vez ao ligar e depois `loop()` para sempre. |
-| **LVGL** | Swing / JavaFX | Biblioteca de interface: botões, labels, abas. Funções `lv_...`. |
-| **Task do FreeRTOS** | `Thread` | Rede roda numa task separada (núcleo 0) para não travar a tela. |
-| **`xSemaphoreTake/Give(mtx)`** | bloco `synchronized` | Protege os dados compartilhados entre a task de rede e a de tela (`sh`, `wx`, `fin`...). |
-| **`Preferences`** (NVS) | `java.util.prefs` / arquivo de config | Guarda Wi-Fi, cidade, ativos etc. e sobrevive a reinício. |
-| **PSRAM x RAM interna** | heap grande x heap pequeno | Não há *garbage collector*. Memória é escassa; veja a seção 6. |
-| **`String` (Arduino)** | `String` | Parecida, mas mutável e cara em memória. |
-| **Unity** | JUnit | Biblioteca de testes. `TEST_ASSERT_EQUAL(...)` ≈ `assertEquals(...)`. |
-| **`pio test`** | `mvn test` | Compila os testes, grava na placa e mostra o resultado. Veja a seção 10. |
+| **ESP32-S3 / ESP32-P4** | o processador da placa (Wi-Fi, PSRAM, vários núcleos) | |
+| **Firmware** | o programa gravado na placa: `nextneo-vista.bin` | o `.jar` |
+| **PlatformIO** (`pio`) e **`platformio.ini`** | baixa dependências (`lib_deps`), compila e grava; cada pasta de placa tem o seu `platformio.ini` | Maven + `pom.xml` |
+| **Gravar / flash** | copiar o `.bin` para a placa pelo cabo USB | deploy |
+| **Monitor serial** | onde aparecem os `Log.printf(...)`; também em `http://IP-DA-PLACA/log` | console |
+| **`.h` e `.cpp`** | o `.h` declara, o `.cpp` implementa; `#include "x.h"` traz as declarações | interface / classe |
+| **`setup()` e `loop()`** | chamados pelo Arduino: uma vez ao ligar e depois em laço, para sempre | `main()` |
+| **LVGL** | biblioteca de interface (botões, labels, abas): funções `lv_...` | |
+| **Task do FreeRTOS** | uma thread; a rede roda numa task separada para não travar a tela | `Thread` |
+| **`xSemaphoreTake/Give(mtx)`** | trava os dados compartilhados entre a task de rede e a de tela | `synchronized` |
+| **`Preferences`** (NVS) | guarda Wi-Fi, cidade, ativos etc.; sobrevive a reinício | |
+| **PSRAM x RAM interna** | memória grande e lenta x pequena e rápida (seção 6) | |
+| **Unity** e **`pio test`** | biblioteca de testes e o comando que os roda (seção 10) | JUnit |
 
-Três diferenças que pegam quem vem do Java:
+Três cuidados que mudam o jeito de programar:
 
 1. **Não há garbage collector.** O que é alocado com `new`/`malloc` precisa ser liberado. Por isso o código reaproveita objetos e evita criar `String` à toa.
-2. **Memória é muito pouca.** Um handshake HTTPS sozinho consome ~50 KB de RAM interna. Um erro de memória aqui não lança exceção bonita: a chamada simplesmente falha (veja a seção 6).
-3. **Só a thread da tela pode mexer na tela.** É como a regra do Swing (EDT): a task de rede só grava dados (em `sh` ou nos dados do módulo, como `wx` do Clima) e a tela redesenha depois.
+2. **Memória é pouca.** Um handshake HTTPS consome ~50 KB de RAM interna. Faltou memória, a chamada simplesmente falha, sem exceção (seção 6).
+3. **Só a thread da tela mexe na tela.** A task de rede só grava dados (em `sh` ou nos dados do módulo, como `wx` do Clima) e a tela redesenha depois.
 
 ### 0.3 Instalar as ferramentas (uma vez só)
 
@@ -98,18 +97,21 @@ Depois **saia e entre de novo** na sessão, para o grupo `dialout` valer. O `bui
 editar código (.cpp/.h)  →  testar na placa  →  gravar o app  →  olhar o log
 ```
 
-Na prática é um comando só, dentro da pasta do projeto (a pasta onde você clonou o repositório, com o `platformio.ini`):
+Na prática é um comando só, na pasta do repositório:
 
 ```sh
-cd caminho/para/nextneo-vista     # a pasta onde você clonou o repositório
-./tools/deploy_nextneo_vista.sh
+./tools/firmware.sh s3 deploy      # placa S3; p4 para a placa nova
 ```
 
-> **Regra do projeto: deploy é sempre com teste.** O script roda os testes automáticos na placa e só grava o app se todos passarem (seção 1). Evite `pio run -t upload` direto: ele grava sem testar.
+> **Regra do projeto: deploy é sempre com teste.** O script roda os testes automáticos na placa e só grava o app se todos passarem (seção 1). `upload` grava sem testar; use só quando souber o que está fazendo.
 
 ### 0.5 Onde fica o código de verdade
 
-O código que é compilado fica em **`src/nextneo-vista/`**, dentro da pasta do projeto. As pastas `examples/` (jogos e demos) não entram no build do app.
+- **`shared/src/`**: o que vale para todas as placas (dados das telas, APIs, página web, gerenciador de telas, tarefa de rede, boot).
+- **`esp32-s3/src/`** e **`esp32-p4/src/`**: o que é de cada placa (telas, driver de tela e touch, kit de UI).
+- `esp32-s3/examples/` (jogos e demos) não entra no build do app.
+
+A seção 7 explica como as peças se encaixam.
 
 ### 0.6 Primeira configuração do aparelho
 
@@ -164,6 +166,8 @@ cd caminho/para/nextneo-vista     # a pasta onde você clonou o repositório
 ./tools/firmware.sh esptool --port /dev/cu.usbmodem1201 chip-id   # esptool, dentro do Docker
 ```
 
+**Placa:** o primeiro argumento escolhe a pasta: `s3` (padrão, `esp32-s3/`), `p4` (`esp32-p4/`, quando existir) ou `shared` (testes de lógica). Ex.: `./tools/firmware.sh s3 deploy`, `./tools/firmware.sh shared pio test -e native`. Sem a placa, vale `s3`.
+
 Opções: `-e <env>` (outro ambiente do `platformio.ini`, ex. `-e snake`), `-p <porta>` (ex. `-p /dev/cu.usbmodem1201`).
 
 **Segunda opção, sem Docker:** acrescente `--local` (ou `USE_DOCKER=0`) e o script usa o `pio` instalado no computador (seção 0.3):
@@ -178,7 +182,7 @@ Como funciona:
 |---|---|
 | Imagem | `nextneo-vista-pio:<hash do Dockerfile>`. Construída sozinha no primeiro uso e reconstruída quando o `Dockerfile` muda. PlatformIO Core 6.2.0 (exigido pela plataforma pioarduino). |
 | Cache | Toolchain, framework e bibliotecas ficam no volume Docker `nnv-platformio`: baixados só na primeira vez (~2–3 GB). Apagar: `docker volume rm nnv-platformio`. |
-| Saída do build | `.pio-docker/build/<env>/` (no Docker) e `.pio/build/<env>/` (no `--local`). São pastas separadas para os dois builds não se misturarem; `.pio-docker/` está no `.gitignore`. |
+| Saída do build | `<placa>/.pio-docker/build/<env>/` (no Docker) e `<placa>/.pio/build/<env>/` (no `--local`), ex. `esp32-s3/.pio-docker/build/nextneo-vista/`. São pastas separadas para os dois builds não se misturarem; `.pio-docker/` está no `.gitignore`. |
 | Gravação no Linux | A porta (`/dev/ttyACM0`) é repassada ao container com `--device`. |
 | Gravação no macOS | O Docker no Mac não acessa USB. O script sobe [`tools/serial_bridge.pl`](tools/serial_bridge.pl), uma ponte **RFC 2217** (serial por TCP) escrita em Perl, que já vem no macOS. Ela escuta só em `127.0.0.1`, numa porta livre, repassa dados e os sinais DTR/RTS (que o `esptool` usa para entrar no modo de gravação) e é encerrada no fim do comando. O container grava por `rfc2217://host.docker.internal:<porta>`. |
 | Reset de gravação | `platformio.ini` fixa `board_upload.before_reset = usb-reset` (seção `[esp32]`). Pela ponte RFC 2217 o `esptool` não consegue ler o VID/PID da placa e usaria o reset de placas com chip USB-UART, que falha com *"Wrong boot mode detected (0x28)"*. O aviso *"Failed to get VID/PID ... Using standard reset sequence"* no log é esperado e inofensivo. |
@@ -190,7 +194,7 @@ Como funciona:
 >
 > **Verificado em 2026-11-16 (macOS, Apple Silicon, Docker Desktop 4.82):** `build` (~5 min na primeira vez, baixando o toolchain) e `upload` para `/dev/cu.usbmodem1201` com *Hash of data verified* em todos os blocos.
 >
-> O deploy com testes (Opção A) também roda no Docker por padrão: chama `tools/firmware.sh pio` e `tools/firmware.sh esptool`, e o build vai para `.pio-docker/`. Verificado com `QUICK=1`: 53 testes no computador, `test_smoke` na placa (a leitura dos resultados também passa pela ponte serial), compilação e gravação verificada. Só o `tools/flash_hub.sh` (hub de jogos, seção 9) ainda exige o PlatformIO instalado.
+> O deploy com testes (Opção A) também roda no Docker por padrão: chama `tools/firmware.sh pio` e `tools/firmware.sh esptool`, e o build vai para `esp32-s3/.pio-docker/`; `BOARD=p4` escolhe a outra placa. Verificado com `QUICK=1`: 53 testes no computador, `test_smoke` na placa (a leitura dos resultados também passa pela ponte serial), compilação e gravação verificada. Só o `tools/flash_hub.sh` (hub de jogos, seção 9) ainda exige o PlatformIO instalado.
 
 ### Opção A: deploy com testes (padrão)
 
@@ -224,44 +228,33 @@ USE_DOCKER=0 ./tools/deploy_nextneo_vista.sh                # sem Docker (Platfo
 ### Opção B: passo a passo
 
 ```sh
-# 1) Limpar. Obrigatório após mudar flags do platformio.ini (ex.: alocador do LVGL)
-pio run -e nextneo-vista -t clean
-
-# 2) Compilar
-pio run -e nextneo-vista
-
-# 3) Descobrir a porta da placa (Linux: ls /dev/ttyACM*)
-ls /dev/cu.usbmodem*
-
-# 4) Gravar SOMENTE o app no offset 0x10000 (troque a porta se for diferente)
-~/.platformio/penv/bin/python ~/.platformio/packages/tool-esptoolpy/esptool.py \
-  --chip esp32s3 --port /dev/cu.usbmodem1201 --baud 921600 \
-  write_flash --flash_size 16MB 0x10000 .pio/build/nextneo-vista/nextneo-vista.bin
-
-# 5) Ver o log
-pio device monitor -b 115200
+./tools/firmware.sh s3 clean       # 1) limpar (obrigatório após mudar flags do platformio.ini)
+./tools/firmware.sh s3 build       # 2) compilar
+ls /dev/cu.usbmodem*               # 3) achar a porta (Linux: ls /dev/ttyACM*)
+./tools/firmware.sh s3 esptool --chip esp32s3 --port /dev/cu.usbmodem1201 --baud 921600 \
+  --before usb-reset write_flash 0x10000 .pio-docker/build/nextneo-vista/nextneo-vista.bin   # 4) gravar SÓ o app
+./tools/firmware.sh s3 monitor     # 5) ver o log (Ctrl+C sai)
 ```
 
-A gravação deu certo se aparecer `Hash of data verified`. Para sair do monitor, use **Ctrl+C**.
-
-> Se `pio` não for encontrado, use `~/.platformio/penv/bin/pio` no lugar.
-> A primeira compilação baixa a plataforma ESP32 e as bibliotecas, então pode levar alguns minutos.
+A gravação deu certo se aparecer `Hash of data verified`. O caminho do `.bin` no passo 4 é relativo à pasta da placa (`esp32-s3/`). A primeira compilação baixa a plataforma ESP32 e as bibliotecas e leva alguns minutos.
 
 ---
 
 ## 2. Comandos úteis
 
+Todos na pasta do repositório. Troque `s3` por `p4` para a placa nova; acrescente `--local` para usar o PlatformIO instalado em vez do Docker.
+
 | Objetivo | Comando |
 |---|---|
-| Compilar sem gravar | `pio run -e nextneo-vista` |
-| Limpar build | `pio run -e nextneo-vista -t clean` |
-| **Deploy (testes + gravar app)** | `./tools/deploy_nextneo_vista.sh [porta]` |
-| Só rodar os testes na placa | `pio test -e nextneo-vista` |
-| Monitor serial | `pio device monitor -b 115200` |
-| Listar portas | `pio device list` (ou `ls /dev/cu.usbmodem*` no macOS, `ls /dev/ttyACM*` no Linux) |
-| Tamanho do app | `ls -l .pio/build/nextneo-vista/nextneo-vista.bin` (limite: 3 342 336 bytes) |
-| Hash do app gravado | `shasum -a 256 .pio/build/nextneo-vista/nextneo-vista.bin` |
-| Apagar cache de build | `rm -rf .pio/build` (é recriado no próximo build) |
+| **Deploy (testes + gravar app)** | `./tools/firmware.sh s3 deploy` (`QUICK=1` na frente: teste rápido) |
+| Compilar sem gravar | `./tools/firmware.sh s3 build` |
+| Limpar build | `./tools/firmware.sh s3 clean` |
+| Testes de lógica (computador) | `./tools/firmware.sh shared pio test -e native` |
+| Só os testes na placa | `./tools/firmware.sh s3 pio test -e nextneo-vista` |
+| Monitor serial | `./tools/firmware.sh s3 monitor` |
+| Listar portas | `ls /dev/cu.usbmodem*` (macOS) ou `ls /dev/ttyACM*` (Linux) |
+| Tamanho do app | `ls -l esp32-s3/.pio-docker/build/nextneo-vista/nextneo-vista.bin` (limite S3: 3 342 336 bytes) |
+| Hash do app | `shasum -a 256 esp32-s3/.pio-docker/build/nextneo-vista/nextneo-vista.bin` |
 
 ---
 
@@ -569,7 +562,7 @@ Gravado (build): 16/11/2026, 21:31:04
 
 - A versão vem de `git describe --tags --always --dirty` no momento do build: `v1.2.0` (exatamente numa tag), `v1.2.0-3-gabc1234` (3 commits depois da tag), `ebd329f` (sem tags, só o commit) e `-dirty` (havia alterações não commitadas). Para versões com nome, crie tags: `git tag v1.0.0`.
 - O horário é o do **build**, que no deploy acontece logo antes da gravação. Ele é guardado em UTC e o navegador mostra no fuso local (sem JavaScript aparece em UTC).
-- Gerado a cada build por `tools/pio_progname.py` em `src/nextneo-vista/core/build_info.cpp` (fora do git; só esse arquivo é recompilado). Declarações em `core/build_info.h`. Funciona igual no Docker e no `--local`.
+- Gerado a cada build por `tools/pio_progname.py` em `esp32-s3/src/core/build_info.cpp` (fora do git; só esse arquivo é recompilado). Declarações em `core/build_info.h`. Funciona igual no Docker e no `--local`.
 
 ### Regras gerais de rede
 As URLs exatas de cada tela estão nos blocos **APIs consultadas** acima; `{lat}`/`{lon}` são as coordenadas configuradas em Ajustes. Nenhuma dessas APIs exige chave ou cadastro. Só a tela ativa faz chamadas de API, em uma tarefa de rede dedicada (núcleo 0) que nunca mexe na interface. Ao trocar de tela, pedidos pendentes da tela anterior são descartados e conexões keep-alive são fechadas. O Wi-Fi é verificado a cada minuto, com reconexão automática.
@@ -604,67 +597,83 @@ Além disso:
 
 ## 7. Estrutura do código e arquitetura
 
-### 7.1 Pastas
+### 7.1 Pastas (uma pasta por placa + código compartilhado)
+
+O repositório tem **uma pasta por placa** e uma pasta **compartilhada**, todas na mesma branch:
 
 ```text
-nextneo-vista/                     # pasta do projeto (o nome é o que você escolher ao clonar)
-├── platformio.ini                 # ambientes; flags do LVGL (inclui alocador PSRAM)
-├── tools/                         # deploy_nextneo_vista.sh (testes + gravação), capture_screenshots.sh, garden_art.py (imagens do Jardim), lib_port.sh (porta macOS/Linux)
-├── test/                          # testes automáticos que rodam na placa (seção 10)
-└── src/nextneo-vista/
-    ├── main.cpp                   # só a inicialização (appSetup) e o laço (appLoop)
-    ├── app_screens.h              # "contrato" do app: estado compartilhado, IDs de tela, ScreenLifecycle
-    ├── core/                      # infraestrutura, igual para todas as telas
-    │   ├── screen_manager.*       # troca de telas + timer de atualização da tela ativa
-    │   ├── screen_registry.h      # lista das telas (cada módulo define a sua)
-    │   ├── net_worker.*           # tarefa de rede (núcleo 0): executa os jobs das telas
-    │   ├── display_touch.*        # tela AXS15231B, touch e integração com o LVGL
-    │   ├── web_config.*           # servidor web: monta a página com os cards dos módulos, log e login
-    │   ├── web_ui.h               # API para um módulo pôr o seu card e as suas rotas na página (WebSection)
-    │   ├── ui_kit.cpp             # makeLabel, makeCard, botão voltar, texto seguro
-    │   ├── app_state.cpp          # sh (Wi-Fi/status), cfg, mtx, prefs, hora local
-    │   └── lv_mem_psram.cpp       # alocador do LVGL em PSRAM
-    ├── modules/                   # uma pasta por tela
-    │   ├── menu/                  # menu inicial (ícones, páginas, snapshot)
-    │   ├── weather/               # weather_screen (tela) + weather_fetch (rede, dono de `wx`) + weather_codes
-    │   ├── finance/               # finance_screen + finance_fetch (dono de `fin`) + finance_assets + finance_symbols
-    │   ├── f1/                    # f1_screen + f1_fetch + f1_internal.h
-    │   ├── football/              # football_screen + football_fetch + football_internal.h
-    │   ├── servers/               # servers_screen + servers_data + servers_internal.h
-    │   ├── flight_radar/          # radar: tela + parser/filtro/projeção separados
-    │   ├── flight_airport/        # airport_screen + airport_data (OSM, tráfego, Aena) + airport_internal.h
-    │   ├── sky/                   # sky_screen + sky_fetch (CelesTrak) + sky_orbit (SGP4/TLE, puro)
-    │   ├── clock/  calendar/  photos/  settings/  generative_art/
-    │   ├── <tela>/<tela>_web.cpp  # card + rotas da tela na página web (clima, radar, finanças, fotos, servidores, futebol)
-    │   └── <tela>/<tela>.h        # o que a tela oferece para OUTROS módulos (quando existe)
-    ├── services/                  # HTTPS, alocação em PSRAM, log, provedores de aviões e mapas
-    └── assets/fonts/              # fontes Montserrat com acentos
+nextneo-vista/
+├── shared/                        # COMPARTILHADO: lógica sem tela, usada por todas as placas
+│   ├── library.json               # é uma biblioteca PlatformIO (as placas usam lib_deps = symlink://../shared)
+│   ├── platformio.ini             # só para os testes de lógica no computador (env native)
+│   ├── test/test_native_*/        # 53 testes de lógica (seção 10.7)
+│   └── src/
+│       ├── core/
+│       │   ├── app_core.h         # núcleo: estado (sh, cfg, mtx, prefs), IDs das telas, jobs de rede. SEM LVGL
+│       │   ├── board.h            # CONTRATO DE PLACA: kBoard, boardDisplayBegin(), boardWifiPrepare(), dp()
+│       │   ├── screen_lifecycle.h # contrato de tela (ScreenLifecycle) + tabela kScreenTable da placa
+│       │   ├── app_main.cpp       # boot e laço comuns (appSetup/appLoop): config, Wi-Fi, mDNS, telas, rede
+│       │   ├── screen_manager.*   # troca de telas, timer da tela ativa, descarte de resultados antigos
+│       │   ├── net_worker.*       # tarefa de rede: executa os jobs das telas, mantém Wi-Fi e relógio
+│       │   ├── app_state.cpp      # sh, cfg, hora local
+│       │   ├── web_config.* web_ui.h   # página web (cards dos módulos, log, login, versão, placa)
+│       │   ├── lv_mem_psram.cpp   # alocador do LVGL em PSRAM
+│       │   ├── i18n.*  text_utils.*  build_info.h
+│       ├── services/              # HTTPS, PSRAM, log, login web, provedores de aviões e mapas
+│       └── modules/<tela>/        # a parte de DADOS de cada tela:
+│                                  #   *_fetch / *_data (rede), parsers, *_web (card da página), <tela>.h,
+│                                  #   armazenamento (photos_store, football_favorites)
+├── esp32-s3/                      # placa ESP32-S3, tela 3,5" 480x320 (modo manutenção)
+│   ├── platformio.ini             # envs da placa (app, docs, exemplos/jogos)
+│   ├── src/
+│   │   ├── main.cpp
+│   │   ├── app_screens.h          # inclui core/app_core.h + LVGL, ScreenLifecycle, kit de UI, SCR_W/SCR_H
+│   │   ├── core/                  # board.cpp (contrato), display_touch (tela QSPI + touch), ui_kit,
+│   │   │                          # screen_registry.cpp (kScreenTable), board_web.cpp (card "Tela (QSPI)")
+│   │   ├── modules/<tela>/        # a parte de TELA: *_screen.cpp, ícones, imagens, arte, menu
+│   │   └── assets/fonts/
+│   ├── test/                      # testes na placa (seção 10)
+│   ├── examples/  hub_partitions.csv   # jogos e demos (seção 9)
+├── esp32-p4/                      # placa ESP32-P4, tela 5" 720x1280: esqueleto (seção 11.3)
+│   ├── platformio.ini  partitions_32MB.csv
+│   └── src/  main.cpp  app_screens.h  core/ (board, display_dsi, ui_kit, ...)  modules/home/
+├── docker/  tools/  docs/         # comuns: build via Docker, scripts, documentação
 ```
 
-### 7.2 Como as peças conversam (comparando com Java)
+**Regra:** o que está em `shared/` não inclui `app_screens.h`, telas, o driver da placa nem medidas de tela; só dados, rede, regras e a infraestrutura comum (gerenciador de telas e tarefa de rede usam tipos do LVGL, que todas as placas têm). As telas de cada placa leem esses dados e desenham do seu jeito. Os `#include` usam caminhos a partir da raiz (`"core/..."`, `"modules/..."`, `"services/..."`), que funcionam nos dois lados. Exceção conhecida: `football_fetch.cpp` usa o decodificador PNG do LVGL para os escudos (as duas placas têm LVGL).
+
+**Cada placa fornece** o contrato de `core/board.h`, as telas e a tabela `kScreenTable`, o kit de UI, `kBoardWeb` e a implementação de `flight_radar.cpp` (lista completa na seção 11.1).
+
+### 7.2 Como as peças conversam
 
 ```text
- Núcleo 1 (thread da tela, como a EDT do Swing)          Núcleo 0 (tarefa de rede)
+ Thread da tela (LVGL)                                    Tarefa de rede (outro núcleo)
  ┌───────────────────────────────────────────┐          ┌──────────────────────────┐
- │ screen_manager                            │  NetJob  │ net_worker               │
+ │ screen_manager                 [shared]   │  NetJob  │ net_worker      [shared] │
  │  └─ tela ativa: onEnter / render / onExit │ ───────► │  └─ job.run() (HTTP)     │
  │      timer → postScreenJob(JOB_UPDATE)    │  (fila)  │      grava resultado em  │
  │  render() lê os dados do módulo  ◄────────┼──────────┼──── wx, fin... (mutex)   │
  └───────────────────────────────────────────┘          └──────────────────────────┘
+   telas (*_screen.cpp) e driver: [placa]                 *_fetch / *_data: [shared]
 ```
 
-- **`ScreenLifecycle`** (em `app_screens.h`) é como uma *interface* Java que toda tela implementa: `build`, `onEnter`, `onExit`, `render`, os intervalos de atualização, a lista de **jobs de rede** (`NetJobDef`: nome + função `run()`) e `netRelease` (fechar conexões quando a tela sai).
-- Cada módulo **define a sua** no fim do `<tela>_screen.cpp` (ex.: `kWeatherScreen`). O `screen_manager` só tem a lista delas, na ordem do `enum ScreenID`. Não existe `switch` nem `enum` central de comandos: um job é "o índice `i` na lista de jobs da tela ativa" (`jobs[JOB_UPDATE]` é sempre a atualização periódica). Só os 3 comandos que não pertencem a uma tela (buscar redes, conectar, geocodificar) ficam no `enum GlobalCmd` do core.
-- **Só a tela ativa** busca dados. Cada job leva a tela e a "visita" (epoch) que o pediu; se o usuário saiu, o resultado é descartado. É assim que o app economiza a pouca RAM.
-- **Cada módulo é dono dos próprios dados e do próprio lock.** O `sh` global guarda só o que é do app (Wi-Fi, linha de status, busca de redes) e é protegido pelo `mtx`. O Clima publica em `wx` com `wxMtx`, Finanças em `fin` com `finMtx`; Radar, Aeroporto e Servidores têm `radarMtx`, `aptMtx` e `srvMtx` (F1 e Futebol já tinham o seu). Um trecho nunca segura dois locks ao mesmo tempo.
-- Os **widgets** (`lv_obj_t *`) são `static` dentro do `.cpp` da tela, como campos `private`. Outras telas não conseguem mexer neles.
-- **Página web por módulo.** Cada tela que tem ajustes na página web (`http://nextneovista.local`) tem um `<tela>_web.cpp` com o seu card e as suas rotas, registrado como `WebSection` (`core/web_ui.h`). O `core/web_config.cpp` só monta a página na ordem da lista `kSections` e cuida do log e do login.
-- Telas grandes separam **rede** (`*_fetch.cpp`/`*_data.cpp`) de **tela** (`*_screen.cpp`). O que os dois lados compartilham fica num `*_internal.h` com `namespace` próprio (equivale a classes *package-private*).
+- **Boot comum:** `shared/src/core/app_main.cpp` (`appSetup`/`appLoop`) carrega a configuração, inicia a tela pela placa (`boardDisplayBegin()`), constrói as telas, liga o Wi-Fi e a tarefa de rede. O `main.cpp` de cada placa só chama essas duas funções.
+- **Contrato de placa** (`shared/src/core/board.h`): `kBoard` (nome, resolução, dpi, recursos como áudio e TF), `boardDisplayBegin()`, `boardWifiPrepare()` e `dp()`. Detalhes na seção 11.
+- **`ScreenLifecycle`** (`shared/src/core/screen_lifecycle.h`) é o contrato de toda tela: `build`, `onEnter`, `onExit`, `render`, os intervalos de atualização, a lista de **jobs de rede** (`NetJobDef`: nome + função `run()`) e `netRelease` (fechar conexões quando a tela sai).
+- Cada tela **define a sua** no fim do `<tela>_screen.cpp` (ex.: `kWeatherScreen`), e a placa as lista em `kScreenTable` (`core/screen_registry.cpp` da placa), em qualquer ordem. Telas que uma placa não tem simplesmente não entram na tabela. Um job é "o índice `i` na lista de jobs da tela ativa" (`jobs[JOB_UPDATE]` é sempre a atualização periódica); só os 3 comandos que não pertencem a uma tela (buscar redes, conectar, geocodificar) ficam no `enum GlobalCmd`.
+- **Só a tela ativa** busca dados. Cada job leva a tela e a "visita" (epoch) que o pediu; se o usuário saiu, o resultado é descartado. É assim que o app economiza RAM.
+- **Cada módulo é dono dos próprios dados e do próprio lock.** O `sh` global guarda só o que é do app (Wi-Fi, linha de status, busca de redes), protegido pelo `mtx`. O Clima publica em `wx` com `wxMtx`, Finanças em `fin` com `finMtx`; Radar, Aeroporto e Servidores têm `radarMtx`, `aptMtx` e `srvMtx`. Um trecho nunca segura dois locks ao mesmo tempo.
+- Os **widgets** (`lv_obj_t *`) são `static` dentro do `.cpp` da tela; outras telas não conseguem mexer neles.
+- **Página web por módulo.** Cada tela com ajustes tem um `<tela>_web.cpp` (em `shared/`) com o seu card e as suas rotas, registrado como `WebSection` (`core/web_ui.h`). A placa acrescenta o seu card (`kBoardWeb`). O `core/web_config.cpp` monta a página na ordem de `kSections` e cuida do log, do login e da versão.
+- Telas grandes separam **dados** (`*_fetch.cpp`/`*_data.cpp`, em `shared/`) de **tela** (`*_screen.cpp`, na placa). O que os dois lados compartilham fica num `*_internal.h` com `namespace` próprio.
+- **Dados mudados pela página web** (fotos enviadas, favoritos do Futebol) ficam em `shared/` e expõem um contador de versão (`photosVersion()`, `footballFavoritesVersion()`). A tela compara com a última versão que desenhou e se atualiza; a página web nunca mexe em variáveis de uma tela.
+- **Teste de arquitetura:** compilar a P4 (`./tools/firmware.sh p4 build`) acusa no link qualquer função de `shared/` que ainda dependa de uma tela da S3.
 
 ### 7.3 Criar uma tela nova (passo a passo)
 
-1. Acrescente o ID no `enum ScreenID` em `app_screens.h` (antes de `SCREEN_COUNT`). Não é preciso criar comando de rede em lugar nenhum: os jobs ficam na própria tela.
-2. Crie `modules/nova/nova_screen.cpp`. Os widgets e as funções ficam `static`, e no fim do arquivo vai o registro:
+1. Acrescente o ID no `enum ScreenID` em `shared/src/core/app_core.h` (antes de `SCREEN_COUNT`).
+2. **Dados (comum às placas):** crie em `shared/src/modules/nova/` o `nova_fetch.cpp` (a função do job, que roda na tarefa de rede e grava os dados com um lock próprio) e o `nova.h` (o que a tela lê). Nada de LVGL aqui.
+3. **Tela (na placa):** crie `<placa>/src/modules/nova/nova_screen.cpp`. Widgets e funções ficam `static`; no fim do arquivo vai o registro:
 
    ```cpp
    static const NetJobDef kNovaJobs[] = {{"nova", novaFetch, true}};   // jobs[JOB_UPDATE]: atualização periódica
@@ -673,18 +682,18 @@ nextneo-vista/                     # pasta do projeto (o nome é o que você esc
      nullptr, 60000, 10000, kNovaJobs, 1, nullptr,
    };
    ```
-3. Declare `extern const ScreenLifecycle kNovaScreen;` em `core/screen_registry.h` e coloque `&kNovaScreen` na lista `kScreens` de `core/screen_manager.cpp`, **na mesma posição do enum**.
-   Para pedir dados na hora (num toque, por exemplo), a tela chama `postScreenJob(JOB_UPDATE)`. Se tiver mais de um job, dê nomes aos índices com um `enum` local, como `FIN_JOB_DETAIL` em `finance_screen.cpp`.
-4. Ponha o ícone no menu (`modules/menu/menu.cpp`, função `buildMenuScreen`) chamando `switchScreen(SCREEN_NOVA)`.
-5. Se ela tiver ajustes na página web: crie `modules/nova/nova_web.cpp` com uma função que acrescenta o card (`void novaCard(String &html)`), outra que registra as rotas (`void novaRoutes(WebServer &server)`, começando cada handler com `WEB_REQUIRE_LOGIN(server)`) e `const WebSection kNovaWeb = {"nova", novaCard, novaRoutes};`. Declare-a em `core/web_ui.h` e ponha `&kNovaWeb` em `kSections` (`core/web_config.cpp`), na posição em que o card deve aparecer.
-6. Inclua a tela nos testes (seção 10.6) e rode `pio test`. O teste `test_registry_lists_every_screen_in_order` avisa se a ordem estiver errada.
+   Na P4, escreva os tamanhos com `dp(...)` (mesmo tamanho físico que na S3).
+4. Declare `extern const ScreenLifecycle kNovaScreen;` em `<placa>/src/core/screen_registry.h` e acrescente `&kNovaScreen` em `kScreenTable` (`<placa>/src/core/screen_registry.cpp`). Para pedir dados na hora (num toque, por exemplo), a tela chama `postScreenJob(JOB_UPDATE)`; com mais de um job, dê nomes aos índices com um `enum` local, como `FIN_JOB_DETAIL` em `finance_screen.cpp`.
+5. Ponha o ícone no menu (`modules/menu/menu.cpp` da placa) chamando `switchScreen(SCREEN_NOVA)`.
+6. Ajustes na página web: crie `shared/src/modules/nova/nova_web.cpp` com `void novaCard(String &html)`, `void novaRoutes(WebServer &server)` (cada handler começa com `WEB_REQUIRE_LOGIN(server)`) e `const WebSection kNovaWeb = {"nova", novaCard, novaRoutes};`. Declare em `core/web_ui.h` e ponha `&kNovaWeb` em `kSections` (`core/web_config.cpp`).
+7. Inclua a tela nos testes da placa (seção 10.6) e rode o deploy.
 
 ### 7.4 Idiomas (português e inglês)
 
 O app tem **português (padrão)** e **inglês**: as 14 telas, o menu e a página web. Os logs continuam em português.
 
 - **Escolher o idioma:** em **Ajustes → Tela → Idioma**, na placa, ou no card **Idioma / Language** da página web. A placa reinicia ao salvar, e todas as telas são criadas de novo no idioma escolhido. A escolha fica salva (`prefs`, chave `lang`).
-- **Escrever um texto novo:** use `T("português", "English")` (`core/i18n.h`), como num `ResourceBundle` do Java, só que com os dois textos no mesmo lugar:
+- **Escrever um texto novo:** use `T("português", "English")` (`core/i18n.h`), com os dois textos no mesmo lugar:
 
   ```cpp
   setLabelIfChanged(lbl, T("Chuva", "Rain"));
@@ -695,9 +704,9 @@ O app tem **português (padrão)** e **inglês**: as 14 telas, o menu e a págin
   - Uma tabela `static` fora de função é montada antes de o idioma ser carregado. Use duas tabelas e escolha pelo `gLang`, como em `statCaption()` de `finance_screen.cpp`.
   - Não envolva só um pedaço de texto concatenado (`LV_SYMBOL_UP " texto"`): traduza a expressão inteira.
   - Se o código **compara** um texto (por exemplo, o status que começa com "Falha"), compare com o mesmo `T()`.
-- **Testar em inglês na placa sem mudar o idioma salvo:** `PLATFORMIO_BUILD_FLAGS="-DNNV_FORCE_LANG=1" QUICK=1 ./tools/deploy_nextneo_vista.sh`. Depois, faça um deploy normal para voltar ao firmware de sempre.
+- **Testar em inglês na placa sem mudar o idioma salvo:** `PLATFORMIO_BUILD_FLAGS="-DNNV_FORCE_LANG=1" QUICK=1 ./tools/firmware.sh s3 deploy`. Depois, faça um deploy normal para voltar ao firmware de sempre.
 
-**Stack:** PlatformIO Core 6.x, plataforma pioarduino (Arduino-ESP32 3.x), LVGL 9.6 (fixado em `~9.6.0`: o app usa a API por flag, `lv_obj_set_hidden`...), GFX Library for Arduino, ArduinoJson 7, JPEGDEC. A configuração do LVGL vem por flags (`-DLV_CONF_SKIP`), sem `lv_conf.h`.
+**Stack:** PlatformIO Core 6.2 (no Docker), plataforma pioarduino (Arduino-ESP32 3.x), LVGL 9.6 (fixado em `~9.6.0`: o app usa a API por flag, `lv_obj_set_hidden`...), ArduinoJson 7, JPEGDEC; na S3 também a GFX Library for Arduino. A configuração do LVGL vem por flags (`-DLV_CONF_SKIP`), sem `lv_conf.h`.
 
 ---
 
@@ -756,27 +765,28 @@ Vídeo para o media player: `ffmpeg -i in.mp4 -vf "scale=480:320" -q:v 6 -r 20 o
 
 Os testes conferem, sozinhos, que o **menu** e as **14 telas** abrem e funcionam. Rode-os depois de mexer no código e antes de fazer commit. Assim você não precisa abrir tela por tela com o dedo.
 
-### 10.1 Como funciona, comparando com o Java
+### 10.1 Como funciona
 
-No Java, o `mvn test` roda os testes **no seu computador**. Aqui não dá: as telas precisam da tela, do touch, do Wi-Fi e da memória da placa. Por isso os testes **rodam dentro da placa**:
+Há dois tipos de teste:
+
+- **Na placa** (`<placa>/test/`): as telas precisam da tela, do touch, do Wi-Fi e da memória reais, então os testes **rodam dentro da placa**.
+- **No computador** (`shared/test/`): a lógica pura (parsers, regras, cálculos), em segundos e sem cabo (seção 10.7).
 
 ```text
-pio test  →  compila um firmware de teste  →  grava na placa  →  a placa roda os testes
-          →  o resultado volta pelo cabo USB  →  aparece PASSED/FAILED no seu terminal
+deploy  →  compila um firmware de teste  →  grava na placa  →  a placa roda os testes
+        →  o resultado volta pelo cabo USB  →  aparece PASSED/FAILED no terminal
 ```
 
-| Aqui | No Java | O que é |
-|---|---|---|
-| `pio test -e nextneo-vista` | `mvn test` | Roda todos os testes. |
-| pasta `test/test_menu/` | uma classe `MenuTest` | Uma **suíte**: um grupo de testes sobre um assunto. |
-| `static void test_boot_lands_on_menu()` | método com `@Test` | Um teste. O nome começa com `test_`. |
-| `RUN_TEST(test_boot_lands_on_menu);` | (automático no JUnit) | Em C++ cada teste precisa ser listado no `setup()` da suíte. |
-| `setUp()` / `tearDown()` | `@BeforeEach` / `@AfterEach` | Rodam antes/depois de **cada** teste. Aqui `setUp()` sempre volta ao menu. |
-| `TEST_ASSERT_EQUAL(esperado, atual)` | `assertEquals(esperado, atual)` | Falha o teste se os valores forem diferentes. |
-| `TEST_ASSERT_NOT_NULL(x)` | `assertNotNull(x)` | Falha se `x` for nulo. |
-| `test/support/ui_harness.h` | classe utilitária de teste | Funções comuns a todas as suítes (tocar num botão, achar o botão voltar...). |
+| Elemento | O que é |
+|---|---|
+| pasta `test/test_menu/` | uma **suíte**: um grupo de testes sobre um assunto |
+| `static void test_boot_lands_on_menu()` | um teste; o nome começa com `test_` |
+| `RUN_TEST(test_boot_lands_on_menu);` | cada teste precisa ser listado no `setup()` da suíte |
+| `setUp()` / `tearDown()` | rodam antes/depois de **cada** teste; aqui `setUp()` sempre volta ao menu |
+| `TEST_ASSERT_EQUAL(esperado, atual)`, `TEST_ASSERT_NOT_NULL(x)` | falham o teste se a condição não vale |
+| `test/support/ui_harness.h` | funções comuns às suítes (tocar num botão, achar o botão voltar...) |
 
-> Cada suíte é gravada e roda **separada**: a placa reinicia entre uma e outra. É como se cada classe de teste rodasse numa JVM nova, então uma suíte não atrapalha a outra.
+> Cada suíte é gravada e roda **separada**: a placa reinicia entre uma e outra, então uma suíte não atrapalha a outra.
 
 ### 10.2 As suítes
 
@@ -859,7 +869,7 @@ test/test_screens/test_main.cpp:119:test_back_returns_to_menu_f1:FAIL: Expected 
 Como ler:
 
 - `test_back_returns_to_menu_f1`: o teste "o voltar da tela F1 leva ao menu".
-- `Expected 1 Was 12`: esperava a tela de número 1 e encontrou a 12. Os números são a ordem do `enum ScreenID` em `src/nextneo-vista/app_screens.h`: 1 = menu, 2 = Clima, ..., 12 = F1, 13 = Arte, 14 = Futebol. Ou seja: tocou em voltar e continuou na F1.
+- `Expected 1 Was 12`: esperava a tela de número 1 e encontrou a 12. Os números são a ordem do `enum ScreenID` em `esp32-s3/src/app_screens.h`: 1 = menu, 2 = Clima, ..., 12 = F1, 13 = Arte, 14 = Futebol. Ou seja: tocou em voltar e continuou na F1.
 
 Problemas comuns:
 
@@ -867,7 +877,7 @@ Problemas comuns:
 |---|---|---|
 | `Could not open port` / `Resource busy` | Monitor serial ou outro programa usando o cabo. | Feche o monitor (`Ctrl+C`) e rode de novo. |
 | Fica parado esperando resultado | Placa travou ou reiniciou durante o teste. | Aperte o botão **RST** da placa ou desconecte e reconecte o USB, e rode de novo. |
-| `error:` com nome de arquivo `.cpp` | Erro de compilação (como no Java, o código não compila). | Leia a mensagem: ela aponta a linha. |
+| `error:` com nome de arquivo `.cpp` | Erro de compilação. | Leia a mensagem: ela aponta a linha. |
 | Falha em `does_not_leak` | Uma tela está alocando memória e não libera ao sair. | Veja a mensagem `heap lost ...` e a seção 6. |
 
 ### 10.6 Criar uma tela nova? Crie o teste junto
@@ -887,19 +897,22 @@ Se você adicionar uma tela ao `enum ScreenID`, **os testes deixam de compilar**
 Além dos testes na placa, há testes que rodam **no próprio computador**, em segundos e sem cabo. Eles testam a lógica pura, ou seja, o código que não depende de tela, Wi-Fi nem hardware, como um teste JUnit comum:
 
 ```sh
-pio test -e native
+./tools/firmware.sh shared pio test -e native     # no Docker (padrão)
+./tools/firmware.sh --local shared pio test -e native   # sem Docker
 ```
+
+Os testes ficam em `shared/test/` (código compartilhado entre as placas).
 
 | Suíte (pasta) | O que verifica | Testes |
 |---|---|---|
-| `test/test_native_weather/` | Códigos de clima → texto ("Garoa", "Céu limpo" à noite) e nível de chuva. | 5 |
-| `test/test_native_finance/` | Símbolos da Yahoo (`" petr4.sa "` → `PETR4.SA`), nomes curtos (`USDBRL=X` → `USD/BRL`) e moedas (`BRL` → `R$`). | 4 |
-| `test/test_native_servers/` | Link do Beszel (URL + ID) e a regra de "servidor fora do ar não atrasa o outro": servidores saudáveis primeiro, o que falhou só a cada 60 s, inclusive quando o relógio interno dá a volta (~49 dias). | 10 |
-| `test/test_native_radar/` | Distância entre coordenadas, filtro dos aviões mais próximos, projeção na tela e leitura do JSON do ADSB.lol. | 6 |
-| `test/test_native_text/` | Troca de caracteres que as fontes não têm (travessão, aspas curvas, emoji). | 5 |
-| `test/test_native_sky/` | Órbitas do Céu: leitura dos formatos TLE (com um TLE público da ISS) e CSV (lançamentos novos, catálogo de 6 dígitos) e o SGP4 colocando os satélites em órbita baixa. | 8 |
-| `test/test_native_i18n/` | Português como padrão, inglês quando escolhido, nomes de dias e meses e textos do clima nos dois idiomas. | 6 |
-| `test/test_native_garden/` | Regras do Jardim: florescer depois dos dias da espécie, planta esquecida secando, placa desligada contando no máximo um dia de sede, calor secando mais rápido e chuva regando, cacto apodrecendo com água demais, replantio mantendo o álbum, sede (abaixo de 25%) e a comemoração de fase uma vez só. | 9 |
+| `shared/test/test_native_weather/` | Códigos de clima → texto ("Garoa", "Céu limpo" à noite) e nível de chuva. | 5 |
+| `shared/test/test_native_finance/` | Símbolos da Yahoo (`" petr4.sa "` → `PETR4.SA`), nomes curtos (`USDBRL=X` → `USD/BRL`) e moedas (`BRL` → `R$`). | 4 |
+| `shared/test/test_native_servers/` | Link do Beszel (URL + ID) e a regra de "servidor fora do ar não atrasa o outro": servidores saudáveis primeiro, o que falhou só a cada 60 s, inclusive quando o relógio interno dá a volta (~49 dias). | 10 |
+| `shared/test/test_native_radar/` | Distância entre coordenadas, filtro dos aviões mais próximos, projeção na tela e leitura do JSON do ADSB.lol. | 6 |
+| `shared/test/test_native_text/` | Troca de caracteres que as fontes não têm (travessão, aspas curvas, emoji). | 5 |
+| `shared/test/test_native_sky/` | Órbitas do Céu: leitura dos formatos TLE (com um TLE público da ISS) e CSV (lançamentos novos, catálogo de 6 dígitos) e o SGP4 colocando os satélites em órbita baixa. | 8 |
+| `shared/test/test_native_i18n/` | Português como padrão, inglês quando escolhido, nomes de dias e meses e textos do clima nos dois idiomas. | 6 |
+| `shared/test/test_native_garden/` | Regras do Jardim: florescer depois dos dias da espécie, planta esquecida secando, placa desligada contando no máximo um dia de sede, calor secando mais rápido e chuva regando, cacto apodrecendo com água demais, replantio mantendo o álbum, sede (abaixo de 25%) e a comemoração de fase uma vez só. | 9 |
 
 **Como isso funciona:** o ambiente `[env:native]` do `platformio.ini` compila só os arquivos `.cpp` puros (sem `Arduino.h` nem LVGL) com o compilador do computador (`g++`/`clang`). Por isso essas funções ficam em arquivos próprios, como `servers_retry.cpp` e `finance_symbols.cpp`, e o resto do app só as chama.
 
@@ -910,4 +923,78 @@ pio test -e native
 3. Crie `test/test_native_<assunto>/test_main.cpp` com um `main()` que chame `UNITY_BEGIN()`, os `RUN_TEST(...)` e `return UNITY_END();` (no computador é `main()`, não `setup()`).
 
 O deploy (seção 1) roda esses testes **antes** dos testes da placa: um erro de lógica aparece em ~10 s em vez de 7 minutos.
+
+---
+
+## 11. Placas: S3, P4 e como criar uma nova
+
+### 11.1 O contrato de placa
+
+Tudo que o app comum (`shared/`) precisa de uma placa está em [`shared/src/core/board.h`](shared/src/core/board.h). Cada placa implementa em `<placa>/src/core/board.cpp`:
+
+| Item | O que é | S3 | P4 |
+|---|---|---|---|
+| `kBoard.name` | nome mostrado na página web | `ESP32-S3 3.5"` | `ESP32-P4 5"` |
+| `kBoard.width/height` | resolução na orientação do app | 480×320 | 720×1280 |
+| `kBoard.dpi` | densidade física (base de `dp()`) | 165 | 294 |
+| `kBoard.hasAudio/hasSdCard/hasCamera/hasBattery` | recursos opcionais; o código comum consulta antes de usar | não | sim |
+| `boardDisplayBegin()` | inicia tela, touch e LVGL | `displayBegin()` (QSPI) | `displayDsiBegin()` (MIPI-DSI) |
+| `boardWifiPrepare()` | ajuste antes do Wi-Fi | nada | pinos SDIO do ESP32-C6 |
+
+Além disso, cada placa fornece:
+
+- `app_screens.h`: inclui o núcleo comum e declara o kit de UI e `SCR_W`/`SCR_H`;
+- `core/screen_registry.cpp`: a tabela `kScreenTable` com as telas que a placa tem;
+- `core/board_web.cpp`: o card `kBoardWeb` da página web (na S3, velocidade QSPI; na P4, informações da placa);
+- `core/ui_kit.cpp` e as telas (`modules/<tela>/<tela>_screen.cpp`);
+- a implementação da API do radar (`modules/flight_radar/flight_radar.cpp`; a API fica em `shared/`).
+
+**Tamanhos em `dp()`:** `dp(48)` dá 48 px na S3 e ~86 px na P4, o mesmo tamanho físico, porque a P4 tem 1,8× mais pixels por polegada. Escreva tamanhos de telas novas assim. Fontes seguem a mesma regra: 14→24, 20→36, 28→48.
+
+### 11.2 ESP32-S3 3,5" (`esp32-s3/`): modo manutenção
+
+Placa completa: 14 telas, testes na placa, jogos e demos. Recebe as correções de `shared/` automaticamente; mudanças de tela só quando necessário. Detalhes de hardware na seção 8.
+
+### 11.3 ESP32-P4 5" (`esp32-p4/`): esqueleto pronto
+
+**Placa:** Waveshare ESP32-P4-WIFI6-Touch-LCD-5: RISC-V dual-core 400 MHz, 32 MB de PSRAM, 32 MB de flash, tela IPS 5" 720×1280 MIPI-DSI com touch capacitivo, Wi-Fi 6 e BLE 5 por um ESP32-C6 (ESP-Hosted via SDIO), codec de áudio, slot TF, câmera MIPI-CSI (OV5647), USB OTG 2.0 HS, conector de bateria e GPIO de 40 pinos. Aceleradores: JPEG por hardware, PPA (2D), ISP e H.264.
+
+**O que já existe:**
+
+| Arquivo | Estado |
+|---|---|
+| `platformio.ini` | env `nextneo-vista`, placa `esp32-p4_r3`, flash 32 MB, fontes maiores, biblioteca `shared/` |
+| `partitions_32MB.csv` | dois slots de app de 8 MB (OTA futura) + LittleFS de ~16 MB |
+| `src/main.cpp`, `src/app_screens.h` | iguais em estrutura à S3; `SCR_W`/`SCR_H` = 720×1280 (retrato) |
+| `src/core/board.cpp` | contrato da placa (dpi 294, todos os recursos marcados) |
+| `src/core/display_dsi.cpp` | LVGL pronto (display, buffer em PSRAM, touch); **envio ao painel e leitura do touch são TODO** |
+| `src/core/ui_kit.cpp` | o kit da S3 com tamanhos em `dp()` |
+| `src/core/board_web.cpp` | card "Placa" na página web (resolução, recursos) |
+| `src/modules/home/home_screen.cpp` | tela inicial de teste: placa, versão, Wi-Fi e IP |
+| `src/modules/flight_radar/flight_radar.cpp` | API do radar provisória (até a tela do radar ser portada) |
+
+Toda a parte comum (página web com login/log/versão, Wi-Fi, NTP, tarefa de rede, APIs, fotos no LittleFS, favoritos do Futebol) já vem de `shared/`. **O esqueleto compila no Docker sem a placa:** `./tools/firmware.sh p4 build` gera ~1,8 MB (de um slot de 8 MB).
+
+**VERIFICAR NA PLACA (quando chegar):**
+
+1. **Revisão do chip:** `./tools/firmware.sh p4 esptool --port /dev/cu.usbmodemXXXX chip-id`. rev. 3.x mantém `board = esp32-p4_r3`; revisão anterior (ES) usa `board = esp32-p4`.
+2. **Porta USB:** a placa tem mais de uma Type-C; usar a do USB-Serial-JTAG para gravar.
+3. **Tela:** controlador do painel DSI, backlight e sequência de inicialização (wiki/exemplo oficial da Waveshare). Implementar em `display_dsi.cpp` com o `esp_lcd` (`esp_lcd_new_dsi_bus` + `esp_lcd_new_panel_dpi`).
+4. **Touch:** controlador e pinos I2C; implementar `touch_cb` em `display_dsi.cpp`.
+5. **Wi-Fi (ESP32-C6):** confirmar os pinos SDIO e ligar `WiFi.setPins(...)` em `board.cpp` se os padrões do core não servirem. Verificar se o firmware do C6 é compatível com a versão do ESP-Hosted do core (a biblioteca `ESP_HostedOTA` atualiza o C6).
+6. **Orientação:** retrato (720×1280, nativa) ou paisagem (1280×720); ajustar `SCR_W`/`SCR_H` e `kBoard`.
+
+**Plano depois da tela funcionando:**
+
+1. Portar as telas da S3 uma a uma: copiar o `*_screen.cpp`, trocar medidas fixas por `dp()`/layouts flex, registrar em `kScreenTable` e escrever o teste junto. Começar por Menu, Ajustes e Clima.
+2. Radar: separar a busca de dados do desenho (hoje juntos em `esp32-s3/src/modules/flight_radar/flight_radar.cpp`), levar os dados para `shared/` e apagar a API provisória da P4.
+3. Recursos da P4: dois framebuffers completos e PPA (animação fluida), JPEG por hardware (fotos e mapas maiores), cartão TF (cache de mapas e fotos), áudio (alarme, sons), bateria.
+
+### 11.4 Criar uma placa nova
+
+1. Copie `esp32-p4/` para `esp32-<nome>/` e ajuste o `platformio.ini` (placa, flash, partições, fontes).
+2. Implemente `core/board.cpp` (contrato da seção 11.1) e o driver de tela/touch.
+3. Liste as telas em `core/screen_registry.cpp` (comece pela `home`).
+4. Acrescente o nome em `tools/firmware.sh` (o `case` que aceita `s3|p4|shared`).
+5. `./tools/firmware.sh <nome> build` deve compilar sem a placa conectada.
 

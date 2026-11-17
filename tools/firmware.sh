@@ -2,6 +2,11 @@
 # NextNeo Vista — compilar, gravar e monitorar. Por padrão TUDO roda no Docker
 # (imagem docker/Dockerfile): não precisa instalar PlatformIO, Python nem toolchain.
 #
+#   ./tools/firmware.sh [placa] <comando> [opções]
+#   placa: s3 (padrão, pasta esp32-s3/), p4 (esp32-p4/) ou shared (testes de lógica)
+#
+#   ./tools/firmware.sh s3 deploy               # exemplo: testes + gravação na S3
+#   ./tools/firmware.sh shared pio test -e native   # testes de lógica no computador
 #   ./tools/firmware.sh build                   # compila (env nextneo-vista)
 #   ./tools/firmware.sh upload                  # compila e grava (porta detectada), sem testes
 #   ./tools/firmware.sh deploy                  # testes + gravação (tools/deploy_nextneo_vista.sh)
@@ -26,6 +31,7 @@ cd "$(dirname "$0")/.."
 source tools/lib_port.sh
 
 ENV_NAME=nextneo-vista
+BOARD="${BOARD:-s3}"
 PORT=""
 USE_DOCKER="${USE_DOCKER:-1}"
 CMD=""
@@ -36,13 +42,19 @@ while (($#)); do
     --docker) USE_DOCKER=1 ;;
     -e) ENV_NAME="$2"; shift ;;
     -p) PORT="$2"; shift ;;
-    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    s3|p4|shared) if [[ -z "$CMD" ]]; then BOARD="$1"; else ARGS+=("$1"); fi ;;
     *) if [[ -z "$CMD" ]]; then CMD="$1"; else ARGS+=("$1"); fi
        if [[ "$CMD" == pio || "$CMD" == esptool ]]; then shift; ARGS+=("$@"); break; fi ;;
   esac
   shift
 done
-[[ -n "$CMD" ]] || { sed -n '2,24p' "$0"; exit 1; }
+[[ -n "$CMD" ]] || { sed -n '2,30p' "$0"; exit 1; }
+case "$BOARD" in
+  s3|p4) PROJ_DIR="esp32-$BOARD" ;;
+  shared) PROJ_DIR=shared ;;
+esac
+[[ -f "$PROJ_DIR/platformio.ini" ]] || { echo "Erro: $PROJ_DIR/platformio.ini não existe (placa '$BOARD' ainda não criada?)." >&2; exit 1; }
 
 DOCKERFILE=docker/Dockerfile
 IMAGE="nextneo-vista-pio:$(shasum "$DOCKERFILE" | cut -c1-12)"
@@ -95,7 +107,8 @@ run_pio() { run_tool pio "$@"; }
 run_tool() {
   local tool="$1"; shift
   if [[ "$USE_DOCKER" != 1 ]]; then
-    if [[ "$tool" == pio ]]; then "$(find_pio)" "$@"; else local_esptool "$@"; fi
+    local pio_bin; pio_bin="$(find_pio)"
+    (cd "$PROJ_DIR" && if [[ "$tool" == pio ]]; then "$pio_bin" "$@"; else local_esptool "$@"; fi)
     return
   fi
   local cmd=(pio)
@@ -112,25 +125,25 @@ run_tool() {
   # Build do Docker em .pio-docker/ (não mistura com o .pio/ do PlatformIO local)
   docker run --rm --init ${tty[@]+"${tty[@]}"} \
     --user "$(id -u):$(id -g)" \
-    -v "$PWD:/project" -v "$VOLUME:/opt/platformio" \
-    -e PLATFORMIO_WORKSPACE_DIR=/project/.pio-docker \
+    -v "$PWD:/project" -v "$VOLUME:/opt/platformio" -w "/project/$PROJ_DIR" \
+    -e PLATFORMIO_WORKSPACE_DIR="/project/$PROJ_DIR/.pio-docker" \
     ${DOCKER_DEV_OPTS[@]+"${DOCKER_DEV_OPTS[@]}"} \
     "$IMAGE" "${cmd[@]}" "${args[@]}"
 }
 
 need_port() { [[ -n "$PORT" ]] || PORT="$(detect_port "")"; echo "== Porta: $PORT" >&2; }
 BUILD_DIR=$([[ "$USE_DOCKER" == 1 ]] && echo .pio-docker || echo .pio)
-echo "== Modo: $([[ "$USE_DOCKER" == 1 ]] && echo "Docker ($IMAGE)" || echo "local (sem Docker)")" >&2
+echo "== Placa: $PROJ_DIR · modo: $([[ "$USE_DOCKER" == 1 ]] && echo "Docker ($IMAGE)" || echo "local (sem Docker)")" >&2
 
 case "$CMD" in
   image)   ensure_image ;;
   build)   run_pio run -e "$ENV_NAME"
-           echo "== Firmware: $BUILD_DIR/build/$ENV_NAME/" ;;
+           echo "== Firmware: $PROJ_DIR/$BUILD_DIR/build/$ENV_NAME/" ;;
   upload)  need_port; run_pio run -e "$ENV_NAME" -t upload --upload-port "$PORT" ;;
   monitor) need_port; run_pio device monitor -b 115200 -p "$PORT" ;;
   clean)   run_pio run -e "$ENV_NAME" -t clean ;;
   pio)     run_tool pio ${ARGS[@]+"${ARGS[@]}"} ;;
   esptool) run_tool esptool ${ARGS[@]+"${ARGS[@]}"} ;;
-  deploy)  USE_DOCKER="$USE_DOCKER" exec ./tools/deploy_nextneo_vista.sh ${PORT:+"$PORT"} ;;
+  deploy)  USE_DOCKER="$USE_DOCKER" BOARD="$BOARD" exec ./tools/deploy_nextneo_vista.sh ${PORT:+"$PORT"} ;;
   *) echo "Comando desconhecido: $CMD (use build, upload, deploy, monitor, clean, image, pio ou esptool)" >&2; exit 1 ;;
 esac

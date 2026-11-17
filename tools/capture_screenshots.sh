@@ -15,7 +15,7 @@ mkdir -p logs
 OUT=docs/screens
 if [ "${ONLY:-}" = garden ]; then export PLATFORMIO_BUILD_FLAGS="-DSHOT_GARDEN"; OUT=logs/garden-shots; fi
 echo "== Gravando o firmware de captura"
-"$PIO" test -e nextneo-vista-docs --without-testing --upload-port "$PORT" > logs/screenshots-build.log 2>&1 \
+(cd esp32-s3 && "$PIO" test -e nextneo-vista-docs --without-testing --upload-port "$PORT") > logs/screenshots-build.log 2>&1 \
   || { tail -20 logs/screenshots-build.log; exit 1; }
 echo "== Recebendo as imagens (cerca de 3 minutos)"
 "$PY" tools/capture_screenshots.py "$PORT" "$OUT"

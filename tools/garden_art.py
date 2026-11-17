@@ -3,7 +3,7 @@ shadows) and writes them as C arrays for the firmware.
 
     <python with pillow + numpy> tools/garden_art.py [--preview out_dir]
 
-Writes src/nextneo-vista/modules/garden/garden_art.cpp. Each picture is a JPEG (colour)
+Writes esp32-s3/src/modules/garden/garden_art.cpp. Each picture is a JPEG (colour)
 plus an RLE 4-bit alpha mask, decoded on the board only when the plant changes stage.
 Every primitive (petal, leaf, stem, sphere, ribbed body) is a height field: its normals
 are lit by one light from the upper left, so the shapes read as round 3D objects.
@@ -601,7 +601,7 @@ def main():
     body.append("const GardenArt kGardenPot = " + ent(pics[-4])[2:-1] + ";")
     body.append("const GardenArt kGardenFly[2] = {" + ent(pics[-3])[2:-1] + ", " + ent(pics[-2])[2:-1] + "};")
     body.append("const GardenArt kGardenBackdrop = " + ent(pics[-1])[2:-1] + ";")
-    out = os.path.join(root, "src/nextneo-vista/modules/garden/garden_art.cpp")
+    out = os.path.join(root, "esp32-s3/src/modules/garden/garden_art.cpp")
     open(out, "w").write("\n".join(body) + "\n")
     total = sum(len(p["jpg"]) + len(p["rle"]) for p in pics)
     print(f"{len(pics)} imagens, {total / 1024:.0f} KB -> {out}")

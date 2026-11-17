@@ -29,13 +29,15 @@ APP_OFFSET=0x10000
 APP_SLOT_BYTES=$((0x330000))   # app0 = 3264 KB (default_8MB.csv)
 # Docker (padrão): tudo via tools/firmware.sh. USE_DOCKER=0: PlatformIO instalado.
 USE_DOCKER="${USE_DOCKER:-1}"; export USE_DOCKER
+BOARD="${BOARD:-s3}"            # pasta esp32-$BOARD (s3 = 3,5"; p4 = 5")
 if [[ "$USE_DOCKER" == 1 ]]; then BUILD_DIR=.pio-docker; else BUILD_DIR=.pio; fi
-IMAGE="$BUILD_DIR/build/$ENV_NAME/nextneo-vista.bin"
+IMAGE="$BUILD_DIR/build/$ENV_NAME/nextneo-vista.bin"   # relativo à pasta da placa
 mkdir -p logs                  # saída completa dos testes / gravação (fora do git)
 
 # ---- PlatformIO e porta USB (macOS e Linux: tools/lib_port.sh)
-PIO=(./tools/firmware.sh pio)
-ESPTOOL_CMD=(./tools/firmware.sh esptool)
+PIO=(./tools/firmware.sh "$BOARD" pio)
+PIO_SHARED=(./tools/firmware.sh shared pio)      # testes de lógica (shared/)
+ESPTOOL_CMD=(./tools/firmware.sh "$BOARD" esptool)
 PORT="$(detect_port "${1:-}")"
 echo "== Porta: $PORT"
 
@@ -44,7 +46,7 @@ if [[ "${SKIP_TESTS:-0}" == "1" ]]; then
   echo "== ATENÇÃO: testes pulados (SKIP_TESTS=1)"
 else
   echo "== 0/3 Testes de lógica no computador (saída completa em logs/native.log)"
-  if ! "${PIO[@]}" test -e native > logs/native.log 2>&1; then
+  if ! "${PIO_SHARED[@]}" test -e native > logs/native.log 2>&1; then
     grep -E ":FAIL|error:|native +test_|test cases" logs/native.log | tail -20 || true
     echo "Erro: testes de lógica falharam. Nada foi gravado na placa." >&2
     exit 1
@@ -75,7 +77,7 @@ echo "== 2/3 Compilando $ENV_NAME"
 "${PIO[@]}" run -e "$ENV_NAME" > logs/build.log 2>&1 || { tail -30 logs/build.log; echo "Erro: falha na compilação (logs/build.log)." >&2; exit 1; }
 grep -E "RAM:|Flash:" logs/build.log || true
 
-SIZE=$(file_size "$IMAGE")
+SIZE=$(file_size "esp32-$BOARD/$IMAGE")
 echo "== Tamanho do app: $SIZE bytes (limite $APP_SLOT_BYTES)"
 (( SIZE <= APP_SLOT_BYTES )) || { echo "Erro: o app não cabe na partição app0 de 3264 KB. Nada foi gravado." >&2; exit 1; }
 

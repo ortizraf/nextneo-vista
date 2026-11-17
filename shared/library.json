@@ -1,0 +1,11 @@
+{
+  "name": "nextneo-shared",
+  "version": "1.0.0",
+  "description": "NextNeo Vista: lógica comum às placas (APIs, parsers, i18n, página web, serviços)",
+  "frameworks": "arduino",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src",
+    "libArchive": false
+  }
+}
