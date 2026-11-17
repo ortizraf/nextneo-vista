@@ -1,3 +1,5 @@
+#include <esp_heap_caps.h>
+#include <math.h>
 #include "app_screens.h"
 #include "core/screen_registry.h"
 #include "modules/weather/weather.h"
@@ -20,8 +22,10 @@ static int renderedDayCodes[7] = {-999,-999,-999,-999,-999,-999,-999};
 static uint32_t renderedWeatherVersion = UINT32_MAX;
 // Photo-like sky behind the tabs (same images as the Clock screen, clock.cpp).
 const lv_image_dsc_t *skyImageFor(float hour, int code);
+void applySkyVeil(lv_obj_t *veil);            // clock_screen.cpp
+lv_obj_t *createSkyVeil(lv_obj_t *parent);
 bool cachedWeatherCode(int &code);   // clock.cpp: last good forecast in flash
-static lv_obj_t *wxSky;
+static lv_obj_t *wxSky, *wxVeil;
 static int skyKey = -1;
 
 // The sky photo can put the sun (or a bright cloud) right behind the clock: white digits
@@ -64,7 +68,7 @@ static void adaptClockColor(const lv_image_dsc_t *img) {
 static void refreshSky(int code, bool force) {
   struct tm ti;
   if (!localNow(&ti)) return;
-  const int key = code * 100 + ti.tm_hour * 4 + ti.tm_min / 15;     // re-pick every 15 min or on new code
+  const int key = code * 1000 + ti.tm_hour * 12 + ti.tm_min / 5;     // re-pick every 5 min (twilight veil) or on new code
   if (!force && key == skyKey) return;
   skyKey = key;
   const lv_image_dsc_t *img = skyImageFor(ti.tm_hour + ti.tm_min / 60.0f, code);
@@ -72,6 +76,7 @@ static void refreshSky(int code, bool force) {
   lv_image_set_src(wxSky, img);
   lv_obj_invalidate(wxSky);
   lv_obj_set_hidden(wxSky, false);       // shown only with the right picture
+  applySkyVeil(wxVeil);
   adaptClockColor(img);
 }
 static int renderedWifiState = -1;
@@ -81,6 +86,7 @@ static void weatherOnEnter() {
   renderedWeatherVersion = UINT32_MAX;
   skyKey = -1;            // Clock may have reused the buffer: reload
   lv_obj_set_hidden(wxSky, true);   // never show a stale picture
+  if (wxVeil) lv_obj_set_hidden(wxVeil, true);
   if (lblClock) lv_obj_set_style_text_color(lblClock, lv_color_hex(CLOCK_LIGHT), 0);
   renderedWifiState = -1;
   if (weatherTabs) lv_tabview_set_active(weatherTabs, 0, LV_ANIM_OFF);   // always start on "Agora"
@@ -120,6 +126,33 @@ static void addRainDrops(lv_obj_t *parent, int code, float s) {
   }
 }
 
+// Crescent moon drawn into a small transparent canvas (ARGB8888): the lit disc minus an
+// offset disc, anti-aliased. Real transparency, so it works over any sky photo or veil
+// (the old version covered the moon with a second, dark disc).
+static void freeCanvasBuf(lv_event_t *e) { heap_caps_free(lv_event_get_user_data(e)); }
+static lv_obj_t *makeCrescent(lv_obj_t *parent, int x, int y, int d, uint32_t rgb) {
+  if (d < 4) d = 4;
+  const int W = d + 2;
+  uint32_t *buf = (uint32_t *)heap_caps_malloc(W * W * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  lv_obj_t *cv = lv_canvas_create(parent);
+  lv_obj_set_pos(cv, x - 1, y - 1);
+  lv_obj_set_clickable(cv, false);
+  if (!buf) return cv;
+  const float r = d / 2.0f, cx = W / 2.0f, cy = W / 2.0f;
+  const float rb = r * 0.86f, bx = cx + r * 0.62f, by = cy - r * 0.42f;   // the shadowed part
+  for (int j = 0; j < W; ++j)
+    for (int i = 0; i < W; ++i) {
+      const float px = i + 0.5f, py = j + 0.5f;
+      float a = r + 0.5f - sqrtf((px - cx) * (px - cx) + (py - cy) * (py - cy));
+      float b = sqrtf((px - bx) * (px - bx) + (py - by) * (py - by)) - rb + 0.5f;
+      a = a < 0 ? 0 : a > 1 ? 1 : a; b = b < 0 ? 0 : b > 1 ? 1 : b;
+      buf[j * W + i] = ((uint32_t)(a * b * 255) << 24) | (rgb & 0xFFFFFF);
+    }
+  lv_canvas_set_buffer(cv, buf, W, W, LV_COLOR_FORMAT_ARGB8888);
+  lv_obj_add_event_cb(cv, freeCanvasBuf, LV_EVENT_DELETE, buf);
+  return cv;
+}
+
 static lv_obj_t *makeWeatherIcon(lv_obj_t *parent, int x, int y, int size, int code, bool night = false) {
   lv_obj_t *icon = lv_obj_create(parent);
   lv_obj_set_size(icon, size, size);
@@ -133,30 +166,32 @@ static lv_obj_t *makeWeatherIcon(lv_obj_t *parent, int x, int y, int size, int c
   // illustration (designed on a 150 px canvas) so all forecast views match it.
   const float s = size / 150.0f;
   auto scaled = [s](int value) { return (int)(value * s + 0.5f); };
-  if (code <= 2) {
+  // Moon / sun behind the cloud. Overcast at night still shows a small moon peeking
+  // out, so "nublado à noite" does not look like a daytime cloud.
+  const bool moonPeek = night && code == 3;
+  if (code <= 2 || moonPeek) {
     // Day: sun. Night: pale moon (crescent cut by a disc in the night-sky colour).
-    lv_obj_t *sun = lv_obj_create(icon);
-    lv_obj_set_size(sun, scaled(night ? 50 : 62), scaled(night ? 50 : 62));
-    lv_obj_set_pos(sun, scaled(night ? 74 : 68), scaled(night ? 8 : 5));
-    lv_obj_set_style_radius(sun, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(sun, lv_color_hex(night ? 0xE9EEF7 : 0xFFC96B), 0);
-    lv_obj_set_style_border_width(sun, 0, 0);
-    lv_obj_move_to_index(sun, 0);
+    const int d = moonPeek ? 40 : night ? 50 : 62, px = moonPeek ? 84 : night ? 74 : 68, py = moonPeek ? 14 : night ? 8 : 5;
     if (night) {
-      lv_obj_t *cut = lv_obj_create(icon);
-      lv_obj_set_size(cut, scaled(42), scaled(42));
-      lv_obj_set_pos(cut, scaled(92), scaled(0));
-      lv_obj_set_style_radius(cut, LV_RADIUS_CIRCLE, 0);
-      lv_obj_set_style_bg_color(cut, lv_color_hex(0x1B2740), 0);
-      lv_obj_set_style_border_width(cut, 0, 0);
-      lv_obj_move_to_index(cut, 1);
+      lv_obj_t *moon = makeCrescent(icon, scaled(px), scaled(py), scaled(d), moonPeek ? 0xCFD8E6 : 0xE9EEF7);
+      lv_obj_move_to_index(moon, 0);
+    } else {
+      lv_obj_t *sun = lv_obj_create(icon);
+      lv_obj_set_size(sun, scaled(d), scaled(d));
+      lv_obj_set_pos(sun, scaled(px), scaled(py));
+      lv_obj_set_style_radius(sun, LV_RADIUS_CIRCLE, 0);
+      lv_obj_set_style_bg_color(sun, lv_color_hex(0xFFC96B), 0);
+      lv_obj_set_style_border_width(sun, 0, 0);
+      lv_obj_move_to_index(sun, 0);
     }
   }
+  // Night clouds: cooler, dimmer greys (the bright day cloud glowed on the dark sky).
+  const uint32_t baseCol = night ? 0x8E9DB0 : 0xBBD2EA, puffCol = night ? 0xAEBBCB : 0xD8E7F5;
   lv_obj_t *base = lv_obj_create(icon);
   lv_obj_set_size(base, scaled(106), scaled(42));
   lv_obj_set_pos(base, scaled(22), scaled(61));
   lv_obj_set_style_radius(base, scaled(22), 0);
-  lv_obj_set_style_bg_color(base, lv_color_hex(0xBBD2EA), 0);
+  lv_obj_set_style_bg_color(base, lv_color_hex(baseCol), 0);
   lv_obj_set_style_border_width(base, 0, 0);
   const int puffX[] = {34, 68};
   const int puffY[] = {38, 49};
@@ -166,7 +201,7 @@ static lv_obj_t *makeWeatherIcon(lv_obj_t *parent, int x, int y, int size, int c
     lv_obj_set_size(puff, scaled(puffSize[j]), scaled(puffSize[j]));
     lv_obj_set_pos(puff, scaled(puffX[j]), scaled(puffY[j]));
     lv_obj_set_style_radius(puff, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(puff, lv_color_hex(0xD8E7F5), 0);
+    lv_obj_set_style_bg_color(puff, lv_color_hex(puffCol), 0);
     lv_obj_set_style_border_width(puff, 0, 0);
   }
   addRainDrops(icon, code, s);
@@ -416,6 +451,7 @@ static void buildWeatherScreen(lv_obj_t *scr) {
   lv_obj_set_size(wxSky, SCR_W, SCR_H);
   lv_obj_set_clickable(wxSky, false);
   lv_obj_set_hidden(wxSky, true);
+  wxVeil = createSkyVeil(weatherView);    // twilight tint over the grey day photos
   weatherTabs = lv_tabview_create(weatherView);
   lv_obj_set_size(weatherTabs, SCR_W, SCR_H);
   lv_obj_set_pos(weatherTabs, 0, 0);
@@ -561,41 +597,8 @@ static void updateWeatherScreen() {
       // Change the scene colours to suit the current condition.
       refreshSky(code, true);      // the sky photo now carries the condition
       lv_obj_clean(weatherArt);
-      // Keep the original large weather artwork on Agora; card icons below
-      // are a compact rendering of this same cloud/sun/drop visual language.
-      lv_obj_t *cloudBase = lv_obj_create(weatherArt);
-      lv_obj_set_pos(cloudBase, 22, 61); lv_obj_set_size(cloudBase, 106, 42);
-      lv_obj_set_style_radius(cloudBase, 22, 0);
-      lv_obj_set_style_bg_color(cloudBase, lv_color_hex(0xBBD2EA), 0);
-      lv_obj_set_style_border_width(cloudBase, 0, 0);
-      lv_obj_t *puff1 = lv_obj_create(weatherArt);
-      lv_obj_set_pos(puff1, 34, 38); lv_obj_set_size(puff1, 54, 54);
-      lv_obj_set_style_radius(puff1, LV_RADIUS_CIRCLE, 0);
-      lv_obj_set_style_bg_color(puff1, lv_color_hex(0xD8E7F5), 0);
-      lv_obj_set_style_border_width(puff1, 0, 0);
-      lv_obj_t *puff2 = lv_obj_create(weatherArt);
-      lv_obj_set_pos(puff2, 68, 49); lv_obj_set_size(puff2, 44, 44);
-      lv_obj_set_style_radius(puff2, LV_RADIUS_CIRCLE, 0);
-      lv_obj_set_style_bg_color(puff2, lv_color_hex(0xD8E7F5), 0);
-      lv_obj_set_style_border_width(puff2, 0, 0);
-      if (code <= 2) {                                         // sun by day, moon at night
-        lv_obj_t *sun = lv_obj_create(weatherArt);
-        if (isDay) { lv_obj_set_pos(sun, 68, 5); lv_obj_set_size(sun, 62, 62); }
-        else       { lv_obj_set_pos(sun, 74, 8); lv_obj_set_size(sun, 50, 50); }
-        lv_obj_set_style_radius(sun, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(sun, lv_color_hex(isDay ? 0xFFC96B : 0xE9EEF7), 0);
-        lv_obj_set_style_border_width(sun, 0, 0);
-        lv_obj_move_to_index(sun, 0);
-        if (!isDay) {
-          lv_obj_t *cut = lv_obj_create(weatherArt);
-          lv_obj_set_pos(cut, 92, 0); lv_obj_set_size(cut, 42, 42);
-          lv_obj_set_style_radius(cut, LV_RADIUS_CIRCLE, 0);
-          lv_obj_set_style_bg_color(cut, lv_color_hex(0x1B2740), 0);
-          lv_obj_set_style_border_width(cut, 0, 0);
-          lv_obj_move_to_index(cut, 1);
-        }
-      }
-      addRainDrops(weatherArt, code, 1.0f);
+      // Same artwork as the forecast cards, at full size (150 px design canvas).
+      makeWeatherIcon(weatherArt, 0, 0, 150, code, !isDay);
     }
   } else {
     lv_label_set_text(lblTemp, "--");
