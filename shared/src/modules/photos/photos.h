@@ -1,5 +1,6 @@
 #pragma once
 // Photos module: slideshow of photos uploaded on the web page (/photos), on LittleFS.
+// Storage: photos_store.cpp (shared). The slideshow screen is per board.
 #include <stddef.h>
 #include <stdint.h>
 
@@ -9,3 +10,4 @@ bool photosFsReady();                                 // LittleFS mounted (also 
 bool photoExists(int slot);
 void photoPath(int slot, char *out, size_t n);
 void photosChanged();                                // after an upload/delete on the web page
+uint32_t photosVersion();                            // bumps on every photosChanged(): screens compare it

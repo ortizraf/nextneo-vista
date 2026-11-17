@@ -2,36 +2,32 @@
 // screen's lifecycle and owns the single refresh timer of the active screen. Network
 // jobs are tagged with the screen and its visit (epoch) so stale results are dropped.
 #include <Arduino.h>
-#include "app_screens.h"
 #include "core/screen_manager.h"
-#include "core/screen_registry.h"
 #include "services/app_log.h"
 
 // ---------------------------------------------------------------- registry
 static const ScreenLifecycle kNoScreen = {SCREEN_NONE, "none", nullptr, nullptr, nullptr, nullptr,
                                           nullptr, nullptr, 0, 0, nullptr, 0, nullptr};
 
-// In ScreenID order; screenManagerBegin() checks it.
-static const ScreenLifecycle *const kScreens[SCREEN_COUNT] = {
-  &kNoScreen,
-  &kMenuScreen,
-  &kWeatherScreen,
-  &kFinanceScreen,
-  &kCalendarScreen,
-  &kFlightRadarScreen,
-  &kSettingsScreen,
-  &kServersScreen,
-  &kClockScreen,
-  &kAirportScreen,
-  &kPhotosScreen,
-  &kSkyScreen,
-  &kF1Screen,
-  &kArtScreen,
-  &kFootballScreen,
-  &kGardenScreen,
-};
+// Indexed by ScreenID, filled from the board's kScreenTable (core/screen_registry.cpp of
+// the board). Screens the board does not have stay kNoScreen.
+static const ScreenLifecycle *kScreens[SCREEN_COUNT];
+static bool kScreensReady = false;
+
+static void buildScreenIndex() {
+  if (kScreensReady) return;
+  for (auto &s : kScreens) s = &kNoScreen;
+  for (uint8_t i = 0; i < kScreenTableCount; ++i) {
+    const ScreenLifecycle *s = kScreenTable[i];
+    if (s->id == SCREEN_NONE || s->id >= SCREEN_COUNT) { Log.printf("ERRO: tela %s com id inválido\n", s->name); continue; }
+    if (kScreens[s->id] != &kNoScreen) Log.printf("ERRO: tela %u registrada duas vezes (%s)\n", s->id, s->name);
+    kScreens[s->id] = s;
+  }
+  kScreensReady = true;
+}
 
 const ScreenLifecycle *screenLifecycle(ScreenID id) {
+  buildScreenIndex();
   return kScreens[id < SCREEN_COUNT ? id : SCREEN_NONE];
 }
 
@@ -128,6 +124,7 @@ static void applyJobOutcome() {
 // ---------------------------------------------------------------- switching
 void switchScreen(ScreenID id) {
   if (id == SCREEN_NONE || id >= SCREEN_COUNT) return;
+  if (screenLifecycle(id) == &kNoScreen) { Log.printf("Tela %u não existe nesta placa\n", id); return; }
   const ScreenID previous = gActiveScreen;
   if (previous == id) return;
 
@@ -169,8 +166,7 @@ static void uiTick(lv_timer_t *) {
 }
 
 void screenManagerBegin(lv_obj_t *root) {
-  for (int i = 0; i < SCREEN_COUNT; ++i)
-    if (kScreens[i]->id != i) Log.printf("ERRO: kScreens[%d] é a tela %s (ordem errada)\n", i, kScreens[i]->name);
+  buildScreenIndex();
   for (const ScreenLifecycle *screen : kScreens)
     if (screen->jobCount > MAX_SCREEN_JOBS) Log.printf("ERRO: tela %s tem %u jobs (máx. %u)\n", screen->name, screen->jobCount, MAX_SCREEN_JOBS);
   for (const ScreenLifecycle *screen : kScreens) if (screen->build) screen->build(root);

@@ -1,6 +1,6 @@
 #pragma once
 // Every screen's lifecycle, defined in its own module (bottom of <screen>_screen.cpp).
-// The screen manager lists them in ScreenID order.
+// Listed in kScreenTable (core/screen_registry.cpp), used by the shared screen manager.
 #include "app_screens.h"
 
 extern const ScreenLifecycle kMenuScreen;

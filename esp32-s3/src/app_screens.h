@@ -6,34 +6,16 @@
 
 #include <lvgl.h>
 #include "core/app_core.h"
+#include "core/board.h"
+#include "core/screen_lifecycle.h"
 
 LV_FONT_DECLARE(lv_font_weather_14);
 LV_FONT_DECLARE(lv_font_weather_20);
 
 #define GFX_BL 1
+// Resolução desta placa (constante de compilação; o mesmo valor está em kBoard)
 #define SCR_W 480
 #define SCR_H 320
-
-// Lifecycle contract of a screen: each module defines one (core/screen_registry.h)
-// and the screen manager drives it. UI callbacks run on the LVGL thread.
-struct ScreenLifecycle {
-  ScreenID id;
-  const char *name;
-  lv_obj_t **view;              // container shown/hidden by the manager
-  void (*build)(lv_obj_t *screen);   // create the widgets once at boot
-  void (*onEnter)();            // screen became visible
-  void (*onExit)();             // screen is about to be hidden
-  void (*render)();             // refresh widgets from cached data (active screen only)
-  void (*requestUpdate)();      // periodic refresh; nullptr = post jobs[0] (if any)
-  uint32_t updateIntervalMs;    // periodic refresh while the user stays (0 = none)
-  uint32_t retryIntervalMs;     // faster retry after a failed request
-  const NetJobDef *jobs;        // jobs this screen may post (jobs[JOB_UPDATE] = periodic update)
-  uint8_t jobCount;
-  void (*netRelease)();         // network task: free keep-alive sessions while not active
-};
-
-const ScreenLifecycle *screenLifecycle(ScreenID id);   // never null (unknown id -> SCREEN_NONE)
-lv_obj_t *screenView(ScreenID id);     // container of a screen (tests, diagnostics)
 
 // ---------------------------------------------------------------- UI kit (core/ui_kit.cpp)
 lv_obj_t *makeLabel(lv_obj_t *parent, const char *txt, const lv_font_t *font, uint32_t color);

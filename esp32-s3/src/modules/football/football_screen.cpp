@@ -38,20 +38,9 @@ static const char *leagueName(int L) {                    // competition title, 
 static const uint8_t kLeagueWeight[L_COUNT] = {220, 210, 60, 230, 40, 40, 60};
 
 static FData *ui;                          // UI thread copy
-static char favorites[64] = "";            // "FLA,PAL" (ESPN abbreviations), prefs "futFav"
 
 // ================================================================ helpers
-static bool isFavorite(const char *abbr) {
-  if (!abbr[0] || !favorites[0]) return false;
-  char key[8]; snprintf(key, sizeof key, "%s", abbr);
-  const char *p = favorites;
-  const size_t k = strlen(key);
-  while ((p = strstr(p, key))) {
-    if ((p == favorites || p[-1] == ',') && (p[k] == 0 || p[k] == ',')) return true;
-    p += k;
-  }
-  return false;
-}
+static bool isFavorite(const char *abbr) { return footballIsFavorite(abbr); }   // shared/football_favorites.cpp
 static int importance(const FMatch &m) {
   int s = kLeagueWeight[m.league];
   if (isFavorite(m.home.abbr) || isFavorite(m.away.abbr)) s += 1000;
@@ -368,17 +357,9 @@ static void tabEvent(lv_event_t *e) {
   footballRender();
 }
 
-void footballSetFavorites(const char *favList) {          // web page (loop thread)
-  String s = favList ? favList : ""; s.toUpperCase(); s.replace(" ", "");
-  copyStr(s.c_str(), favorites, sizeof favorites);
-  prefs.putString("futFav", favorites);
-  shownVersion = UINT32_MAX;
-}
-String footballFavorites() { return String(favorites); }
 
 static void buildFootballScreen(lv_obj_t *scr) {
   lock = xSemaphoreCreateMutex();
-  if (prefs.isKey("futFav")) copyStr(prefs.getString("futFav", "").c_str(), favorites, sizeof favorites);
   tab = prefs.isKey("futTab") ? prefs.getUChar("futTab", 0) : 0;
   if (tab >= NTAB) tab = 0;
   footballView = lv_obj_create(scr);
@@ -492,6 +473,8 @@ static void footballRender() {
   }
   setLabelIfChanged(statusLbl, b);
   lv_obj_set_style_text_color(statusLbl, lv_color_hex(ui->msg[0] ? 0xFFD477 : 0x8CA0BE), 0);
+  static uint32_t favSeen = 0;                              // favorites edited on the web page
+  if (footballFavoritesVersion() != favSeen) { favSeen = footballFavoritesVersion(); shownVersion = UINT32_MAX; }
   if (ui->version == shownVersion && tab == shownTab && ui->logoVersion == shownLogoVersion) return;
   shownVersion = ui->version; shownTab = tab; shownLogoVersion = ui->logoVersion;
   refreshTabIcons(ui->logoVersion);

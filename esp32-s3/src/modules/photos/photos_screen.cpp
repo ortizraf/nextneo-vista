@@ -19,30 +19,20 @@ static uint16_t *pix;                     // 480x320 RGB565 in PSRAM
 static lv_image_dsc_t dsc;
 static int current = -1;                  // slot on screen
 static lv_timer_t *slideTimer, *hideBackTimer;
-static volatile bool changed = false;     // set by the web upload/delete
 static lv_point_t pressAt;
 
-static bool fsReady() {
-  static int state = -1;
-  if (state < 0) {
-    state = LittleFS.begin(true) ? 1 : 0;
-    if (state == 1 && !LittleFS.exists("/photos")) LittleFS.mkdir("/photos");   // once, not on every check
-  }
-  return state == 1;
-}
-// Which slots hold a photo. Each LittleFS lookup costs ~10 ms and the screen checks all
-// slots on entry (was ~200 ms): cached, refreshed after a web upload / delete.
-static int8_t slotHas[PHOTO_SLOTS] = {-1, -1, -1, -1, -1, -1, -1, -1};
-static void forgetSlots() { for (int8_t &s : slotHas) s = -1; }
-void photoPath(int slot, char *out, size_t n) { snprintf(out, n, "/photos/%d.jpg", slot); }
-bool photoExists(int slot) {
-  if (slot < 0 || slot >= PHOTO_SLOTS || !fsReady()) return false;
-  if (slotHas[slot] < 0) { char p[24]; photoPath(slot, p, sizeof p); slotHas[slot] = LittleFS.exists(p) ? 1 : 0; }
-  return slotHas[slot] == 1;
-}
+// Armazenamento das fotos (LittleFS, slots, aviso de mudança): shared/src/modules/photos/photos_store.cpp
 static int decodedSlot = -1;              // slot currently decoded in pix (-1 = none / stale)
-void photosChanged() { changed = true; decodedSlot = -1; forgetSlots(); }   // web upload/delete: look again
-bool photosFsReady() { return fsReady(); }
+// The web page uploads/deletes photos (photosChanged() bumps photosVersion()); the screen
+// notices here and drops the decoded picture.
+static uint32_t seenVersion = 0;
+static bool takeChange() {
+  const uint32_t v = photosVersion();
+  if (v == seenVersion) return false;
+  seenVersion = v;
+  decodedSlot = -1;
+  return true;
+}
 
 // ---------------------------------------------------------------- decode
 static const uint8_t kBayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
@@ -155,11 +145,11 @@ static void go(int step) {
 }
 
 static void slideCb(lv_timer_t *) {
-  if (changed) { changed = false; go(0); return; }
+  if (takeChange()) { go(0); return; }
   go(+1);
 }
 static void watchCb(lv_timer_t *) {                         // web changes show up within 1 s
-  if (changed) { changed = false; if (current >= 0 && !photoExists(current)) current = -1; go(current < 0 ? 1 : 0); }
+  if (takeChange()) { if (current >= 0 && !photoExists(current)) current = -1; go(current < 0 ? 1 : 0); }
 }
 static lv_timer_t *watchTimer;
 
@@ -231,7 +221,7 @@ static void photosOnEnter() {
   char b[96];
   snprintf(b, sizeof b, T("Nenhuma foto ainda\n\nEnvie até %d fotos em\nhttp://%s/photos", "No photos yet\n\nUpload up to %d photos at\nhttp://%s/photos"), PHOTO_SLOTS, WiFi.localIP().toString().c_str());
   lv_label_set_text(emptyLbl, b);
-  changed = false;
+  takeChange();                                             // already up to date on entry
   showBack(true);                                           // visible for 3 s on entry
   go(0);
   lv_timer_reset(slideTimer); lv_timer_resume(slideTimer);

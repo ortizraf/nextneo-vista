@@ -4,7 +4,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
-#include "app_screens.h"
+#include "core/app_core.h"
+#include "core/screen_lifecycle.h"
 #include "core/net_worker.h"
 #include "core/screen_manager.h"
 #include "modules/weather/weather.h"

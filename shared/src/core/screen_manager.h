@@ -1,7 +1,7 @@
 #pragma once
 // Screen manager internals used by the boot code and the network task.
-// Screens only need app_screens.h (switchScreen, postScreenJob, ...).
-#include "app_screens.h"
+// Screens only need app_core.h (switchScreen, postScreenJob, ...).
+#include "core/screen_lifecycle.h"
 
 void screenManagerBegin(lv_obj_t *root);   // build every screen, start the timers, show the menu
 

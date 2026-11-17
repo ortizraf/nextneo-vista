@@ -2,6 +2,7 @@
 // card + the board's card (kBoardWeb, defined by each board) + one card per WebSection
 // (each module adds its own: core/web_ui.h); the log page and the login stay here. Runs on the Arduino loop thread.
 #include "core/build_info.h"
+#include "core/board.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <time.h>
@@ -82,7 +83,7 @@ button.sec{background:#ffffff1a;color:#edf4ff}small{display:block;margin-top:12p
 .chip{width:auto;margin:0;padding:6px 10px;border-radius:999px;background:#ffffff14;color:#cfe2f7;font-size:13px;font-weight:600}code{color:#9fe3ff}.btnlink{display:block;margin-top:14px;padding:12px;border-radius:12px;background:#ffffff1a;color:#edf4ff;text-align:center;text-decoration:none;font-weight:700}</style>
 <main>
 <div class="card"><h1>NextNeo Vista</h1><div class="muted">Ajustes do aparelho</div>
-<div class="status %NOTICECLASS%">%NOTICE%Wi-Fi: %STATUS%<br>Endereço: http://%IP%<br>Versão: <b>%VERSION%</b> · branch %BRANCH%<br>Gravado (build): <span class="bt" data-ts="%EPOCH%">%BUILDUTC%</span></div>
+<div class="status %NOTICECLASS%">%NOTICE%Wi-Fi: %STATUS%<br>Endereço: http://%IP%<br>Placa: %BOARD%<br>Versão: <b>%VERSION%</b> · branch %BRANCH%<br>Gravado (build): <span class="bt" data-ts="%EPOCH%">%BUILDUTC%</span></div>
 <a class="btnlink" href="/log">Ver log da aplicação</a><a class="btnlink" href="/logout">Sair</a></div>
 
 )HTML",
@@ -99,7 +100,7 @@ button.sec{background:#ffffff1a;color:#edf4ff}small{display:block;margin-top:12p
 .chip{width:auto;margin:0;padding:6px 10px;border-radius:999px;background:#ffffff14;color:#cfe2f7;font-size:13px;font-weight:600}code{color:#9fe3ff}.btnlink{display:block;margin-top:14px;padding:12px;border-radius:12px;background:#ffffff1a;color:#edf4ff;text-align:center;text-decoration:none;font-weight:700}</style>
 <main>
 <div class="card"><h1>NextNeo Vista</h1><div class="muted">Device settings</div>
-<div class="status %NOTICECLASS%">%NOTICE%Wi-Fi: %STATUS%<br>Address: http://%IP%<br>Version: <b>%VERSION%</b> · branch %BRANCH%<br>Flashed (build): <span class="bt" data-ts="%EPOCH%">%BUILDUTC%</span></div>
+<div class="status %NOTICECLASS%">%NOTICE%Wi-Fi: %STATUS%<br>Address: http://%IP%<br>Board: %BOARD%<br>Version: <b>%VERSION%</b> · branch %BRANCH%<br>Flashed (build): <span class="bt" data-ts="%EPOCH%">%BUILDUTC%</span></div>
 <a class="btnlink" href="/log">View the app log</a><a class="btnlink" href="/logout">Log out</a></div>
 
 )HTML");
@@ -107,6 +108,7 @@ button.sec{background:#ffffff1a;color:#edf4ff}small{display:block;margin-top:12p
   page.replace("%NOTICE%", notice.isEmpty() ? String() : webEscape(notice) + "<br>");
   page.replace("%STATUS%", webEscape(status));
   page.replace("%IP%", WiFi.localIP().toString());
+  page.replace("%BOARD%", webEscape(kBoard.name));
   page.replace("%VERSION%", webEscape(kBuildVersion));
   page.replace("%BRANCH%", webEscape(kBuildBranch));
   page.replace("%EPOCH%", String(kBuildEpoch));
