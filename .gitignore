@@ -18,3 +18,9 @@ Thumbs.db
 # Logs locais (build, testes, gravação): nunca no git
 logs/
 *.log
+
+# Build do Docker (tools/firmware.sh)
+.pio-docker/
+
+# Gerado a cada build (tools/pio_progname.py)
+src/nextneo-vista/core/build_info.cpp
