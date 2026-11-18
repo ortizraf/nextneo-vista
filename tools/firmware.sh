@@ -13,14 +13,21 @@
 #   ./tools/firmware.sh monitor                 # monitor serial (Ctrl+C sai)
 #   ./tools/firmware.sh clean                   # limpa o build
 #   ./tools/firmware.sh image                   # (re)constrói só a imagem Docker
+#   ./tools/firmware.sh cleanup                 # apaga a imagem, o volume e o cache de build do Docker
 #   ./tools/firmware.sh pio <args...>           # qualquer comando do pio, ex.: pio test -e native
 #   ./tools/firmware.sh esptool <args...>       # esptool, ex.: esptool --port /dev/cu.usbmodem1201 chip-id
 #
 # Opções (antes ou depois do comando):
 #   -e <env>      ambiente do platformio.ini (padrão: nextneo-vista)
 #   -p <porta>    porta serial (padrão: detectada; ex. /dev/cu.usbmodem1201, /dev/ttyACM0)
+#   KEEP_DOCKER=1 não limpa o Docker depois de upload/deploy (ver abaixo)
 #   --local       SEGUNDA OPÇÃO: usa o PlatformIO instalado no computador, sem Docker
 #                 (equivale a USE_DOCKER=0)
+#
+# Limpeza: ao terminar um upload/deploy (deu certo ou não), a imagem (nextneo-vista-pio:*),
+# o volume nnv-platformio (toolchains, vários GB), o cache de build do Docker e as pastas
+# .pio-docker de todas as placas são apagados: nada de builds antigos se acumula.
+# O próximo build baixa tudo de novo (alguns minutos). KEEP_DOCKER=1 mantém.
 #
 # Gravação pelo Docker:
 #   Linux: a porta é repassada ao container (--device).
@@ -61,7 +68,13 @@ IMAGE="nextneo-vista-pio:$(shasum "$DOCKERFILE" | cut -c1-12)"
 VOLUME=nnv-platformio
 BRIDGE_PID=""
 TMPD="$(mktemp -d)"
-cleanup() { [[ -n "$BRIDGE_PID" ]] && kill "$BRIDGE_PID" 2>/dev/null; rm -rf "$TMPD"; }
+cleanup() {
+  [[ -n "$BRIDGE_PID" ]] && kill "$BRIDGE_PID" 2>/dev/null
+  rm -rf "$TMPD"
+  # upload/deploy: clean the Docker data at the end, also when it failed
+  [[ "${CLEAN_ON_EXIT:-0}" == 1 ]] && after_flash_cleanup
+  return 0
+}
 trap cleanup EXIT
 
 ensure_image() {
@@ -131,6 +144,22 @@ run_tool() {
     "$IMAGE" "${cmd[@]}" "${args[@]}"
 }
 
+# Apaga só o que é deste projeto: imagens nextneo-vista-pio:*, o volume nnv-platformio e
+# o cache de build (docker builder prune). Containers deste projeto rodam com --rm.
+docker_cleanup() {
+  command -v docker >/dev/null && docker info >/dev/null 2>&1 || return 0
+  echo "== Limpando o Docker (imagem, volume e cache de build do projeto)" >&2
+  local imgs; imgs="$(docker images --format '{{.Repository}}:{{.Tag}}' | grep '^nextneo-vista-pio:' || true)"
+  [[ -n "$imgs" ]] && docker rmi -f $imgs >/dev/null 2>&1 || true
+  docker volume rm -f "$VOLUME" >/dev/null 2>&1 || true
+  docker builder prune -af >/dev/null 2>&1 || true
+  # build folders of every board (.pio-docker): nothing from older builds piles up
+  rm -rf esp32-*/.pio-docker shared/.pio-docker
+  docker system df 2>/dev/null | sed -n '1,5p' >&2 || true
+}
+CLEAN_ON_EXIT=0
+after_flash_cleanup() { [[ "$USE_DOCKER" == 1 && "${KEEP_DOCKER:-0}" != 1 ]] && docker_cleanup; return 0; }
+
 need_port() { [[ -n "$PORT" ]] || PORT="$(detect_port "")"; echo "== Porta: $PORT" >&2; }
 BUILD_DIR=$([[ "$USE_DOCKER" == 1 ]] && echo .pio-docker || echo .pio)
 echo "== Placa: $PROJ_DIR · modo: $([[ "$USE_DOCKER" == 1 ]] && echo "Docker ($IMAGE)" || echo "local (sem Docker)")" >&2
@@ -139,11 +168,12 @@ case "$CMD" in
   image)   ensure_image ;;
   build)   run_pio run -e "$ENV_NAME"
            echo "== Firmware: $PROJ_DIR/$BUILD_DIR/build/$ENV_NAME/" ;;
-  upload)  need_port; run_pio run -e "$ENV_NAME" -t upload --upload-port "$PORT" ;;
+  upload)  CLEAN_ON_EXIT=1; need_port; run_pio run -e "$ENV_NAME" -t upload --upload-port "$PORT" ;;
   monitor) need_port; run_pio device monitor -b 115200 -p "$PORT" ;;
   clean)   run_pio run -e "$ENV_NAME" -t clean ;;
   pio)     run_tool pio ${ARGS[@]+"${ARGS[@]}"} ;;
   esptool) run_tool esptool ${ARGS[@]+"${ARGS[@]}"} ;;
-  deploy)  USE_DOCKER="$USE_DOCKER" BOARD="$BOARD" exec ./tools/deploy_nextneo_vista.sh ${PORT:+"$PORT"} ;;
-  *) echo "Comando desconhecido: $CMD (use build, upload, deploy, monitor, clean, image, pio ou esptool)" >&2; exit 1 ;;
+  deploy)  CLEAN_ON_EXIT=1; USE_DOCKER="$USE_DOCKER" BOARD="$BOARD" ./tools/deploy_nextneo_vista.sh ${PORT:+"$PORT"} ;;
+  cleanup) docker_cleanup ;;
+  *) echo "Comando desconhecido: $CMD (use build, upload, deploy, monitor, clean, image, cleanup, pio ou esptool)" >&2; exit 1 ;;
 esac
