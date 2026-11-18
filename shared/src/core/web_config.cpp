@@ -62,7 +62,7 @@ static const WebSection kLanguageWeb = {"language", languageCard, languageRoutes
 
 // ---------------------------------------------------------------- sections, in page order
 static const WebSection *const kSections[] = {
-  &kBoardWeb, &kLanguageWeb, &kWeatherWeb, &kRadarWeb, &kFinanceWeb, &kPhotosWeb, &kServersWeb, &kFootballWeb,
+  &kBoardWeb, &kLanguageWeb, &kWeatherWeb, &kRadarWeb, &kFinanceWeb, &kCalendarWeb, &kPhotosWeb, &kServersWeb, &kFootballWeb,
 };
 
 // ---------------------------------------------------------------- settings page

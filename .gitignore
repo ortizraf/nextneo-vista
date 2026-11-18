@@ -24,3 +24,6 @@ logs/
 
 # Gerado a cada build (tools/pio_progname.py)
 */src/core/build_info.cpp
+
+# Gerado por tools/calendar_art.py (fundo + gatos para 480x320, 720x1280, 1280x720)
+assets/calendar/out/

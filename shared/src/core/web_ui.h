@@ -29,3 +29,4 @@ extern const WebSection kRadarWeb;
 extern const WebSection kFinanceWeb;
 extern const WebSection kPhotosWeb;
 extern const WebSection kServersWeb;
+extern const WebSection kCalendarWeb;

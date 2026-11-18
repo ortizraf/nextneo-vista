@@ -21,10 +21,13 @@ LV_FONT_DECLARE(lv_font_clock_120);
 
 static lv_obj_t *clockView;
 
+static constexpr int CLOUDS = 4;
 static constexpr int STARS = 14, DROPS = 30, FOG = 3, HOURS = 5, SPLASH = 8;
 static constexpr uint32_t FRAME_MS = 66;      // ~15 fps: every frame pushes the full panel
 
-static lv_obj_t *sky, *star[STARS], *shoot, *drop[DROPS], *fog[FOG], *flash;
+static lv_obj_t *sky, *skyVeil, *star[STARS], *shoot, *drop[DROPS], *fog[FOG], *flash, *cloud[CLOUDS];
+static float cloudX[CLOUDS];
+static int cloudsShown = 0;
 static lv_obj_t *textBox, *clkTime, *clkDate, *clkTimeSh, *clkDateSh, *chev, *hoursRow;
 static bool expanded = false;
 static uint32_t expandedAtMs = 0;
@@ -166,18 +169,87 @@ static void loadSky(int id) {
 
 struct WxCacheShared { int code; float temp, tmax, tmin; int rain; time_t at; };   // == WxCache below
 static constexpr time_t WX_CACHE_MAX_AGE_S = 2 * 3600;   // cache older than 2 h is ignored
-static int pickSky(float h, int code) {
-  const bool nightH = h < 5.3f || h >= 19.8f;
-  const bool dawn = (h >= 5.3f && h < 7.0f) || (h >= 17.6f && h < 18.8f);
-  const bool dusk = h >= 18.8f && h < 19.8f;
+// Sun altitude (deg) at the configured place, now. Low-precision solar formula
+// (~0.5 deg), plenty for picking a sky. NAN while the clock is not set.
+float sunAltitudeNow() {
+  const time_t now = time(nullptr);
+  if (now < 1700000000) return NAN;
+  const double RADF = M_PI / 180.0, d = (now - 946728000.0) / 86400.0;   // days since J2000.0
+  const double g = 357.529 + 0.98560028 * d, q = 280.459 + 0.98564736 * d;
+  const double L = (q + 1.915 * sin(g * RADF) + 0.020 * sin(2 * g * RADF)) * RADF;
+  const double e = (23.439 - 0.00000036 * d) * RADF;
+  const double ra = atan2(cos(e) * sin(L), cos(L)), dec = asin(sin(e) * sin(L));
+  const double lst = fmod(280.46061837 + 360.98564736629 * d + cfg.lon, 360.0) * RADF;
+  const double lat = cfg.lat * RADF;
+  return (float)(asin(sin(lat) * sin(dec) + cos(lat) * cos(dec) * cos(lst - ra)) / RADF);
+}
+// Without a set clock: a rough altitude from the local hour (sun up 6-18 h).
+static float sunAltFor(float h) {
+  const float a = sunAltitudeNow();
+  if (!isnan(a)) return a;
+  return 60.0f * sinf((h - 6.0f) / 12.0f * (float)M_PI);
+}
+// Sky photo by sun altitude: day above +6 deg, golden hour +6..0, twilight 0..-6, night below.
+static int pickSky(float alt, int code) {
+  const bool nightA = alt < -6.0f;
   if (isStorm(code)) return SKY_STORM;
-  if (isWet(code)) return nightH || dusk ? SKY_NIGHT_OVERCAST : rainLevel(code) == 1 ? SKY_OVERCAST_DAY : SKY_RAIN;
-  if (isFog(code)) return nightH ? SKY_NIGHT_OVERCAST : SKY_FOG;
-  if (code >= 3) return nightH ? SKY_NIGHT_OVERCAST : SKY_OVERCAST_DAY;
-  if (dawn) return SKY_DAWN;
-  if (dusk) return SKY_DUSK;
-  if (nightH) return code >= 1 ? SKY_NIGHT_PARTLY : SKY_NIGHT_CLEAR;
+  if (isWet(code)) return nightA ? SKY_NIGHT_OVERCAST : rainLevel(code) == 1 ? SKY_OVERCAST_DAY : SKY_RAIN;
+  if (isFog(code)) return nightA ? SKY_NIGHT_OVERCAST : SKY_FOG;
+  if (code >= 3) return nightA ? SKY_NIGHT_OVERCAST : SKY_OVERCAST_DAY;
+  if (nightA) return code >= 1 ? SKY_NIGHT_PARTLY : SKY_NIGHT_CLEAR;
+  if (alt < 0.0f) return SKY_DUSK;
+  if (alt < 6.0f) return SKY_DAWN;
   return code >= 1 ? SKY_DAY_PARTLY : SKY_DAY_CLEAR;
+}
+static int lastSkyId = -1;
+static float lastSkyAlt = 90.0f;
+int currentSkyId() { return lastSkyId; }
+
+// Light veil over the day photos that have no twilight version (overcast, rain, fog):
+// amber near sunset/sunrise, deepening to dark blue in civil twilight. Night photos,
+// storm and the clear-sky dawn/dusk photos are left as they are.
+void applySkyVeil(lv_obj_t *veil) {
+  if (!veil) return;
+  const bool dayGrey = lastSkyId == SKY_OVERCAST_DAY || lastSkyId == SKY_RAIN || lastSkyId == SKY_FOG;
+  const float a = lastSkyAlt;
+  if (!dayGrey || a >= 8.0f || a < -6.5f) { lv_obj_set_hidden(veil, true); return; }
+  auto mix = [](uint32_t x, uint32_t y, float t) -> uint32_t {
+    auto ch = [&](int sh) { return (uint32_t)(((x >> sh) & 0xFF) * (1 - t) + ((y >> sh) & 0xFF) * t) << sh; };
+    return ch(16) | ch(8) | ch(0);
+  };
+  uint32_t top, bot; float opa;
+  if (a >= 0.0f) {                                   // +8..0: amber glow grows toward the horizon
+    const float t = (8.0f - a) / 8.0f;
+    top = 0x3C285A; bot = 0xFF8C3C; opa = 0.38f * t;
+  } else {                                           // 0..-6.5: amber -> dark blue, heavier
+    const float t = fminf(1.0f, -a / 6.5f);
+    top = mix(0x3C285A, 0x0F193C, t); bot = mix(0xFF8C3C, 0x463C6E, t); opa = 0.38f + 0.27f * t;
+  }
+  lv_obj_set_style_bg_color(veil, lv_color_hex(top), 0);
+  lv_obj_set_style_bg_grad_color(veil, lv_color_hex(bot), 0);
+  lv_obj_set_style_bg_opa(veil, (lv_opa_t)(opa * 255), 0);
+  lv_obj_set_hidden(veil, false);
+}
+// Fade a freshly decoded sky in (from the dark card behind it) instead of a hard cut.
+static void skyOpaCb(void *o, int32_t v) { lv_obj_set_style_opa((lv_obj_t *)o, (lv_opa_t)v, 0); }
+void fadeInSky(lv_obj_t *img) {
+  if (!img) return;
+  lv_anim_delete(img, skyOpaCb);
+  lv_anim_t a; lv_anim_init(&a);
+  lv_anim_set_var(&a, img); lv_anim_set_exec_cb(&a, skyOpaCb);
+  lv_anim_set_values(&a, 0, LV_OPA_COVER); lv_anim_set_duration(&a, 1200);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+  lv_anim_start(&a);
+}
+// Common setup for a full-screen veil object (created right after the sky image).
+lv_obj_t *createSkyVeil(lv_obj_t *parent) {
+  lv_obj_t *v = lv_obj_create(parent);
+  lv_obj_remove_style_all(v);
+  lv_obj_set_pos(v, 0, 0); lv_obj_set_size(v, SCR_W, SCR_H);
+  lv_obj_set_style_bg_grad_dir(v, LV_GRAD_DIR_VER, 0);
+  lv_obj_set_clickable(v, false);
+  lv_obj_set_hidden(v, true);
+  return v;
 }
 
 // Shared with the Weather screen: same PSRAM buffer, only one screen is visible.
@@ -190,19 +262,28 @@ bool cachedWeatherCode(int &code) {
   code = w.code; return true;
 }
 const lv_image_dsc_t *skyImageFor(float hour, int code) {
-  loadSky(pickSky(hour, code));
+  lastSkyAlt = sunAltFor(hour);
+  lastSkyId = pickSky(lastSkyAlt, code);
+  loadSky(lastSkyId);
   return skyLoaded >= 0 ? &skyDsc : nullptr;
 }
 
 // ---------------------------------------------------------------- per-minute scene
 static void updateScene(const struct tm &ti) {
   const float hour = ti.tm_hour + ti.tm_min / 60.0f;
-  night = hour < 5.6f || hour >= 19.4f;
+  const float alt = sunAltFor(hour);
+  night = alt < -6.0f;                                  // after civil twilight, by the real sun
   // Sky only when the right one is known (time + live or cached weather) and decoded;
   // otherwise plain black. Never an old picture first.
   bool skyOn = false;
-  if (!minimal && wxCode >= 0) { const int id = pickSky(hour, wxCode); loadSky(id); skyOn = skyLoaded == id; }
+  if (!minimal && wxCode >= 0) {
+    const int id = pickSky(alt, wxCode); lastSkyId = id; lastSkyAlt = alt;
+    const int before = skyLoaded, wasHidden = lv_obj_is_hidden(sky);
+    loadSky(id); skyOn = skyLoaded == id;
+    if (skyOn && (before != id || wasHidden)) fadeInSky(sky);
+  }
   show(sky, skyOn);
+  if (skyOn) applySkyVeil(skyVeil); else show(skyVeil, false);
   lv_obj_set_style_bg_color(card, lv_color_hex(minimal ? 0x111111 : night ? 0x0A0E1C : 0x0E1A2C), 0);
   const bool clearNight = skyOn && night && wxCode <= 2;
   for (int i = 0; i < STARS; ++i) show(star[i], clearNight);
@@ -219,6 +300,14 @@ static void updateScene(const struct tm &ti) {
   for (int i = 0; i < DROPS; ++i) show(drop[i], i < kRainDrops[lvl]);
   if (lvl < 3) for (int k = 0; k < SPLASH; ++k) { splashStart[k] = 0; show(splash[k], false); }
   for (int i = 0; i < FOG; ++i) show(fog[i], skyOn && isFog(wxCode));
+  // Drifting clouds over the clear / partly cloudy photos: few for "poucas nuvens",
+  // more for "parcialmente nublado". Dimmer and bluer at night.
+  cloudsShown = !skyOn ? 0 : wxCode == 1 ? 2 : wxCode == 2 ? CLOUDS : 0;
+  for (int i = 0; i < CLOUDS; ++i) {
+    lv_obj_set_style_bg_color(cloud[i], lv_color_hex(night ? 0x9AA6BC : 0xFFFFFF), 0);
+    lv_obj_set_style_bg_opa(cloud[i], night ? LV_OPA_20 : LV_OPA_30, 0);
+    show(cloud[i], i < cloudsShown);
+  }
 
   const bool wantDim = ti.tm_hour >= 23 || ti.tm_hour < 6;          // night dimming
   if (wantDim != dimmed) { dimmed = wantDim; analogWrite(GFX_BL, wantDim ? 40 : map(cfg.bright, 0, 100, 25, 255)); }
@@ -262,6 +351,11 @@ static void animCb(lv_timer_t *) {
       lv_obj_set_style_border_opa(splash[k], (lv_opa_t)(150 - e * 150 / 260), 0);
       show(splash[k], true);
     }
+  }
+  for (int i = 0; i < cloudsShown; ++i) {                          // slow drift, wrap around
+    cloudX[i] += (4 + i * 2) * dt;
+    if (cloudX[i] > SCR_W) cloudX[i] = -(float)lv_obj_get_width(cloud[i]);
+    lv_obj_set_x(cloud[i], (int)cloudX[i]);
   }
   if (!lv_obj_is_hidden(fog[0])) {
     for (int i = 0; i < FOG; ++i) {
@@ -340,6 +434,7 @@ static void buildClockScreen(lv_obj_t *scr) {
   sky = lv_image_create(clockView);           // photo-like background (see sky_images.c)
   lv_obj_set_pos(sky, 0, 0); lv_obj_set_size(sky, SCR_W, SCR_H);
   lv_obj_set_clickable(sky, false);
+  skyVeil = createSkyVeil(clockView);             // twilight tint over the grey day photos
 
   for (int i = 0; i < STARS; ++i) {               // a few twinkling stars over the baked star field
     star[i] = shape(clockView, 3, 3, 0xFFFFFF, LV_OPA_70);
@@ -353,6 +448,13 @@ static void buildClockScreen(lv_obj_t *scr) {
   lv_obj_set_style_transform_rotation(shoot, -200, 0);      // -20°
   show(shoot, false);
 
+  for (int i = 0; i < CLOUDS; ++i) {               // soft drifting clouds (wxCode 1-2)
+    static const int16_t kW[CLOUDS] = {170, 120, 150, 100}, kY[CLOUDS] = {28, 70, 112, 50};
+    cloud[i] = shape(clockView, kW[i], kW[i] / 4, 0xFFFFFF, LV_OPA_30);
+    cloudX[i] = (float)(i * SCR_W / CLOUDS);
+    lv_obj_set_pos(cloud[i], (int)cloudX[i], kY[i]);
+    lv_obj_add_flag(cloud[i], LV_OBJ_FLAG_HIDDEN);
+  }
   for (int i = 0; i < FOG; ++i) {
     fog[i] = shape(clockView, SCR_W + 160, 30, 0xE3E8EF, LV_OPA_20, 15);
     lv_obj_set_pos(fog[i], -60, 140 + i * 44); fogX[i] = -20 - i * 25;
@@ -444,10 +546,12 @@ static void showCard(bool on) {
 static void clockOnEnter() {
   minimal = prefs.getBool("clkMin", false);
   // black until clockRender picks the right sky (time + live/cached weather)
-  show(sky, false);
+  show(sky, false); show(skyVeil, false);
   for (int i = 0; i < STARS; ++i) show(star[i], false);
   for (int i = 0; i < DROPS; ++i) show(drop[i], false);
   for (int i = 0; i < FOG; ++i) show(fog[i], false);
+  for (int i = 0; i < CLOUDS; ++i) show(cloud[i], false);
+  cloudsShown = 0;
   renderedMinute = -1;
   nextFlashMs = flashStartMs = nextShootMs = shootStartMs = 0;
   for (int &c : iconCodes) c = -99;
