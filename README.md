@@ -162,6 +162,7 @@ cd caminho/para/nextneo-vista     # a pasta onde você clonou o repositório
 ./tools/firmware.sh monitor    # monitor serial, 115200 (Ctrl+C sai)
 ./tools/firmware.sh clean      # limpa o build
 ./tools/firmware.sh image      # (re)constrói só a imagem Docker
+./tools/firmware.sh cleanup    # apaga imagem, volume, cache de build e .pio-docker (upload/deploy já fazem isso no fim)
 ./tools/firmware.sh pio test -e native        # qualquer comando do pio, dentro do Docker
 ./tools/firmware.sh esptool --port /dev/cu.usbmodem1201 chip-id   # esptool, dentro do Docker
 ```
