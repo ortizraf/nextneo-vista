@@ -24,6 +24,8 @@ static uint32_t renderedWeatherVersion = UINT32_MAX;
 const lv_image_dsc_t *skyImageFor(float hour, int code);
 void applySkyVeil(lv_obj_t *veil);            // clock_screen.cpp
 lv_obj_t *createSkyVeil(lv_obj_t *parent);
+void fadeInSky(lv_obj_t *img);
+int currentSkyId();
 bool cachedWeatherCode(int &code);   // clock.cpp: last good forecast in flash
 static lv_obj_t *wxSky, *wxVeil;
 static int skyKey = -1;
@@ -73,9 +75,13 @@ static void refreshSky(int code, bool force) {
   skyKey = key;
   const lv_image_dsc_t *img = skyImageFor(ti.tm_hour + ti.tm_min / 60.0f, code);
   if (!img) return;
+  static int shownSkyId = -1;
+  const bool changed = lv_obj_is_hidden(wxSky) || currentSkyId() != shownSkyId;
+  shownSkyId = currentSkyId();
   lv_image_set_src(wxSky, img);
   lv_obj_invalidate(wxSky);
   lv_obj_set_hidden(wxSky, false);       // shown only with the right picture
+  if (changed) fadeInSky(wxSky);         // new scene: fade in instead of a hard cut
   applySkyVeil(wxVeil);
   adaptClockColor(img);
 }

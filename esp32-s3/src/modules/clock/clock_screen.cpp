@@ -21,10 +21,13 @@ LV_FONT_DECLARE(lv_font_clock_120);
 
 static lv_obj_t *clockView;
 
+static constexpr int CLOUDS = 4;
 static constexpr int STARS = 14, DROPS = 30, FOG = 3, HOURS = 5, SPLASH = 8;
 static constexpr uint32_t FRAME_MS = 66;      // ~15 fps: every frame pushes the full panel
 
-static lv_obj_t *sky, *skyVeil, *star[STARS], *shoot, *drop[DROPS], *fog[FOG], *flash;
+static lv_obj_t *sky, *skyVeil, *star[STARS], *shoot, *drop[DROPS], *fog[FOG], *flash, *cloud[CLOUDS];
+static float cloudX[CLOUDS];
+static int cloudsShown = 0;
 static lv_obj_t *textBox, *clkTime, *clkDate, *clkTimeSh, *clkDateSh, *chev, *hoursRow;
 static bool expanded = false;
 static uint32_t expandedAtMs = 0;
@@ -200,6 +203,7 @@ static int pickSky(float alt, int code) {
 }
 static int lastSkyId = -1;
 static float lastSkyAlt = 90.0f;
+int currentSkyId() { return lastSkyId; }
 
 // Light veil over the day photos that have no twilight version (overcast, rain, fog):
 // amber near sunset/sunrise, deepening to dark blue in civil twilight. Night photos,
@@ -225,6 +229,17 @@ void applySkyVeil(lv_obj_t *veil) {
   lv_obj_set_style_bg_grad_color(veil, lv_color_hex(bot), 0);
   lv_obj_set_style_bg_opa(veil, (lv_opa_t)(opa * 255), 0);
   lv_obj_set_hidden(veil, false);
+}
+// Fade a freshly decoded sky in (from the dark card behind it) instead of a hard cut.
+static void skyOpaCb(void *o, int32_t v) { lv_obj_set_style_opa((lv_obj_t *)o, (lv_opa_t)v, 0); }
+void fadeInSky(lv_obj_t *img) {
+  if (!img) return;
+  lv_anim_delete(img, skyOpaCb);
+  lv_anim_t a; lv_anim_init(&a);
+  lv_anim_set_var(&a, img); lv_anim_set_exec_cb(&a, skyOpaCb);
+  lv_anim_set_values(&a, 0, LV_OPA_COVER); lv_anim_set_duration(&a, 1200);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+  lv_anim_start(&a);
 }
 // Common setup for a full-screen veil object (created right after the sky image).
 lv_obj_t *createSkyVeil(lv_obj_t *parent) {
@@ -261,7 +276,12 @@ static void updateScene(const struct tm &ti) {
   // Sky only when the right one is known (time + live or cached weather) and decoded;
   // otherwise plain black. Never an old picture first.
   bool skyOn = false;
-  if (!minimal && wxCode >= 0) { const int id = pickSky(alt, wxCode); lastSkyId = id; lastSkyAlt = alt; loadSky(id); skyOn = skyLoaded == id; }
+  if (!minimal && wxCode >= 0) {
+    const int id = pickSky(alt, wxCode); lastSkyId = id; lastSkyAlt = alt;
+    const int before = skyLoaded, wasHidden = lv_obj_is_hidden(sky);
+    loadSky(id); skyOn = skyLoaded == id;
+    if (skyOn && (before != id || wasHidden)) fadeInSky(sky);
+  }
   show(sky, skyOn);
   if (skyOn) applySkyVeil(skyVeil); else show(skyVeil, false);
   lv_obj_set_style_bg_color(card, lv_color_hex(minimal ? 0x111111 : night ? 0x0A0E1C : 0x0E1A2C), 0);
@@ -280,6 +300,14 @@ static void updateScene(const struct tm &ti) {
   for (int i = 0; i < DROPS; ++i) show(drop[i], i < kRainDrops[lvl]);
   if (lvl < 3) for (int k = 0; k < SPLASH; ++k) { splashStart[k] = 0; show(splash[k], false); }
   for (int i = 0; i < FOG; ++i) show(fog[i], skyOn && isFog(wxCode));
+  // Drifting clouds over the clear / partly cloudy photos: few for "poucas nuvens",
+  // more for "parcialmente nublado". Dimmer and bluer at night.
+  cloudsShown = !skyOn ? 0 : wxCode == 1 ? 2 : wxCode == 2 ? CLOUDS : 0;
+  for (int i = 0; i < CLOUDS; ++i) {
+    lv_obj_set_style_bg_color(cloud[i], lv_color_hex(night ? 0x9AA6BC : 0xFFFFFF), 0);
+    lv_obj_set_style_bg_opa(cloud[i], night ? LV_OPA_20 : LV_OPA_30, 0);
+    show(cloud[i], i < cloudsShown);
+  }
 
   const bool wantDim = ti.tm_hour >= 23 || ti.tm_hour < 6;          // night dimming
   if (wantDim != dimmed) { dimmed = wantDim; analogWrite(GFX_BL, wantDim ? 40 : map(cfg.bright, 0, 100, 25, 255)); }
@@ -323,6 +351,11 @@ static void animCb(lv_timer_t *) {
       lv_obj_set_style_border_opa(splash[k], (lv_opa_t)(150 - e * 150 / 260), 0);
       show(splash[k], true);
     }
+  }
+  for (int i = 0; i < cloudsShown; ++i) {                          // slow drift, wrap around
+    cloudX[i] += (4 + i * 2) * dt;
+    if (cloudX[i] > SCR_W) cloudX[i] = -(float)lv_obj_get_width(cloud[i]);
+    lv_obj_set_x(cloud[i], (int)cloudX[i]);
   }
   if (!lv_obj_is_hidden(fog[0])) {
     for (int i = 0; i < FOG; ++i) {
@@ -415,6 +448,13 @@ static void buildClockScreen(lv_obj_t *scr) {
   lv_obj_set_style_transform_rotation(shoot, -200, 0);      // -20°
   show(shoot, false);
 
+  for (int i = 0; i < CLOUDS; ++i) {               // soft drifting clouds (wxCode 1-2)
+    static const int16_t kW[CLOUDS] = {170, 120, 150, 100}, kY[CLOUDS] = {28, 70, 112, 50};
+    cloud[i] = shape(clockView, kW[i], kW[i] / 4, 0xFFFFFF, LV_OPA_30);
+    cloudX[i] = (float)(i * SCR_W / CLOUDS);
+    lv_obj_set_pos(cloud[i], (int)cloudX[i], kY[i]);
+    lv_obj_add_flag(cloud[i], LV_OBJ_FLAG_HIDDEN);
+  }
   for (int i = 0; i < FOG; ++i) {
     fog[i] = shape(clockView, SCR_W + 160, 30, 0xE3E8EF, LV_OPA_20, 15);
     lv_obj_set_pos(fog[i], -60, 140 + i * 44); fogX[i] = -20 - i * 25;
@@ -510,6 +550,8 @@ static void clockOnEnter() {
   for (int i = 0; i < STARS; ++i) show(star[i], false);
   for (int i = 0; i < DROPS; ++i) show(drop[i], false);
   for (int i = 0; i < FOG; ++i) show(fog[i], false);
+  for (int i = 0; i < CLOUDS; ++i) show(cloud[i], false);
+  cloudsShown = 0;
   renderedMinute = -1;
   nextFlashMs = flashStartMs = nextShootMs = shootStartMs = 0;
   for (int &c : iconCodes) c = -99;
