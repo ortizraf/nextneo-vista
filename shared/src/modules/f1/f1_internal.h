@@ -25,12 +25,14 @@ struct Race {
   float lat, lon;
   time_t t[S_COUNT];                                      // 0 = no such session
 };
+struct ResultRow { uint8_t pos, pts; char name[28], teamId[16], gap[18]; };   // full race result
 struct Standing { uint8_t pos; char name[28], team[24], teamId[16]; float pts; uint8_t wins; };
 struct F1Data {
   uint32_t version;
   int season, nRaces;
   Race races[30];
   int resultRound; char resultRace[40]; char podium[3][28];
+  int nResult; ResultRow result[24];                      // every finisher / retirement of resultRound
   int nDrivers, nTeams;
   Standing drivers[24], teams[12];
   uint32_t schedMs, standMs;                              // millis() of the last good fetch (0 = never)

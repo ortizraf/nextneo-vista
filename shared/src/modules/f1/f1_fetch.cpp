@@ -15,6 +15,7 @@
 #include <JPEGDEC.h>
 #include <new>
 #include "modules/f1/f1_internal.h"
+#include "modules/f1/f1_schedule.h"
 #include "services/psram_alloc.h"
 
 namespace f1 {
@@ -138,16 +139,24 @@ static bool fetchStandings(PsramBuffer &body) {
   bool ok = true;
   {
     JsonDocument doc(SpiRamJsonAllocator::instance());
-    if (fetchJson("https://api.jolpi.ca/ergast/f1/current/last/results.json?limit=3", doc, body) == 200) {
+    if (fetchJson("https://api.jolpi.ca/ergast/f1/current/last/results.json?limit=30", doc, body) == 200) {
       JsonObjectConst r = doc["MRData"]["RaceTable"]["Races"][0];
       if (!r.isNull()) {
         d.resultRound = atoi(r["round"] | "0");
         const CircuitInfo *ci = circuitInfo(r["Circuit"]["circuitId"] | "");
         copyStr(ci ? gpName(ci) : (const char *)(r["raceName"] | ""), d.resultRace, sizeof d.resultRace);
         int k = 0;
+        d.nResult = 0;
         for (JsonObjectConst x : r["Results"].as<JsonArrayConst>()) {
-          if (k >= 3) break;
-          copyStr(x["Driver"]["familyName"], d.podium[k++], sizeof d.podium[0]);
+          if (k < 3) copyStr(x["Driver"]["familyName"], d.podium[k++], sizeof d.podium[0]);
+          if (d.nResult >= 24) continue;
+          ResultRow &row = d.result[d.nResult++];
+          row.pos = (uint8_t)atoi(x["position"] | "0");
+          row.pts = (uint8_t)atoi(x["points"] | "0");
+          char given[2] = {(char)(((const char *)(x["Driver"]["givenName"] | "?"))[0]), 0};
+          snprintf(row.name, sizeof row.name, "%s. %s", given, (const char *)(x["Driver"]["familyName"] | ""));
+          copyStr(x["Constructor"]["constructorId"], row.teamId, sizeof row.teamId);
+          f1ResultGap(x["Time"]["time"] | "", x["status"] | "", gLang == LANG_EN, row.gap, sizeof row.gap);
         }
       }
     } else ok = false;
