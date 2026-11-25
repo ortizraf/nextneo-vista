@@ -6,8 +6,10 @@
 //    (lakes, sea, parks, big buildings from OpenStreetMap) and famous landmarks / corners.
 //    Tap the left side = full weekend programme; tap the map = corner names on/off.
 //  * Pilotos / Equipes: championship standings (team colour bar, points, gap).
-// Automatic mode: from the chequered flag (results published) until midnight it opens on the
-// standings with the podium; after the last race of the season it shows the champions.
+// Automatic mode: from the chequered flag until 23:59 of that (local) day the screen shows the
+// RESULT (Próxima page + podium banner on the standings, "aguardando resultado" until the API
+// publishes it); at midnight it moves on to the next race. After the last race of the season
+// it shows the champions. Rule: shared/src/modules/f1/f1_schedule.cpp (native tests).
 //
 // Data (all free, no key):
 //  - Jolpica-F1 (api.jolpi.ca, Ergast successor): calendar with every session, last race
@@ -18,6 +20,7 @@
 #include "app_screens.h"
 #include "core/screen_registry.h"
 #include "modules/f1/f1_internal.h"
+#include "modules/f1/f1_schedule.h"
 static void f1Render();
 #include "modules/photos/photos.h"
 #include "services/app_log.h"
@@ -717,26 +720,29 @@ static const char *wdF1(int w) {                          // "dom" / "Sun"
   return gLang == LANG_EN ? weekdayShort(w) : pt[w];
 }
 
-// race shown on the "next" f1Page: the first one not finished yet (start + 2 h)
+// race shown on the "next" f1Page: the race in its result day (chequered flag .. 23:59),
+// otherwise the first one not finished yet
 static int previewIdx = -1;                                // >= 0: browsing other circuits (arrows on the map)
 static uint32_t previewMs;
+static F1RacePhase phaseOf(const Race &r, time_t now) { return f1RacePhase(r.t[S_RACE], now, cfg.utcOffset); }
+static const Race *resultRace(time_t now) {              // race whose result is shown today, if any
+  for (int i = ui->nRaces - 1; i >= 0; --i) if (ui->races[i].t[S_RACE] && phaseOf(ui->races[i], now) == F1_RESULT_DAY) return &ui->races[i];
+  return nullptr;
+}
 static const Race *displayRace(time_t now) {
   if (previewIdx >= 0 && previewIdx < ui->nRaces) return &ui->races[previewIdx];
-  for (int i = 0; i < ui->nRaces; ++i) if (ui->races[i].t[S_RACE] && ui->races[i].t[S_RACE] + 7200 > now) return &ui->races[i];
+  if (const Race *r = resultRace(now)) return r;
+  for (int i = 0; i < ui->nRaces; ++i) if (ui->races[i].t[S_RACE] && phaseOf(ui->races[i], now) == F1_UPCOMING) return &ui->races[i];
   return nullptr;
 }
 static const Race *lastRace(time_t now) {
   const Race *r = nullptr;
-  for (int i = 0; i < ui->nRaces; ++i) if (ui->races[i].t[S_RACE] && ui->races[i].t[S_RACE] + 7200 <= now) r = &ui->races[i];
+  for (int i = 0; i < ui->nRaces; ++i) if (ui->races[i].t[S_RACE] && phaseOf(ui->races[i], now) != F1_UPCOMING) r = &ui->races[i];
   return r;
 }
-// results mode: chequered flag seen (result published) and still the same local day
-static bool resultsMode(time_t now) {
-  const Race *r = lastRace(now);
-  if (!r || ui->resultRound != r->round) return false;
-  struct tm a, b; localTm(r->t[S_RACE] + 7200, a); localTm(now, b);
-  return a.tm_yday == b.tm_yday && a.tm_year == b.tm_year;
-}
+// results mode: from the chequered flag until 23:59 of that day (published or not yet)
+static bool resultsMode(time_t now) { return resultRace(now) != nullptr; }
+static bool resultPublished(const Race *r) { return r && ui->resultRound == r->round; }
 
 static void setPage(int p) {
   f1Page = p;
@@ -771,8 +777,12 @@ static void fillStandings(int which, time_t now) {
       snprintf(t1, sizeof t1, T("CAMPE\xC3\x95" "ES %d", "CHAMPIONS %d"), ui->season);
       snprintf(t2, sizeof t2, "%s  \xC2\xB7  %s", ui->drivers[0].name, ui->teams[0].name);
     } else {
-      snprintf(t1, sizeof t1, T("RESULTADO  \xC2\xB7  %s", "RESULT  \xC2\xB7  %s"), ui->resultRace);
-      snprintf(t2, sizeof t2, "1\xC2\xBA %s    2\xC2\xBA %s    3\xC2\xBA %s", ui->podium[0], ui->podium[1], ui->podium[2]);
+      const Race *rr = resultRace(now);
+      const CircuitInfo *rci = rr ? circuitInfo(rr->cid) : nullptr;
+      snprintf(t1, sizeof t1, T("RESULTADO  \xC2\xB7  %s", "RESULT  \xC2\xB7  %s"), rci ? gpName(rci) : rr ? rr->name : ui->resultRace);
+      if (resultPublished(rr))
+        snprintf(t2, sizeof t2, "1\xC2\xBA %s    2\xC2\xBA %s    3\xC2\xBA %s", ui->podium[0], ui->podium[1], ui->podium[2]);
+      else snprintf(t2, sizeof t2, "%s", T("aguardando o resultado oficial...", "waiting for the official result..."));
     }
     lv_obj_t *l1 = makeLabel(b, t1, &lv_font_weather_14, 0xFFD54A); lv_obj_set_pos(l1, 20, 4);
     lv_obj_t *l2 = makeLabel(b, t2, &lv_font_weather_14, C_TXT); lv_obj_set_pos(l2, 20, 24);
@@ -880,7 +890,53 @@ static bool fillProg() {
   lv_label_set_text(progFoot, foot);
   return true;
 }
+// ---- race result overlay (same look as the programme), shown on the result day ----
+static const int RES_MAX = 24;
+static lv_obj_t *resPanel, *resTitle, *resSub, *resList, *resWait, *resBox[RES_MAX], *resPos[RES_MAX], *resBar[RES_MAX],
+                *resName[RES_MAX], *resGap[RES_MAX], *resPts[RES_MAX];
+static lv_timer_t *resTimer;
+static uint32_t resVersion = 0;
+static void closeRes() { lv_obj_set_hidden(resPanel, true); lv_timer_pause(resTimer); }
+static bool fillRes() {
+  if (!ui) return false;
+  const Race *r = resultRace(time(nullptr));
+  if (!r) return false;
+  resVersion = ui->version;
+  const CircuitInfo *ci = circuitInfo(r->cid);
+  lv_label_set_text(resTitle, ci ? gpName(ci) : r->name);
+  struct tm t; localTm(r->t[S_RACE], t);
+  static char sub[64];
+  snprintf(sub, sizeof sub, T("Resultado da corrida  \xC2\xB7  %s %02d/%02d", "Race result  \xC2\xB7  %s %02d/%02d"), wdF1(t.tm_wday), t.tm_mday, t.tm_mon + 1);
+  lv_label_set_text(resSub, sub);
+  const bool have = ui->resultRound == r->round && ui->nResult > 0;
+  lv_obj_set_hidden(resWait, have);
+  const int n = have ? (ui->nResult < RES_MAX ? ui->nResult : RES_MAX) : 0;
+  for (int k = 0; k < RES_MAX; ++k) {
+    if (k >= n) { lv_obj_set_hidden(resBox[k], true); continue; }
+    const ResultRow &x = ui->result[k];
+    const uint32_t txt = k == 0 ? 0xFFD54A : k < 3 ? 0xFFFFFF : C_TXT;
+    lv_obj_set_style_bg_color(resBox[k], lv_color_hex(k < 3 ? 0x2A2414 : 0x1A2232), 0);
+    lv_obj_set_style_bg_opa(resBox[k], k < 3 || (k & 1) ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_color(resBar[k], lv_color_hex(teamColor(x.teamId)), 0);
+    char b[12];
+    snprintf(b, sizeof b, "%u", x.pos); lv_label_set_text(resPos[k], b);
+    lv_label_set_text(resName[k], x.name);
+    lv_label_set_text(resGap[k], x.gap);
+    if (x.pts) snprintf(b, sizeof b, "+%u", x.pts); else b[0] = 0;
+    lv_label_set_text(resPts[k], b);
+    for (lv_obj_t *o : {resPos[k], resName[k], resGap[k]}) lv_obj_set_style_text_color(o, lv_color_hex(txt), 0);
+    lv_obj_set_hidden(resBox[k], false);
+  }
+  return true;
+}
 static void openProg(lv_event_t *) {
+  // on the result day (and not previewing another circuit) the left box opens the result table
+  if (previewIdx < 0 && fillRes()) {
+    lv_obj_scroll_to_y(resList, 0, LV_ANIM_OFF);
+    lv_obj_set_hidden(resPanel, false); lv_obj_move_foreground(resPanel);
+    lv_timer_reset(resTimer); lv_timer_resume(resTimer);
+    return;
+  }
   if (!fillProg()) return;
   lv_obj_set_hidden(progPanel, false); lv_obj_move_foreground(progPanel);
   lv_timer_reset(progTimer); lv_timer_resume(progTimer);
@@ -1057,6 +1113,54 @@ static void buildF1Screen(lv_obj_t *scr) {
   lv_obj_set_hidden(progPanel, true);
   progTimer = lv_timer_create([](lv_timer_t *) { closeProg(); }, 20000, NULL);
   lv_timer_pause(progTimer);
+
+  // race result overlay: same frame as the programme, scrollable list of every driver
+  resPanel = lv_obj_create(f1View);
+  lv_obj_set_size(resPanel, 464, 308); lv_obj_align(resPanel, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_set_style_bg_color(resPanel, lv_color_hex(0x10151F), 0); lv_obj_set_style_bg_opa(resPanel, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_color(resPanel, lv_color_hex(0x2C3850), 0); lv_obj_set_style_border_width(resPanel, 1, 0);
+  lv_obj_set_style_radius(resPanel, 16, 0); lv_obj_set_style_pad_all(resPanel, 0, 0);
+  lv_obj_set_scrollable(resPanel, false); lv_obj_set_clickable(resPanel, true);
+  lv_obj_add_event_cb(resPanel, [](lv_event_t *) { closeRes(); }, LV_EVENT_CLICKED, NULL);
+  { lv_obj_t *bar = lv_obj_create(resPanel);
+    lv_obj_set_size(bar, 4, 40); lv_obj_set_pos(bar, 16, 12);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0xFF3B30), 0); lv_obj_set_style_border_width(bar, 0, 0); lv_obj_set_style_radius(bar, 2, 0);
+    lv_obj_set_clickable(bar, false); }
+  resTitle = makeLabel(resPanel, "", &lv_font_weather_20, 0xFFFFFF); lv_obj_set_pos(resTitle, 26, 10);
+  resSub = makeLabel(resPanel, "", &lv_font_weather_14, C_DIM); lv_obj_set_pos(resSub, 26, 34);
+  { lv_obj_t *sep = lv_obj_create(resPanel);
+    lv_obj_set_size(sep, 440, 1); lv_obj_set_pos(sep, 12, 56);
+    lv_obj_set_style_bg_color(sep, lv_color_hex(0x2C3850), 0); lv_obj_set_style_border_width(sep, 0, 0);
+    lv_obj_set_clickable(sep, false); }
+  resWait = makeLabel(resPanel, T("aguardando o resultado oficial...", "waiting for the official result..."), &lv_font_weather_20, C_DIM);
+  lv_obj_set_pos(resWait, 26, 80);
+  resList = lv_obj_create(resPanel);
+  lv_obj_set_size(resList, 444, 240); lv_obj_set_pos(resList, 10, 62);
+  lv_obj_set_style_bg_opa(resList, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(resList, 0, 0);
+  lv_obj_set_style_pad_all(resList, 0, 0); lv_obj_set_style_radius(resList, 0, 0);
+  lv_obj_set_scroll_dir(resList, LV_DIR_VER); lv_obj_set_scrollbar_mode(resList, LV_SCROLLBAR_MODE_ACTIVE);
+  lv_obj_add_event_cb(resList, [](lv_event_t *) { closeRes(); }, LV_EVENT_CLICKED, NULL);   // a tap (not a drag) closes
+  lv_obj_add_event_cb(resList, [](lv_event_t *) { lv_timer_reset(resTimer); }, LV_EVENT_SCROLL, NULL);
+  for (int i = 0; i < RES_MAX; ++i) {
+    resBox[i] = lv_obj_create(resList);
+    lv_obj_set_size(resBox[i], 436, 26); lv_obj_set_pos(resBox[i], 2, i * 27);
+    lv_obj_set_style_radius(resBox[i], 6, 0); lv_obj_set_style_border_width(resBox[i], 0, 0); lv_obj_set_style_pad_all(resBox[i], 0, 0);
+    lv_obj_set_scrollable(resBox[i], false); lv_obj_set_clickable(resBox[i], false);
+    lv_obj_add_flag(resBox[i], LV_OBJ_FLAG_EVENT_BUBBLE);
+    resPos[i] = makeLabel(resBox[i], "", &lv_font_weather_20, C_TXT);
+    lv_obj_set_width(resPos[i], 26); lv_obj_set_style_text_align(resPos[i], LV_TEXT_ALIGN_RIGHT, 0); lv_obj_set_pos(resPos[i], 4, 2);
+    resBar[i] = lv_obj_create(resBox[i]);
+    lv_obj_set_size(resBar[i], 4, 16); lv_obj_set_pos(resBar[i], 38, 5);
+    lv_obj_set_style_border_width(resBar[i], 0, 0); lv_obj_set_style_radius(resBar[i], 2, 0); lv_obj_set_clickable(resBar[i], false);
+    resName[i] = makeLabel(resBox[i], "", &lv_font_weather_20, C_TXT); lv_obj_set_pos(resName[i], 50, 2);
+    resGap[i] = makeLabel(resBox[i], "", &lv_font_weather_20, C_TXT);
+    lv_obj_set_width(resGap[i], 130); lv_obj_set_style_text_align(resGap[i], LV_TEXT_ALIGN_RIGHT, 0); lv_obj_set_pos(resGap[i], 246, 2);
+    resPts[i] = makeLabel(resBox[i], "", &lv_font_weather_14, 0x8FD18F);
+    lv_obj_set_width(resPts[i], 46); lv_obj_set_style_text_align(resPts[i], LV_TEXT_ALIGN_RIGHT, 0); lv_obj_set_pos(resPts[i], 382, 5);
+  }
+  lv_obj_set_hidden(resPanel, true);
+  resTimer = lv_timer_create([](lv_timer_t *) { closeRes(); }, 45000, NULL);
+  lv_timer_pause(resTimer);
   addBackButton(f1View);
   setPage(0);
 }
@@ -1093,17 +1197,25 @@ static void f1Render() {
   }
   const time_t now = time(nullptr);
   if (now < 1700000000) return;
-  const bool fresh = ui->version != shownVersion;
+  // mode = race in its result day (+ published?) / season over: changes with the clock too
+  static int shownMode = -2;
+  const Race *rrMode = resultRace(now);
+  lv_label_set_text(lblHint, rrMode && previewIdx < 0 ? T("toque: resultado >", "tap: result >") : T("toque: programa\xC3\xA7\xC3\xA3o >", "tap: schedule >"));
+  const int mode = rrMode ? rrMode->round * 2 + resultPublished(rrMode) : (ui->nRaces && !displayRace(now)) ? -1 : 0;
+  const bool modeChanged = mode != shownMode;
+  shownMode = mode;
+  const bool fresh = ui->version != shownVersion || modeChanged;
   if (fresh) {
     shownVersion = ui->version;
     fillStandings(0, now); fillStandings(1, now);
   }
-  if (ui->version && (int)ui->version != autoPageDone) {          // start f1Page: results / champions
+  if (ui->version && ((int)ui->version != autoPageDone || modeChanged)) {   // start f1Page: results / champions
     autoPageDone = ui->version;
-    setPage(resultsMode(now) || (ui->nRaces && !displayRace(now)) ? 1 : 0);
+    setPage(ui->nRaces && !displayRace(now) ? 1 : 0);    // result day stays on page 0: tap the box for the race table
   }
   // programme open while new data (e.g. the race forecast) arrived: refresh it in place
   if (progPanel && !lv_obj_is_hidden(progPanel) && ui->version != progVersion) fillProg();
+  if (resPanel && !lv_obj_is_hidden(resPanel) && ui->version != resVersion) fillRes();
   if (previewIdx >= 0 && millis() - previewMs > 120000UL) previewIdx = -1;   // back to the real next race
   const Race *r = displayRace(now);
   const Race *mapRace = r ? r : lastRace(now);
@@ -1126,6 +1238,20 @@ static void f1Render() {
     setLabelIfChanged(lblGp, ci ? gpName(ci) : r->name);
     snprintf(b, sizeof b, "%s  \xC2\xB7  %s", r->locality, ci ? countryName(ci) : r->country); setLabelIfChanged(lblPlace, b);
     snprintf(b, sizeof b, T("Rodada %d de %d", "Round %d of %d"), r->round, ui->nRaces); setLabelIfChanged(lblRound, b);
+    if (previewIdx < 0 && phaseOf(*r, now) == F1_RESULT_DAY) {   // chequered flag .. 23:59: the result
+      setLabelIfChanged(lblNextKind, T("RESULTADO  \xC2\xB7  Corrida", "RESULT  \xC2\xB7  Race"));
+      struct tm t; localTm(r->t[S_RACE], t);
+      snprintf(b, sizeof b, "%s %02d/%02d", wdF1(t.tm_wday), t.tm_mday, t.tm_mon + 1); setLabelIfChanged(f1LblDate, b);
+      lv_obj_set_style_text_font(lblTime, &lv_font_weather_20, 0);   // name, not a clock: smaller font
+      if (resultPublished(r)) {
+        snprintf(b, sizeof b, "1\xC2\xBA %s", ui->podium[0]); setLabelIfChanged(lblTime, b);
+        snprintf(b, sizeof b, "2\xC2\xBA %s  \xC2\xB7  3\xC2\xBA %s", ui->podium[1], ui->podium[2]); setLabelIfChanged(lblCount, b);
+      } else {
+        setLabelIfChanged(lblTime, T("Encerrada", "Finished"));
+        setLabelIfChanged(lblCount, T("aguardando o resultado oficial...", "waiting for the official result..."));
+      }
+    } else {
+    lv_obj_set_style_text_font(lblTime, &lv_font_montserrat_48, 0);
     bool live; const int s = nextSession(r, now, live);
     snprintf(b, sizeof b, "%s  \xC2\xB7  %s", previewIdx >= 0 ? T("PR\xC3\x89VIA", "PREVIEW") : live ? T("AO VIVO", "LIVE") : T("PR\xC3\x93XIMA", "NEXT"), sessionName(s));
     setLabelIfChanged(lblNextKind, b);
@@ -1136,6 +1262,7 @@ static void f1Render() {
     else if (previewIdx >= 0 && r->t[s] <= now) b[0] = 0;          // preview of a race already run: no countdown
     else countdown(b, sizeof b, (long)(r->t[s] - now));
     setLabelIfChanged(lblCount, b);
+    }
   }
   // circuit drawing: on a new circuit, new files from the network task, or corners toggled
   if (mapRace) {
